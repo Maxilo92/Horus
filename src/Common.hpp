@@ -37,6 +37,7 @@ struct TrackedObject {
     float confidence;
     int   lost_frames;        // Frames seit letztem Match
     bool  is_active;          // False = Dead Reckoning / verlorener Track
+    bool  is_confirmed;       // True wenn Track verlässlich bestätigt wurde
 
     // Centroid-History für Trail-Rendering
     std::vector<cv::Point> trail;

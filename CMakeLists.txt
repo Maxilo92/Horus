@@ -39,7 +39,7 @@ set(CORE_SRCS
     src/CameraModule.cpp
     src/VideoRenderer.cpp
     src/HUD.cpp
-    src/SingleTracker.cpp
+    src/MultiTracker.cpp
 )
 
 add_executable(Tactileviewer src/main.cpp ${CORE_SRCS} ${IMGUI_SRCS})
@@ -62,6 +62,9 @@ target_link_libraries(Tactileviewer
 
 # --- TESTING ---
 enable_testing()
+
+set(BUILD_GMOCK OFF CACHE BOOL "Build GMock" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "Install GTest" FORCE)
 
 FetchContent_Declare(
   googletest

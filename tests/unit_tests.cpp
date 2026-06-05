@@ -2,90 +2,108 @@
 #include <gtest/gtest.h>
 #include "ObjectDetector.hpp"
 #include "CameraModule.hpp"
-#include "SingleTracker.hpp"
+#include "MultiTracker.hpp"
 #include <opencv2/opencv.hpp>
 #include <filesystem>
 
 namespace fs = std::filesystem;
 
-// --- SingleTracker Tests ---
+// --- MultiTracker Tests ---
 
-TEST(SingleTrackerTest, InitialState) {
-    SingleTracker tracker;
-    EXPECT_FALSE(tracker.isLocked());
-    EXPECT_EQ(tracker.getTarget().state, TrackingState::SEARCHING);
+TEST(MultiTrackerTest, InitialState) {
+    MultiTracker tracker;
+    EXPECT_EQ(tracker.getActiveTrackCount(), 0);
 }
 
-TEST(SingleTrackerTest, LockOnAndRelease) {
-    SingleTracker tracker;
+TEST(MultiTrackerTest, StartsTrackingOnDetection) {
+    MultiTracker tracker;
     Detection d;
     d.class_id = 1;
     d.box = cv::Rect(10, 10, 100, 100);
     d.confidence = 0.9f;
     d.className = "test";
 
-    tracker.lockOn(d);
-    EXPECT_TRUE(tracker.isLocked());
-    EXPECT_EQ(tracker.getTarget().state, TrackingState::LOCKED);
-    EXPECT_EQ(tracker.getTarget().box.x, 10);
+    SystemSettings settings;
+    tracker.update({d}, settings);
+    
+    EXPECT_EQ(tracker.getActiveTrackCount(), 1);
+    auto objects = tracker.getTrackedObjects(10);
+    ASSERT_EQ(objects.size(), 1);
+    EXPECT_EQ(objects[0].class_id, 1);
+    EXPECT_FALSE(objects[0].is_confirmed); // Initially false
 
-    tracker.releaseLock();
-    EXPECT_FALSE(tracker.isLocked());
+    // Second update with same detection should confirm it
+    tracker.update({d}, settings);
+    objects = tracker.getTrackedObjects(10);
+    ASSERT_EQ(objects.size(), 1);
+    EXPECT_TRUE(objects[0].is_confirmed); 
 }
 
-TEST(SingleTrackerTest, SuccessfulTracking) {
-    SingleTracker tracker;
+TEST(MultiTrackerTest, SuccessfulTracking) {
+    MultiTracker tracker;
+    SystemSettings settings;
+    
+    // First detection
     Detection d1;
-    d1.class_id = 1; d1.box = cv::Rect(10, 10, 100, 100); d1.confidence = 0.9f;
-    tracker.lockOn(d1);
+    d1.class_id = 1; d1.box = cv::Rect(10, 10, 100, 100); d1.confidence = 0.9f; d1.className = "test";
+    tracker.update({d1}, settings);
+    
+    auto objects1 = tracker.getTrackedObjects(10);
+    ASSERT_EQ(objects1.size(), 1);
+    int track_id = objects1[0].track_id;
 
     // Target moves
-    std::vector<Detection> detections;
     Detection d2;
-    d2.class_id = 1; d2.box = cv::Rect(15, 15, 100, 100); d2.confidence = 0.85f;
-    detections.push_back(d2);
-
-    SystemSettings settings;
-    tracker.update(detections, settings);
-    EXPECT_EQ(tracker.getTarget().state, TrackingState::LOCKED);
-    EXPECT_EQ(tracker.getTarget().box.x, 15);
-    EXPECT_EQ(tracker.getTarget().lost_frames, 0);
+    d2.class_id = 1; d2.box = cv::Rect(15, 15, 100, 100); d2.confidence = 0.85f; d2.className = "test";
+    
+    tracker.update({d2}, settings);
+    
+    auto objects2 = tracker.getTrackedObjects(10);
+    ASSERT_EQ(objects2.size(), 1);
+    EXPECT_EQ(objects2[0].track_id, track_id); // Stable ID
+    EXPECT_EQ(objects2[0].box.x, 15);
+    EXPECT_EQ(objects2[0].lost_frames, 0);
+    EXPECT_TRUE(objects2[0].is_active);
 }
 
-TEST(SingleTrackerTest, PredictionOnSignalLoss) {
-    SingleTracker tracker;
-    Detection d1;
-    d1.class_id = 1; d1.box = cv::Rect(100, 100, 50, 50);
-    tracker.lockOn(d1);
-
-    // Give it some velocity
-    std::vector<Detection> detections;
-    Detection d2;
-    d2.class_id = 1; d2.box = cv::Rect(110, 100, 50, 50);
-    detections.push_back(d2);
+TEST(MultiTrackerTest, PredictionOnSignalLoss) {
+    MultiTracker tracker;
     SystemSettings settings;
-    tracker.update(detections, settings); 
+    
+    // Initialize track with velocity
+    Detection d1; d1.class_id = 1; d1.box = cv::Rect(100, 100, 50, 50); d1.className = "test";
+    tracker.update({d1}, settings);
+    
+    Detection d2; d2.class_id = 1; d2.box = cv::Rect(110, 100, 50, 50); d2.className = "test";
+    tracker.update({d2}, settings); 
 
-    // Signal loss
-    tracker.update({}, settings); // No detections
-    EXPECT_EQ(tracker.getTarget().state, TrackingState::LOCKED);
-    EXPECT_EQ(tracker.getTarget().lost_frames, 1);
-    EXPECT_GT(tracker.getTarget().box.x, 110);
+    // Signal loss (empty detections)
+    tracker.update({}, settings);
+    
+    auto objects = tracker.getTrackedObjects(10);
+    ASSERT_EQ(objects.size(), 1);
+    EXPECT_EQ(objects[0].lost_frames, 1);
+    EXPECT_FALSE(objects[0].is_active);
+    // Kalman should predict it moving further in x direction
+    EXPECT_GT(objects[0].box.x, 110);
 }
 
-TEST(SingleTrackerTest, SignalLostAfterTimeout) {
-    SingleTracker tracker;
-    Detection d;
-    d.class_id = 1; d.box = cv::Rect(10, 10, 100, 100);
-    tracker.lockOn(d);
-
+TEST(MultiTrackerTest, TrackRemovalAfterTimeout) {
+    MultiTracker tracker;
     SystemSettings settings;
-    settings.trackerMaxLostFrames = 10;
-    for (int i = 0; i < 15; ++i) {
+    settings.trackerMaxLostFrames = 5;
+    
+    Detection d; d.class_id = 1; d.box = cv::Rect(10, 10, 100, 100); d.className = "test";
+    tracker.update({d}, settings);
+    
+    EXPECT_EQ(tracker.getActiveTrackCount(), 1);
+
+    // Update with empty detections until it's removed
+    for (int i = 0; i < 6; ++i) {
         tracker.update({}, settings);
     }
     
-    EXPECT_EQ(tracker.getTarget().state, TrackingState::LOST);
+    EXPECT_EQ(tracker.getTrackedObjects(10).size(), 0);
 }
 
 // --- ObjectDetector Tests ---

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.3] - 2026-06-05
+### Fixed
+- **Unit Test Build Errors:** Resolved build failures in `unit_tests.cpp` caused by the removal of `SingleTracker` from the core project.
+- **MOT Test Integration:** Updated the automated test suite to verify `MultiTracker` functionality, including stable ID assignment, Kalman-based prediction, and track lifecycle management.
+- **Googletest Compatibility:** Fixed a build-breaking conflict in `googlemock` related to C++17 `std::index_sequence` by disabling GMock (which was unused) in `CMakeLists.txt`.
+- **Test Logic Refinement:** Corrected `MultiTracker` validation logic to account for the confirmation delay (tracks are confirmed on their first match, not creation).
+
 ## [1.5.2] - 2026-06-05
 ### Added
 - **Formal Source Control Integration:** Initialized local Git repository with optimized `.gitignore` for C++ development.

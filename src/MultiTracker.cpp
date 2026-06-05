@@ -224,6 +224,7 @@ std::vector<TrackedObject> MultiTracker::getTrackedObjects(int maxTrailLength) c
         obj.confidence  = track.confidence;
         obj.lost_frames = track.lost_frames;
         obj.is_active   = (track.lost_frames == 0);
+        obj.is_confirmed = track.is_confirmed;
 
         // Trail kopieren
         const int trailSize = static_cast<int>(track.trail.size());
