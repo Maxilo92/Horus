@@ -2,6 +2,11 @@
 
 ## [1.10.5] - 2026-06-05
 ### Added
+- **HUD Bounding Box for Pixel Targets**: Custom pixel targets (ID 999) are now appended to the tracked objects list. This ensures the target's bounding box is rendered directly on the main Camera View HUD just like any standard YOLO-detected object.
+- **First-Class Data Panel Integration**: Added custom pixel targets to the Developer Console Data Panel table, allowing users to monitor their live confidence, position, and status (e.g. `LOCKED`), and select or release them.
+
+## [1.10.4] - 2026-06-05
+### Added
 - **High-Resolution Target Zoom**: Implemented a hybrid resolution pipeline. Configured the camera module to request 4K resolution (3840x2160) from hardware UVC camera indices (falling back to the maximum supported resolution). The processing thread resizes each raw camera frame to standard HD (1280x720) for the detection and tracking pipeline, but crops locked targets directly from the original high-resolution frame.
 - **Zero-Heap Real-Time Copying**: Avoids heap allocation jitter by using persistent local cv::Mat buffers and `copyTo()` operations to transfer the cropped target and the HD view frame to the rendering thread.
 - **Settings and Dev Console Toggles**: Integrated a "Request 4K camera resolution" toggle (which automatically hot-swaps/re-opens the camera feed when checked) and an "Enable 4K target zoom" toggle in both the floating Settings window and the System tab of the Developer Console.
