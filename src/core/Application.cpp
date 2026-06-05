@@ -44,12 +44,13 @@ Application::Application()
 
     m_fpsHistory.assign(kFpsHistorySize, 0.0f);
 
-    m_camera     = std::make_unique<CameraModule>();
-    m_renderer   = std::make_unique<VideoRenderer>();
-    m_hud        = std::make_unique<HUD>();
-    m_tracker    = std::make_unique<MultiTracker>();
-    m_dataLogger = std::make_unique<DataLogger>();
-    m_roiManager = std::make_unique<ROIManager>();
+    m_camera       = std::make_unique<CameraModule>();
+    m_renderer     = std::make_unique<VideoRenderer>();
+    m_zoomRenderer = std::make_unique<VideoRenderer>();
+    m_hud          = std::make_unique<HUD>();
+    m_tracker      = std::make_unique<MultiTracker>();
+    m_dataLogger   = std::make_unique<DataLogger>();
+    m_roiManager   = std::make_unique<ROIManager>();
 
     log(LogLevel::INFO, "Application constructed");
 }
@@ -232,6 +233,53 @@ void Application::workerLoop() {
             m_tracker->update(detections, currentSettings);
             tracked = m_tracker->getTrackedObjects(currentSettings.trackerMaxTrailLength);
             m_workerTrackCount.store(static_cast<int>(tracked.size()));
+
+            // ── Alarm Zone Checks ───────────────────────────────────────
+            auto zones = m_roiManager->getROIs();
+            std::unordered_set<int> activeZoneIds;
+            for (const auto& z : zones) {
+                if (z.active && z.function == ROIFunction::ALARM) {
+                    activeZoneIds.insert(z.id);
+                    std::unordered_set<int> currentTracksInZone;
+                    for (const auto& obj : tracked) {
+                        cv::Point center(
+                            obj.box.x + obj.box.width  / 2,
+                            obj.box.y + obj.box.height / 2);
+                        if (z.rect.contains(center)) {
+                            currentTracksInZone.insert(obj.track_id);
+                        }
+                    }
+
+                    // Detect entry
+                    for (int tid : currentTracksInZone) {
+                        if (m_activeAlarms[z.id].find(tid) == m_activeAlarms[z.id].end()) {
+                            std::string clsName = "unknown";
+                            for (const auto& obj : tracked) {
+                                if (obj.track_id == tid) { clsName = obj.className; break; }
+                            }
+                            log(LogLevel::WARN, "ALARM: Object #" + std::to_string(tid) + " (" + clsName + ") entered Alarm Zone '" + z.label + "'");
+                        }
+                    }
+
+                    // Detect exit
+                    for (int tid : m_activeAlarms[z.id]) {
+                        if (currentTracksInZone.find(tid) == currentTracksInZone.end()) {
+                            log(LogLevel::INFO, "Object #" + std::to_string(tid) + " left Alarm Zone '" + z.label + "'");
+                        }
+                    }
+
+                    m_activeAlarms[z.id] = currentTracksInZone;
+                }
+            }
+
+            // Cleanup removed or deactivated zones
+            for (auto it = m_activeAlarms.begin(); it != m_activeAlarms.end(); ) {
+                if (activeZoneIds.find(it->first) == activeZoneIds.end()) {
+                    it = m_activeAlarms.erase(it);
+                } else {
+                    ++it;
+                }
+            }
         }
         m_totalFramesProcessed.fetch_add(1);
 
@@ -314,18 +362,22 @@ void Application::workerLoop() {
 // -----------------------------------------------------------------------
 
 void Application::handleTargetLocking(const ViewportInfo& view) {
-    if (!ImGui::GetIO().WantCaptureMouse && ImGui::IsMouseClicked(0)) {
+    if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {
         ImVec2 mousePos = ImGui::GetMousePos();
-        float videoX = (mousePos.x - view.pos_x) / view.scale;
-        float videoY = (mousePos.y - view.pos_y) / view.scale;
-        cv::Point clickPoint(static_cast<int>(videoX), static_cast<int>(videoY));
-        for (const auto& obj : m_trackedObjects) {
-            if (obj.box.contains(clickPoint)) {
-                m_requestedLockId.store(obj.track_id);
-                m_lockRequested.store(true);
-                log(LogLevel::INFO, "Target lock requested: " + obj.className +
-                    " TrackID=" + std::to_string(obj.track_id));
-                break;
+        // Check if mouse click is inside the actual video viewport bounds
+        if (mousePos.x >= view.pos_x && mousePos.x <= view.pos_x + view.target_w &&
+            mousePos.y >= view.pos_y && mousePos.y <= view.pos_y + view.target_h) {
+            float videoX = (mousePos.x - view.pos_x) / view.scale;
+            float videoY = (mousePos.y - view.pos_y) / view.scale;
+            cv::Point clickPoint(static_cast<int>(videoX), static_cast<int>(videoY));
+            for (const auto& obj : m_trackedObjects) {
+                if (obj.box.contains(clickPoint)) {
+                    m_requestedLockId.store(obj.track_id);
+                    m_lockRequested.store(true);
+                    log(LogLevel::INFO, "Target lock requested: " + obj.className +
+                        " TrackID=" + std::to_string(obj.track_id));
+                    break;
+                }
             }
         }
     }
@@ -452,7 +504,13 @@ void Application::renderZoomWindow(const cv::Mat& currentFrame) {
 
     if (m_lockedTarget.state != TrackingState::SEARCHING && !currentFrame.empty()) {
         cv::Rect roi = m_lockedTarget.box;
-        
+
+        // Validate bounding box before any crop operation
+        const bool bbox_valid = (roi.width > 0 && roi.height > 0 &&
+                                  roi.x >= 0 && roi.y >= 0 &&
+                                  roi.x + roi.width  <= currentFrame.cols &&
+                                  roi.y + roi.height <= currentFrame.rows);
+        if (bbox_valid) {
         // Add 15% padding around the target bounding box
         int pad_w = static_cast<int>(roi.width * 0.15f);
         int pad_h = static_cast<int>(roi.height * 0.15f);
@@ -529,7 +587,10 @@ void Application::renderZoomWindow(const cv::Mat& currentFrame) {
 
             snprintf(infoText, sizeof(infoText), "CONF: %.2f | SIZE: %dx%d", m_lockedTarget.confidence, roi.width, roi.height);
             drawList->AddText(ImVec2(draw_x + 8.0f, draw_y + 22.0f), hudColor, infoText);
-        } else {
+        }   // end if (x2 > x1 && y2 > y1)
+        }   // end if (bbox_valid)
+        else {
+            // Bounding box is degenerate or out of frame
             ImVec2 avail = ImGui::GetContentRegionAvail();
             ImVec2 pos = ImGui::GetCursorScreenPos();
             const char* text = "INVALID TARGET BOUNDS";
@@ -1098,11 +1159,12 @@ void Application::renderDevConsole() {
             if (zones.empty()) {
                 ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "  No zones defined.");
             } else {
-                if (ImGui::BeginTable("ROIZones", 4,
+                if (ImGui::BeginTable("ROIZones", 5,
                         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                         ImGuiTableFlags_SizingStretchProp)) {
                     ImGui::TableSetupColumn("ID",     ImGuiTableColumnFlags_WidthFixed, 30.0f);
                     ImGui::TableSetupColumn("Label",  ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableSetupColumn("Function", ImGuiTableColumnFlags_WidthStretch);
                     ImGui::TableSetupColumn("Rect",   ImGuiTableColumnFlags_WidthStretch);
                     ImGui::TableSetupColumn("Ctrl",   ImGuiTableColumnFlags_WidthFixed, 80.0f);
                     ImGui::TableHeadersRow();
@@ -1128,10 +1190,21 @@ void Application::renderDevConsole() {
                         }
 
                         ImGui::TableSetColumnIndex(2);
+                        // Inline function selector
+                        const char* funcNames[] = { "Detection (Inc)", "Exclude (Exc)", "Alarm (Alm)" };
+                        int currentFunc = static_cast<int>(z.function);
+                        char funcId[16];
+                        snprintf(funcId, sizeof(funcId), "##func%d", z.id);
+                        ImGui::SetNextItemWidth(-1);
+                        if (ImGui::Combo(funcId, &currentFunc, funcNames, 3)) {
+                            m_roiManager->setFunction(z.id, static_cast<ROIFunction>(currentFunc));
+                        }
+
+                        ImGui::TableSetColumnIndex(3);
                         ImGui::Text("%d,%d %dx%d", z.rect.x, z.rect.y,
                                     z.rect.width, z.rect.height);
 
-                        ImGui::TableSetColumnIndex(3);
+                        ImGui::TableSetColumnIndex(4);
                         char togId[16], delId[16];
                         snprintf(togId, sizeof(togId), "%s##t%d",
                                  z.active ? "Dis" : "Ena", z.id);
@@ -1320,41 +1393,226 @@ void Application::run() {
                                ImVec2(view.pos_x, view.pos_y),
                                ImVec2(view.pos_x + view.target_w, view.pos_y + view.target_h));
 
-            // ── ROI Edit Mode: drag-to-draw ────────────────────────────
+            // ── ROI Edit Mode: drag-to-draw/move/resize ───────────────
+            int hoveredZoneId = -1;
+            ROIEditState hoveredAction = ROIEditState::NONE;
+
             if (m_roiEditMode && ImGui::IsWindowHovered(ImGuiHoveredFlags_None)) {
                 ImVec2 mpos = ImGui::GetMousePos();
                 cv::Point mVideo(
                     static_cast<int>((mpos.x - view.pos_x) / view.scale),
                     static_cast<int>((mpos.y - view.pos_y) / view.scale));
 
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-                    m_roiManager->beginDrag(mVideo);
-                }
-                if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && m_roiManager->isDragging()) {
-                    m_roiManager->updateDrag(mVideo);
-                }
-                if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && m_roiManager->isDragging()) {
-                    int newId = m_roiManager->commitDrag();
-                    if (newId >= 0) {
-                        int bufIdx = newId % ROIManager::kMaxZones;
-                        auto zones = m_roiManager->getROIs();
+                auto zones = m_roiManager->getROIs();
+                double tol = std::max(4.0, 8.0 / view.scale);
+
+                if (m_editState == ROIEditState::NONE) {
+                    // Check corners first
+                    for (const auto& z : zones) {
+                        cv::Rect r = z.rect;
+                        cv::Point tl(r.x, r.y);
+                        cv::Point tr(r.x + r.width, r.y);
+                        cv::Point bl(r.x, r.y + r.height);
+                        cv::Point br(r.x + r.width, r.y + r.height);
+
+                        if (std::hypot(mVideo.x - tl.x, mVideo.y - tl.y) <= tol) {
+                            hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_TL; break;
+                        }
+                        if (std::hypot(mVideo.x - tr.x, mVideo.y - tr.y) <= tol) {
+                            hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_TR; break;
+                        }
+                        if (std::hypot(mVideo.x - bl.x, mVideo.y - bl.y) <= tol) {
+                            hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_BL; break;
+                        }
+                        if (std::hypot(mVideo.x - br.x, mVideo.y - br.y) <= tol) {
+                            hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_BR; break;
+                        }
+                    }
+
+                    // Check edges if no corner hovered
+                    if (hoveredZoneId == -1) {
                         for (const auto& z : zones) {
-                            if (z.id == newId) {
-                                strncpy(m_roiLabelBuf[bufIdx], z.label.c_str(), 63);
+                            cv::Rect r = z.rect;
+                            if (std::abs(mVideo.x - r.x) <= tol && mVideo.y >= r.y && mVideo.y <= r.y + r.height) {
+                                hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_L; break;
+                            }
+                            if (std::abs(mVideo.x - (r.x + r.width)) <= tol && mVideo.y >= r.y && mVideo.y <= r.y + r.height) {
+                                hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_R; break;
+                            }
+                            if (std::abs(mVideo.y - r.y) <= tol && mVideo.x >= r.x && mVideo.x <= r.x + r.width) {
+                                hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_T; break;
+                            }
+                            if (std::abs(mVideo.y - (r.y + r.height)) <= tol && mVideo.x >= r.x && mVideo.x <= r.x + r.width) {
+                                hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_B; break;
+                            }
+                        }
+                    }
+
+                    // Check center (moving) if no edge/corner hovered
+                    if (hoveredZoneId == -1) {
+                        for (const auto& z : zones) {
+                            cv::Rect r = z.rect;
+                            if (mVideo.x > r.x && mVideo.x < r.x + r.width &&
+                                mVideo.y > r.y && mVideo.y < r.y + r.height) {
+                                hoveredZoneId = z.id; hoveredAction = ROIEditState::MOVING; break;
+                            }
+                        }
+                    }
+                } else {
+                    // We are actively editing
+                    hoveredZoneId = m_editZoneId;
+                    hoveredAction = m_editState;
+                }
+
+                // Handle cursors
+                if (m_editState == ROIEditState::DRAWING) {
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+                } else {
+                    ROIEditState currentAction = (m_editState == ROIEditState::NONE) ? hoveredAction : m_editState;
+                    switch (currentAction) {
+                        case ROIEditState::RESIZING_TL:
+                        case ROIEditState::RESIZING_BR:
+                            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+                            break;
+                        case ROIEditState::RESIZING_TR:
+                        case ROIEditState::RESIZING_BL:
+                            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNESW);
+                            break;
+                        case ROIEditState::RESIZING_L:
+                        case ROIEditState::RESIZING_R:
+                            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                            break;
+                        case ROIEditState::RESIZING_T:
+                        case ROIEditState::RESIZING_B:
+                            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+                            break;
+                        case ROIEditState::MOVING:
+                            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+                            break;
+                        default:
+                            ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
+                            break;
+                    }
+                }
+
+                // Mouse actions
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                    if (hoveredAction != ROIEditState::NONE) {
+                        m_editState = hoveredAction;
+                        m_editZoneId = hoveredZoneId;
+                        m_editDragStartMouse = mVideo;
+                        // Get the zone starting rect
+                        for (const auto& z : zones) {
+                            if (z.id == m_editZoneId) {
+                                m_editDragStartRect = z.rect;
                                 break;
                             }
                         }
-                        log(LogLevel::INFO, "ROI zone added: ID " + std::to_string(newId));
+                    } else if (zones.size() < ROIManager::kMaxZones) {
+                        m_editState = ROIEditState::DRAWING;
+                        m_roiManager->beginDrag(mVideo);
                     }
-                    if (static_cast<int>(m_roiManager->getROIs().size()) >= ROIManager::kMaxZones)
-                        m_roiEditMode = false;
                 }
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && m_roiManager->isDragging()) {
-                    m_roiManager->cancelDrag();
+
+                if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                    if (m_editState == ROIEditState::DRAWING && m_roiManager->isDragging()) {
+                        m_roiManager->updateDrag(mVideo);
+                    } else if (m_editState != ROIEditState::NONE && m_editZoneId != -1) {
+                        int dx = mVideo.x - m_editDragStartMouse.x;
+                        int dy = mVideo.y - m_editDragStartMouse.y;
+                        int cols = currentFrame.cols;
+                        int rows = currentFrame.rows;
+                        cv::Rect newRect = m_editDragStartRect;
+
+                        switch (m_editState) {
+                            case ROIEditState::MOVING: {
+                                int x1 = std::clamp(m_editDragStartRect.x + dx, 0, cols - m_editDragStartRect.width);
+                                int y1 = std::clamp(m_editDragStartRect.y + dy, 0, rows - m_editDragStartRect.height);
+                                newRect = cv::Rect(x1, y1, m_editDragStartRect.width, m_editDragStartRect.height);
+                                break;
+                            }
+                            case ROIEditState::RESIZING_TL: {
+                                int x1 = std::clamp(m_editDragStartRect.x + dx, 0, m_editDragStartRect.x + m_editDragStartRect.width - 4);
+                                int y1 = std::clamp(m_editDragStartRect.y + dy, 0, m_editDragStartRect.y + m_editDragStartRect.height - 4);
+                                newRect = cv::Rect(x1, y1, (m_editDragStartRect.x + m_editDragStartRect.width) - x1, (m_editDragStartRect.y + m_editDragStartRect.height) - y1);
+                                break;
+                            }
+                            case ROIEditState::RESIZING_TR: {
+                                int x2 = std::clamp(m_editDragStartRect.x + m_editDragStartRect.width + dx, m_editDragStartRect.x + 4, cols);
+                                int y1 = std::clamp(m_editDragStartRect.y + dy, 0, m_editDragStartRect.y + m_editDragStartRect.height - 4);
+                                newRect = cv::Rect(m_editDragStartRect.x, y1, x2 - m_editDragStartRect.x, (m_editDragStartRect.y + m_editDragStartRect.height) - y1);
+                                break;
+                            }
+                            case ROIEditState::RESIZING_BL: {
+                                int x1 = std::clamp(m_editDragStartRect.x + dx, 0, m_editDragStartRect.x + m_editDragStartRect.width - 4);
+                                int y2 = std::clamp(m_editDragStartRect.y + m_editDragStartRect.height + dy, m_editDragStartRect.y + 4, rows);
+                                newRect = cv::Rect(x1, m_editDragStartRect.y, (m_editDragStartRect.x + m_editDragStartRect.width) - x1, y2 - m_editDragStartRect.y);
+                                break;
+                            }
+                            case ROIEditState::RESIZING_BR: {
+                                int x2 = std::clamp(m_editDragStartRect.x + m_editDragStartRect.width + dx, m_editDragStartRect.x + 4, cols);
+                                int y2 = std::clamp(m_editDragStartRect.y + m_editDragStartRect.height + dy, m_editDragStartRect.y + 4, rows);
+                                newRect = cv::Rect(m_editDragStartRect.x, m_editDragStartRect.y, x2 - m_editDragStartRect.x, y2 - m_editDragStartRect.y);
+                                break;
+                            }
+                            case ROIEditState::RESIZING_L: {
+                                int x1 = std::clamp(m_editDragStartRect.x + dx, 0, m_editDragStartRect.x + m_editDragStartRect.width - 4);
+                                newRect = cv::Rect(x1, m_editDragStartRect.y, (m_editDragStartRect.x + m_editDragStartRect.width) - x1, m_editDragStartRect.height);
+                                break;
+                            }
+                            case ROIEditState::RESIZING_R: {
+                                int x2 = std::clamp(m_editDragStartRect.x + m_editDragStartRect.width + dx, m_editDragStartRect.x + 4, cols);
+                                newRect = cv::Rect(m_editDragStartRect.x, m_editDragStartRect.y, x2 - m_editDragStartRect.x, m_editDragStartRect.height);
+                                break;
+                            }
+                            case ROIEditState::RESIZING_T: {
+                                int y1 = std::clamp(m_editDragStartRect.y + dy, 0, m_editDragStartRect.y + m_editDragStartRect.height - 4);
+                                newRect = cv::Rect(m_editDragStartRect.x, y1, m_editDragStartRect.width, (m_editDragStartRect.y + m_editDragStartRect.height) - y1);
+                                break;
+                            }
+                            case ROIEditState::RESIZING_B: {
+                                int y2 = std::clamp(m_editDragStartRect.y + m_editDragStartRect.height + dy, m_editDragStartRect.y + 4, rows);
+                                newRect = cv::Rect(m_editDragStartRect.x, m_editDragStartRect.y, m_editDragStartRect.width, y2 - m_editDragStartRect.y);
+                                break;
+                            }
+                            default:
+                                break;
+                        }
+                        m_roiManager->updateRect(m_editZoneId, newRect);
+                    }
+                }
+
+                if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                    if (m_editState == ROIEditState::DRAWING && m_roiManager->isDragging()) {
+                        int newId = m_roiManager->commitDrag();
+                        if (newId >= 0) {
+                            int bufIdx = newId % ROIManager::kMaxZones;
+                            auto currentZones = m_roiManager->getROIs();
+                            for (const auto& z : currentZones) {
+                                if (z.id == newId) {
+                                    strncpy(m_roiLabelBuf[bufIdx], z.label.c_str(), 63);
+                                    break;
+                                }
+                            }
+                            log(LogLevel::INFO, "ROI zone added: ID " + std::to_string(newId));
+                        }
+                        if (static_cast<int>(m_roiManager->getROIs().size()) >= ROIManager::kMaxZones)
+                            m_roiEditMode = false;
+                    }
+                    m_editState = ROIEditState::NONE;
+                    m_editZoneId = -1;
+                }
+
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                    if (m_editState == ROIEditState::DRAWING && m_roiManager->isDragging()) {
+                        m_roiManager->cancelDrag();
+                    }
+                    m_editState = ROIEditState::NONE;
+                    m_editZoneId = -1;
                 }
 
                 // Draw in-progress drag rectangle
-                if (m_roiManager->isDragging()) {
+                if (m_editState == ROIEditState::DRAWING && m_roiManager->isDragging()) {
                     cv::Rect dr = m_roiManager->getDragRect();
                     ImVec2 rMin(view.pos_x + dr.x * view.scale,
                                 view.pos_y + dr.y * view.scale);
@@ -1363,32 +1621,93 @@ void Application::run() {
                     drawList->AddRect(rMin, rMax, IM_COL32(255, 220, 0, 220), 0.0f, 0, 2.0f);
                     drawList->AddRectFilled(rMin, rMax, IM_COL32(255, 220, 0, 25));
                 }
-
-                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
             }
 
             // ── ROI Overlay: draw existing zones ──────────────────────
             if (m_settings.showROIOverlay) {
                 auto zones = m_roiManager->getROIs();
                 for (const auto& z : zones) {
-                    ImU32 col = z.active
-                        ? IM_COL32(100, 255, 80, 200)
-                        : IM_COL32(150, 150, 150, 120);
-                    ImU32 fillCol = z.active
-                        ? IM_COL32(100, 255, 80, 18)
-                        : IM_COL32(150, 150, 150, 10);
+                    bool isHoveredZone = (m_roiEditMode && hoveredZoneId == z.id);
+                    bool isEditingZone = (m_roiEditMode && m_editZoneId == z.id);
+
+                    // Check if alarm triggered (object inside active alarm zone)
+                    bool hasObjectInside = false;
+                    if (z.active && z.function == ROIFunction::ALARM) {
+                        for (const auto& obj : m_trackedObjects) {
+                            cv::Point center(
+                                obj.box.x + obj.box.width  / 2,
+                                obj.box.y + obj.box.height / 2);
+                            if (z.rect.contains(center)) {
+                                hasObjectInside = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Style colors based on function and state
+                    ImU32 col = IM_COL32(150, 150, 150, 120); // Gray if inactive
+                    ImU32 fillCol = IM_COL32(150, 150, 150, 10);
+                    float borderThickness = (isHoveredZone || isEditingZone) ? 2.5f : 1.5f;
+
+                    if (z.active) {
+                        if (z.function == ROIFunction::DETECTION) {
+                            col = IM_COL32(100, 255, 80, 200); // Green
+                            fillCol = IM_COL32(100, 255, 80, 18);
+                        } else if (z.function == ROIFunction::EXCLUDE) {
+                            col = IM_COL32(240, 140, 30, 200); // Orange
+                            fillCol = IM_COL32(240, 140, 30, 15);
+                        } else if (z.function == ROIFunction::ALARM) {
+                            if (hasObjectInside) {
+                                float timeSec = std::chrono::duration<float>(std::chrono::steady_clock::now() - m_appStart).count();
+                                bool flash = (static_cast<int>(timeSec * 4.0f) % 2 == 0);
+                                col = flash ? IM_COL32(255, 0, 0, 255) : IM_COL32(150, 0, 0, 220); // Flashing Red
+                                fillCol = IM_COL32(255, 0, 0, flash ? 35 : 15);
+                                borderThickness = 3.0f;
+                            } else {
+                                col = IM_COL32(220, 50, 50, 180); // Red
+                                fillCol = IM_COL32(220, 50, 50, 15);
+                            }
+                        }
+                    }
+
+                    // Highlights
+                    if (isHoveredZone || isEditingZone) {
+                        // Blend yellow glow if hovered/editing
+                        col = IM_COL32(255, 255, 0, 255);
+                    }
 
                     ImVec2 rMin(view.pos_x + z.rect.x * view.scale,
                                 view.pos_y + z.rect.y * view.scale);
                     ImVec2 rMax(view.pos_x + (z.rect.x + z.rect.width)  * view.scale,
                                 view.pos_y + (z.rect.y + z.rect.height) * view.scale);
 
-                    drawList->AddRect(rMin, rMax, col, 0.0f, 0, 1.5f);
+                    drawList->AddRect(rMin, rMax, col, 0.0f, 0, borderThickness);
                     drawList->AddRectFilled(rMin, rMax, fillCol);
 
-                    char zoneLbl[80];
-                    snprintf(zoneLbl, sizeof(zoneLbl), "[%d] %s%s",
-                             z.id, z.label.c_str(), z.active ? "" : " (off)");
+                    // Render corner handles (little squares) in edit mode
+                    if (m_roiEditMode) {
+                        ImVec2 tl(rMin.x, rMin.y);
+                        ImVec2 tr(rMax.x, rMin.y);
+                        ImVec2 bl(rMin.x, rMax.y);
+                        ImVec2 br(rMax.x, rMax.y);
+
+                        drawList->AddRectFilled(ImVec2(tl.x - 3, tl.y - 3), ImVec2(tl.x + 3, tl.y + 3), col);
+                        drawList->AddRectFilled(ImVec2(tr.x - 3, tr.y - 3), ImVec2(tr.x + 3, tr.y + 3), col);
+                        drawList->AddRectFilled(ImVec2(bl.x - 3, bl.y - 3), ImVec2(bl.x + 3, bl.y + 3), col);
+                        drawList->AddRectFilled(ImVec2(br.x - 3, br.y - 3), ImVec2(br.x + 3, br.y + 3), col);
+                    }
+
+                    // Render label with function prefix
+                    std::string funcPrefix = "";
+                    if (z.function == ROIFunction::DETECTION) funcPrefix = "[DET] ";
+                    else if (z.function == ROIFunction::EXCLUDE) funcPrefix = "[EXC] ";
+                    else if (z.function == ROIFunction::ALARM) {
+                        funcPrefix = hasObjectInside ? "[ALARM TRIGGERED] " : "[ALM] ";
+                    }
+
+                    char zoneLbl[120];
+                    snprintf(zoneLbl, sizeof(zoneLbl), "%s[%d] %s%s",
+                             funcPrefix.c_str(), z.id, z.label.c_str(), z.active ? "" : " (off)");
                     drawList->AddText(ImVec2(rMin.x + 4, rMin.y + 3), col, zoneLbl);
                 }
             }

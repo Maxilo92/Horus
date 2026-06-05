@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.1] - 2026-06-05 — HOTFIX
+### Fixed
+- **CRASH on target lock (SIGSEGV):** `m_zoomRenderer` was declared as a `unique_ptr<VideoRenderer>` in `Application.hpp` but was never initialized in the constructor, leaving it as `nullptr`. Any call to `renderZoomWindow()` (triggered on locking a target) would immediately dereference the null pointer and crash with `EXC_BAD_ACCESS KERN_INVALID_ADDRESS at 0x0`.
+  - **Fix:** Added `m_zoomRenderer = std::make_unique<VideoRenderer>()` to the constructor alongside `m_renderer`.
+- **Defensive bbox validation in `renderZoomWindow()`:** Added a pre-crop check that validates the locked target's bounding box (non-zero size, fully inside frame dimensions). If the box is degenerate or stale, the function renders an "INVALID TARGET BOUNDS" message instead of attempting an out-of-bounds `cv::Mat` crop.
+
+## [1.9.0] - 2026-06-05
+### Fixed
+- **Target Locking:** Fixed mouse click targeting inside the Camera View window by replacing `!WantCaptureMouse` with `ImGui::IsWindowHovered()`, allowing targets to be correctly locked by clicking on their bounding boxes.
+
 ## [1.9.0] - 2026-06-05
 ### Added
 - **ROI Management (Plan 04):** New `ROIManager` module implementing up to 4 independent rectangular surveillance zones.
