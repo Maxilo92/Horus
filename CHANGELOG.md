@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.4] - 2026-06-05
+### Added
+- **Verbose Diagnostic Logging:** Added console output for each initialization stage (Camera, Models, GLFW, ImGui) to simplify crash analysis.
+### Changed
+- **Default Camera Selection:** Updated default camera ID from 1 to 0 for better compatibility with single-camera systems.
+### Fixed
+- **Initialization Stability:** Improved error reporting during application startup.
+
 ## [1.6.3] - 2026-06-05
 ### Fixed
 - **Critical Resource Loading Fix:** Re-implemented the resource path resolution logic that was lost during previous refactorings. The application now correctly identifies model paths within the macOS App Bundle structure and supports local development fallbacks.

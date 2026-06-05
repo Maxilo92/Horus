@@ -46,6 +46,7 @@ struct TrackedObject {
 // Legacy: Für Single-Target-Lock (Mausklick-Lock Feature)
 struct TrackedTarget {
     TrackingState state     = TrackingState::SEARCHING;
+    int   track_id          = -1;
     int   class_id          = -1;
     std::string className;
     cv::Rect box;
@@ -54,7 +55,9 @@ struct TrackedTarget {
 };
 
 struct SystemSettings {
+    // ----------------------------------------------------------------
     // Detector Settings
+    // ----------------------------------------------------------------
     float detectorConfThreshold  = 0.25f;
     float detectorScoreThreshold = 0.25f;
     float detectorNmsThreshold   = 0.45f;
@@ -64,26 +67,55 @@ struct SystemSettings {
     bool filterByPriorityClasses = true;
     std::set<int> priorityClasses = {0, 1, 2, 3, 5, 7};
 
+    // ----------------------------------------------------------------
     // Multi-Tracker Settings
+    // ----------------------------------------------------------------
     int   trackerMaxLostFrames    = 30;
-    float trackerMinMatchIOU      = 0.25f;   // Nur noch für SingleTracker; MOT nutzt hybriden Score
+    float trackerMinMatchIOU      = 0.25f;
     int   trackerMaxTrailLength   = 30;
     bool  showTrails              = true;
+    float trackerMinMatchScore    = 0.30f;   // Greedy-Matching minimum combined score
+    float trackerMaxCenterDistPx  = 200.0f;  // Max center distance for matching
+    int   trackerConfirmFrames    = 2;        // Frames until a track is confirmed
 
     // Single-Tracker Settings (Target-Lock Feature)
     float trackerVelocitySmoothing    = 0.6f;
     float trackerDeadReckoningDamping = 0.9f;
 
+    // ----------------------------------------------------------------
     // HUD Settings
+    // ----------------------------------------------------------------
     bool showTacticalOverlay = true;
     bool showCrosshair       = true;
     bool showCornerBrackets  = true;
     bool showStatusWindows   = true;
     bool showDetections      = true;
+    bool showTrackIDs        = true;
+    bool showConfidence      = true;
+    bool showTrailFade       = true;    // Trail alpha fades over time
 
-    // uint32_t ist binärkompatibel mit ImU32 (= unsigned int in imgui)
+    float hudBrightness      = 1.0f;    // Global HUD brightness multiplier [0.2 – 1.0]
+    float crosshairScale     = 1.0f;    // Scale multiplier for crosshair size
+    float boxLineWidth       = 1.5f;    // Bounding box line width
+
+    // RGBA color channels stored separately for ImGui::ColorEdit4 compatibility
+    // uint32_t is binary-compatible with ImU32 (= unsigned int in imgui)
     uint32_t hudColor    = 0;  // Wird in HUD initialisiert
     uint32_t targetColor = 0;
+
+    // ----------------------------------------------------------------
+    // Performance / Pipeline Settings
+    // ----------------------------------------------------------------
+    bool  enableDetection    = true;   // Toggle the ONNX detector entirely
+    bool  enableTracking     = true;   // Toggle tracking pipeline
+    int   detectionSkipFrames = 0;     // Run detector every N+1 frames (0 = every frame)
+    bool  grayscaleInput     = false;  // Convert to grayscale before detection (speed)
+
+    // ----------------------------------------------------------------
+    // Console / Logging Settings
+    // ----------------------------------------------------------------
+    int   logLevel = 1;    // 0=VERBOSE, 1=INFO, 2=WARN, 3=ERROR
+    bool  logToFile = false;
 };
 
 #endif // COMMON_HPP

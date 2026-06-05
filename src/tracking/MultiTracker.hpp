@@ -62,6 +62,9 @@ public:
     // Findet den nächstgelegenen Track zu einem Frame-Punkt (für Mausklick-Lock)
     const TrackState* findNearestTrack(cv::Point2f framePoint, float maxDistPx) const;
 
+    // Findet einen spezifischen Track nach ID
+    const TrackState* getTrackById(int id) const;
+
     int getActiveTrackCount() const;
 
 private:

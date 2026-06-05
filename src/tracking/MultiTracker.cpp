@@ -254,6 +254,12 @@ const TrackState* MultiTracker::findNearestTrack(cv::Point2f point, float maxDis
     return nearest;
 }
 
+const TrackState* MultiTracker::getTrackById(int id) const {
+    auto it = m_tracks.find(id);
+    if (it != m_tracks.end()) return &(it->second);
+    return nullptr;
+}
+
 int MultiTracker::getActiveTrackCount() const {
     int count = 0;
     for (const auto& [id, track] : m_tracks)
