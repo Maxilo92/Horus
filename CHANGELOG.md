@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.10.1] - 2026-06-05
+### Fixed
+- **Target Zoom View Distortion:** Resolved visual skewing, tiling, and horizontal tearing in the target zoom window when viewing locked targets of arbitrary size. Handled non-contiguous cv::Mat crop sub-matrices by specifying `GL_UNPACK_ROW_LENGTH` in OpenGL, and prevented skewing from unaligned row width sizes by setting `GL_UNPACK_ALIGNMENT` to 1.
+
 ## [1.10.0] - 2026-06-05
 ### Added
 - **ROI Zone Functions:** Added three selectable functions/types for ROI zones:

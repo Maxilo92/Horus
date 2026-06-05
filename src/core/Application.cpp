@@ -632,7 +632,7 @@ void Application::renderDevConsole() {
     // ── Header bar ──────────────────────────────────────────────────────
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "HORUS DEV CONSOLE");
     ImGui::SameLine();
-    ImGui::TextDisabled("v1.7.0");
+    ImGui::TextDisabled("v1.10.1");
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120.0f);
     if (ImGui::Button("Settings...", ImVec2(110, 0)))
         m_showSettingsWindow = !m_showSettingsWindow;

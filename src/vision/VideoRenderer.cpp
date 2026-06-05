@@ -22,7 +22,15 @@ void VideoRenderer::updateTexture(const cv::Mat& frame) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+    // Configure unpacking alignment and row length based on cv::Mat's properties
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.step / frame.elemSize());
+
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame.cols, frame.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, frame.data);
+
+    // Restore default unpack alignment and row length to avoid affecting other uploads
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 }
 
 void VideoRenderer::drawBackground(int windowWidth, int windowHeight, const cv::Mat& frame) {
