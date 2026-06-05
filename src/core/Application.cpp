@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cstring>
 #include <cmath>
+#include <cinttypes>
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
@@ -43,10 +44,12 @@ Application::Application()
 
     m_fpsHistory.assign(kFpsHistorySize, 0.0f);
 
-    m_camera   = std::make_unique<CameraModule>();
-    m_renderer = std::make_unique<VideoRenderer>();
-    m_hud      = std::make_unique<HUD>();
-    m_tracker  = std::make_unique<MultiTracker>();
+    m_camera     = std::make_unique<CameraModule>();
+    m_renderer   = std::make_unique<VideoRenderer>();
+    m_hud        = std::make_unique<HUD>();
+    m_tracker    = std::make_unique<MultiTracker>();
+    m_dataLogger = std::make_unique<DataLogger>();
+    m_roiManager = std::make_unique<ROIManager>();
 
     log(LogLevel::INFO, "Application constructed");
 }
@@ -212,6 +215,14 @@ void Application::workerLoop() {
                     cv::cvtColor(gray, inputFrame, cv::COLOR_GRAY2BGR);
                 }
                 detections = m_detector->detect(inputFrame, currentSettings);
+
+                // ── ROI Filter (Plan 04) ──────────────────────────────────
+                // Filter out detections outside active ROI zones.
+                // If no zone is active, all detections pass through unchanged.
+                if (m_roiManager->hasActiveROI()) {
+                    m_roiManager->filterDetections(detections);
+                }
+
                 m_workerDetectionCount.store(static_cast<int>(detections.size()));
             }
         }
@@ -223,6 +234,42 @@ void Application::workerLoop() {
             m_workerTrackCount.store(static_cast<int>(tracked.size()));
         }
         m_totalFramesProcessed.fetch_add(1);
+
+        // ── Data-Logging (Plan 03) ────────────────────────────────────────
+        // Start/stop logger based on UI-controlled setting.
+        if (currentSettings.dataLoggingEnabled && !m_dataLogger->isOpen()) {
+            // Logging was just turned on — open a new file
+            LogFormat fmt = (currentSettings.dataLoggingFormat == 1)
+                ? LogFormat::JSON : LogFormat::CSV;
+            if (m_dataLogger->open(currentSettings.dataLoggingOutputDir, fmt)) {
+                log(LogLevel::INFO, "Data logging started: " + m_dataLogger->getCurrentPath());
+            } else {
+                log(LogLevel::ERR, "Data logger failed to open file");
+            }
+            m_logFrameCounter = 0;
+            // Record session start time in ms
+            m_logSessionStartMs = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count());
+        } else if (!currentSettings.dataLoggingEnabled && m_dataLogger->isOpen()) {
+            // Logging was just turned off — close file
+            uint64_t rows = m_dataLogger->getRowsWritten();
+            m_dataLogger->close();
+            log(LogLevel::INFO, "Data logging stopped. Rows written: " + std::to_string(rows));
+        }
+
+        if (currentSettings.dataLoggingEnabled && m_dataLogger->isOpen()) {
+            m_logFrameCounter++;
+            if (m_logFrameCounter >= currentSettings.dataLoggingFreqFrames) {
+                m_logFrameCounter = 0;
+                // Compute monotonic timestamp in ms from session start
+                uint64_t nowMs = static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch()).count());
+                double sessionMs = static_cast<double>(nowMs - m_logSessionStartMs);
+                m_dataLogger->logFrame(sessionMs, tracked, 0.0 /* no calibration yet */);
+            }
+        }
 
         // --- Handle Target Locking Logic ---
         if (m_lockRequested.exchange(false)) {
@@ -381,6 +428,136 @@ void Application::renderDataPanel() {
         }
     }
     
+    ImGui::End();
+}
+
+// -----------------------------------------------------------------------
+// UI: Zoom Window
+// -----------------------------------------------------------------------
+static ImU32 ApplyBrightnessLocal(ImU32 col, float brightness) {
+    float r = ((col >>  0) & 0xFF) * brightness;
+    float g = ((col >>  8) & 0xFF) * brightness;
+    float b = ((col >> 16) & 0xFF) * brightness;
+    float a = ((col >> 24) & 0xFF);
+    return IM_COL32(
+        static_cast<int>(r),
+        static_cast<int>(g),
+        static_cast<int>(b),
+        static_cast<int>(a)
+    );
+}
+
+void Application::renderZoomWindow(const cv::Mat& currentFrame) {
+    ImGui::Begin("Target Zoom");
+
+    if (m_lockedTarget.state != TrackingState::SEARCHING && !currentFrame.empty()) {
+        cv::Rect roi = m_lockedTarget.box;
+        
+        // Add 15% padding around the target bounding box
+        int pad_w = static_cast<int>(roi.width * 0.15f);
+        int pad_h = static_cast<int>(roi.height * 0.15f);
+        int x1 = std::max(0, roi.x - pad_w);
+        int y1 = std::max(0, roi.y - pad_h);
+        int x2 = std::min(currentFrame.cols, roi.x + roi.width + pad_w);
+        int y2 = std::min(currentFrame.rows, roi.y + roi.height + pad_h);
+
+        if (x2 > x1 && y2 > y1) {
+            cv::Mat cropped = currentFrame(cv::Rect(x1, y1, x2 - x1, y2 - y1));
+            m_zoomRenderer->updateTexture(cropped);
+
+            ImVec2 avail = ImGui::GetContentRegionAvail();
+            ImVec2 pos   = ImGui::GetCursorScreenPos();
+
+            float frame_aspect  = static_cast<float>(cropped.cols) / static_cast<float>(cropped.rows);
+            float window_aspect = avail.x / avail.y;
+
+            float target_w, target_h;
+            float draw_x, draw_y;
+
+            if (window_aspect > frame_aspect) {
+                target_h = avail.y;
+                target_w = target_h * frame_aspect;
+                draw_x    = pos.x + (avail.x - target_w) / 2.0f;
+                draw_y    = pos.y;
+            } else {
+                target_w = avail.x;
+                target_h = target_w / frame_aspect;
+                draw_y    = pos.y + (avail.y - target_h) / 2.0f;
+                draw_x    = pos.x;
+            }
+
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->AddImage(reinterpret_cast<void*>(static_cast<intptr_t>(m_zoomRenderer->getTextureID())),
+                               ImVec2(draw_x, draw_y),
+                               ImVec2(draw_x + target_w, draw_y + target_h));
+
+            // Resolve and apply colors
+            ImU32 hudColor = (m_settings.hudColor != 0) ? m_settings.hudColor : IM_COL32(0, 200, 100, 220);
+            ImU32 targetColor = (m_settings.targetColor != 0) ? m_settings.targetColor : IM_COL32(255, 180, 0, 255);
+            
+            hudColor = ApplyBrightnessLocal(hudColor, m_settings.hudBrightness);
+            targetColor = ApplyBrightnessLocal(targetColor, m_settings.hudBrightness);
+
+            // Draw center reticle/crosshair in target zoom view
+            ImVec2 zoomCenter = ImVec2(draw_x + target_w / 2.0f, draw_y + target_h / 2.0f);
+            float reticleSize = 15.0f;
+            drawList->AddLine(ImVec2(zoomCenter.x - reticleSize, zoomCenter.y), ImVec2(zoomCenter.x - 4, zoomCenter.y), targetColor, 1.0f);
+            drawList->AddLine(ImVec2(zoomCenter.x + 4, zoomCenter.y), ImVec2(zoomCenter.x + reticleSize, zoomCenter.y), targetColor, 1.0f);
+            drawList->AddLine(ImVec2(zoomCenter.x, zoomCenter.y - reticleSize), ImVec2(zoomCenter.x, zoomCenter.y - 4), targetColor, 1.0f);
+            drawList->AddLine(ImVec2(zoomCenter.x, zoomCenter.y + 4), ImVec2(zoomCenter.x, zoomCenter.y + reticleSize), targetColor, 1.0f);
+            drawList->AddCircle(zoomCenter, 6.0f, targetColor, 12, 1.0f);
+
+            // Corner brackets inside the zoom view
+            float bracketLen = 12.0f;
+            // Top-left
+            drawList->AddLine(ImVec2(draw_x, draw_y), ImVec2(draw_x + bracketLen, draw_y), hudColor, 1.5f);
+            drawList->AddLine(ImVec2(draw_x, draw_y), ImVec2(draw_x, draw_y + bracketLen), hudColor, 1.5f);
+            // Top-right
+            drawList->AddLine(ImVec2(draw_x + target_w, draw_y), ImVec2(draw_x + target_w - bracketLen, draw_y), hudColor, 1.5f);
+            drawList->AddLine(ImVec2(draw_x + target_w, draw_y), ImVec2(draw_x + target_w, draw_y + bracketLen), hudColor, 1.5f);
+            // Bottom-left
+            drawList->AddLine(ImVec2(draw_x, draw_y + target_h), ImVec2(draw_x + bracketLen, draw_y + target_h), hudColor, 1.5f);
+            drawList->AddLine(ImVec2(draw_x, draw_y + target_h), ImVec2(draw_x, draw_y + target_h - bracketLen), hudColor, 1.5f);
+            // Bottom-right
+            drawList->AddLine(ImVec2(draw_x + target_w, draw_y + target_h), ImVec2(draw_x + target_w - bracketLen, draw_y + target_h), hudColor, 1.5f);
+            drawList->AddLine(ImVec2(draw_x + target_w, draw_y + target_h), ImVec2(draw_x + target_w, draw_y + target_h - bracketLen), hudColor, 1.5f);
+
+            // Overlay info text
+            char infoText[128];
+            snprintf(infoText, sizeof(infoText), "TRK ID: %03d | CLASS: %s", m_lockedTarget.track_id, m_lockedTarget.className.c_str());
+            drawList->AddText(ImVec2(draw_x + 8.0f, draw_y + 8.0f), hudColor, infoText);
+
+            snprintf(infoText, sizeof(infoText), "CONF: %.2f | SIZE: %dx%d", m_lockedTarget.confidence, roi.width, roi.height);
+            drawList->AddText(ImVec2(draw_x + 8.0f, draw_y + 22.0f), hudColor, infoText);
+        } else {
+            ImVec2 avail = ImGui::GetContentRegionAvail();
+            ImVec2 pos = ImGui::GetCursorScreenPos();
+            const char* text = "INVALID TARGET BOUNDS";
+            ImVec2 textSize = ImGui::CalcTextSize(text);
+            ImGui::SetCursorScreenPos(ImVec2(pos.x + (avail.x - textSize.x) * 0.5f, pos.y + (avail.y - textSize.y) * 0.5f));
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", text);
+        }
+    } else {
+        // Render cool standby grid and text
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        ImU32 gridColor = IM_COL32(0, 200, 100, 20);
+        float step = 30.0f;
+        for (float x = pos.x; x < pos.x + avail.x; x += step) {
+            drawList->AddLine(ImVec2(x, pos.y), ImVec2(x, pos.y + avail.y), gridColor);
+        }
+        for (float y = pos.y; y < pos.y + avail.y; y += step) {
+            drawList->AddLine(ImVec2(pos.x, y), ImVec2(pos.x + avail.x, y), gridColor);
+        }
+
+        const char* text = "ZOOM STANDBY\nNO TARGET LOCKED";
+        ImVec2 textSize = ImGui::CalcTextSize(text);
+        ImGui::SetCursorScreenPos(ImVec2(pos.x + (avail.x - textSize.x) * 0.5f, pos.y + (avail.y - textSize.y) * 0.5f));
+        ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 0.6f), "%s", text);
+    }
+
     ImGui::End();
 }
 
@@ -805,6 +982,176 @@ void Application::renderDevConsole() {
             ImGui::EndTabItem();
         }
 
+        // ── TAB: Logging ───────────────────────────────────────────────
+        if (ImGui::BeginTabItem("Logging")) {
+            // Start / Stop button
+            bool logActive = m_settings.dataLoggingEnabled;
+            if (logActive) {
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.7f, 0.1f, 0.1f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.2f, 0.2f, 1.0f));
+                if (ImGui::Button("  STOP Logging  ", ImVec2(-1, 0))) {
+                    m_settings.dataLoggingEnabled = false;
+                    settingsChanged = true;
+                }
+                ImGui::PopStyleColor(2);
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.1f, 0.55f, 0.1f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f, 0.75f, 0.15f, 1.0f));
+                if (ImGui::Button("  START Logging  ", ImVec2(-1, 0))) {
+                    m_settings.dataLoggingEnabled = true;
+                    settingsChanged = true;
+                }
+                ImGui::PopStyleColor(2);
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Output Format");
+
+            bool fmtDisabled = m_settings.dataLoggingEnabled;
+            if (fmtDisabled) ImGui::BeginDisabled();
+            static const char* kFmtNames[] = { "CSV", "JSON-Lines (.jsonl)" };
+            ImGui::SetNextItemWidth(-1);
+            settingsChanged |= ImGui::Combo("##logfmt", &m_settings.dataLoggingFormat,
+                                            kFmtNames, IM_ARRAYSIZE(kFmtNames));
+            if (ImGui::IsItemHovered() && !fmtDisabled)
+                ImGui::SetTooltip("CSV: one row per tracked object per frame.\n"
+                                  "JSON-Lines: one JSON object per line (streamable).");
+            if (fmtDisabled) ImGui::EndDisabled();
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Frequency");
+            ImGui::SetNextItemWidth(-1);
+            settingsChanged |= ImGui::SliderInt("Log every N frames##lfreq",
+                &m_settings.dataLoggingFreqFrames, 1, 30);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("1 = log every frame. Higher = lower I/O overhead.");
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Output Directory");
+            static char s_logDirBuf[256] = {0};
+            // Sync buffer on first render
+            if (s_logDirBuf[0] == '\0' && !m_settings.dataLoggingOutputDir.empty())
+                strncpy(s_logDirBuf, m_settings.dataLoggingOutputDir.c_str(), sizeof(s_logDirBuf)-1);
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputText("##logdir", s_logDirBuf, sizeof(s_logDirBuf))) {
+                m_settings.dataLoggingOutputDir = s_logDirBuf;
+                settingsChanged = true;
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Leave empty to write into the current working directory.");
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Session Status");
+            if (m_dataLogger->isOpen()) {
+                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.5f, 1.0f), "RECORDING");
+                ImGui::Text("File : %s", m_dataLogger->getCurrentPath().c_str());
+                ImGui::Text("Rows : %" PRIu64, m_dataLogger->getRowsWritten());
+                uint64_t kb = m_dataLogger->getBytesWritten() / 1024;
+                ImGui::Text("Size : %" PRIu64 " KB", kb);
+            } else {
+                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "IDLE");
+            }
+
+            ImGui::EndTabItem();
+        }
+
+        // ── TAB: ROI ───────────────────────────────────────────────────
+        if (ImGui::BeginTabItem("ROI")) {
+            ImGui::TextDisabled("Region of Interest Management");
+
+            // Edit mode toggle
+            if (m_roiEditMode) {
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.7f, 0.5f, 0.0f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.65f, 0.0f, 1.0f));
+                if (ImGui::Button("  Exit Edit Mode  ", ImVec2(-1, 0))) {
+                    m_roiEditMode = false;
+                    if (m_roiManager->isDragging()) m_roiManager->cancelDrag();
+                }
+                ImGui::PopStyleColor(2);
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
+                    "  Drag in Camera View to draw a zone.");
+            } else {
+                // Check capacity
+                bool atCapacity = (static_cast<int>(m_roiManager->getROIs().size()) >= ROIManager::kMaxZones);
+                if (atCapacity) ImGui::BeginDisabled();
+                if (ImGui::Button("  Enter Edit Mode  ", ImVec2(-1, 0))) {
+                    m_roiEditMode = true;
+                }
+                if (atCapacity) {
+                    ImGui::EndDisabled();
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "MAX 4 ZONES");
+                }
+            }
+
+            if (ImGui::Button("Clear All Zones", ImVec2(-1, 0))) {
+                auto zones = m_roiManager->getROIs();
+                for (const auto& z : zones) m_roiManager->removeROI(z.id);
+            }
+
+            settingsChanged |= ImGui::Checkbox("Show ROI Overlay##roi", &m_settings.showROIOverlay);
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Active Zones");
+
+            auto zones = m_roiManager->getROIs();
+            if (zones.empty()) {
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "  No zones defined.");
+            } else {
+                if (ImGui::BeginTable("ROIZones", 4,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                        ImGuiTableFlags_SizingStretchProp)) {
+                    ImGui::TableSetupColumn("ID",     ImGuiTableColumnFlags_WidthFixed, 30.0f);
+                    ImGui::TableSetupColumn("Label",  ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableSetupColumn("Rect",   ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableSetupColumn("Ctrl",   ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                    ImGui::TableHeadersRow();
+
+                    for (auto& z : zones) {
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::Text("%d", z.id);
+
+                        ImGui::TableSetColumnIndex(1);
+                        // Inline label edit
+                        int zidxBuf = z.id % ROIManager::kMaxZones;
+                        // Sync buffer if label changed externally
+                        if (strncmp(m_roiLabelBuf[zidxBuf], z.label.c_str(), 63) != 0 &&
+                            m_roiLabelBuf[zidxBuf][0] == '\0') {
+                            strncpy(m_roiLabelBuf[zidxBuf], z.label.c_str(), 63);
+                        }
+                        char labelId[16];
+                        snprintf(labelId, sizeof(labelId), "##lbl%d", z.id);
+                        ImGui::SetNextItemWidth(-1);
+                        if (ImGui::InputText(labelId, m_roiLabelBuf[zidxBuf], 64)) {
+                            m_roiManager->setLabel(z.id, m_roiLabelBuf[zidxBuf]);
+                        }
+
+                        ImGui::TableSetColumnIndex(2);
+                        ImGui::Text("%d,%d %dx%d", z.rect.x, z.rect.y,
+                                    z.rect.width, z.rect.height);
+
+                        ImGui::TableSetColumnIndex(3);
+                        char togId[16], delId[16];
+                        snprintf(togId, sizeof(togId), "%s##t%d",
+                                 z.active ? "Dis" : "Ena", z.id);
+                        snprintf(delId, sizeof(delId), "Del##d%d", z.id);
+
+                        if (ImGui::SmallButton(togId))
+                            m_roiManager->toggleROI(z.id);
+                        ImGui::SameLine();
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f,0.1f,0.1f,1.0f));
+                        if (ImGui::SmallButton(delId))
+                            m_roiManager->removeROI(z.id);
+                        ImGui::PopStyleColor();
+                    }
+                    ImGui::EndTable();
+                }
+            }
+
+            ImGui::EndTabItem();
+        }
+
         ImGui::EndTabBar();
     }
 
@@ -919,7 +1266,6 @@ void Application::run() {
                 m_renderFps   = 1.0f / dt;
                 m_frameTimeMs = dt * 1000.0f;
             }
-            // Update FPS ring buffer
             m_fpsHistory[m_fpsHistoryIdx] = m_renderFps;
             m_fpsHistoryIdx = (m_fpsHistoryIdx + 1) % static_cast<int>(kFpsHistorySize);
         }
@@ -974,7 +1320,83 @@ void Application::run() {
                                ImVec2(view.pos_x, view.pos_y),
                                ImVec2(view.pos_x + view.target_w, view.pos_y + view.target_h));
 
-            handleTargetLocking(view);
+            // ── ROI Edit Mode: drag-to-draw ────────────────────────────
+            if (m_roiEditMode && ImGui::IsWindowHovered(ImGuiHoveredFlags_None)) {
+                ImVec2 mpos = ImGui::GetMousePos();
+                cv::Point mVideo(
+                    static_cast<int>((mpos.x - view.pos_x) / view.scale),
+                    static_cast<int>((mpos.y - view.pos_y) / view.scale));
+
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                    m_roiManager->beginDrag(mVideo);
+                }
+                if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && m_roiManager->isDragging()) {
+                    m_roiManager->updateDrag(mVideo);
+                }
+                if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && m_roiManager->isDragging()) {
+                    int newId = m_roiManager->commitDrag();
+                    if (newId >= 0) {
+                        int bufIdx = newId % ROIManager::kMaxZones;
+                        auto zones = m_roiManager->getROIs();
+                        for (const auto& z : zones) {
+                            if (z.id == newId) {
+                                strncpy(m_roiLabelBuf[bufIdx], z.label.c_str(), 63);
+                                break;
+                            }
+                        }
+                        log(LogLevel::INFO, "ROI zone added: ID " + std::to_string(newId));
+                    }
+                    if (static_cast<int>(m_roiManager->getROIs().size()) >= ROIManager::kMaxZones)
+                        m_roiEditMode = false;
+                }
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && m_roiManager->isDragging()) {
+                    m_roiManager->cancelDrag();
+                }
+
+                // Draw in-progress drag rectangle
+                if (m_roiManager->isDragging()) {
+                    cv::Rect dr = m_roiManager->getDragRect();
+                    ImVec2 rMin(view.pos_x + dr.x * view.scale,
+                                view.pos_y + dr.y * view.scale);
+                    ImVec2 rMax(view.pos_x + (dr.x + dr.width)  * view.scale,
+                                view.pos_y + (dr.y + dr.height) * view.scale);
+                    drawList->AddRect(rMin, rMax, IM_COL32(255, 220, 0, 220), 0.0f, 0, 2.0f);
+                    drawList->AddRectFilled(rMin, rMax, IM_COL32(255, 220, 0, 25));
+                }
+
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+            }
+
+            // ── ROI Overlay: draw existing zones ──────────────────────
+            if (m_settings.showROIOverlay) {
+                auto zones = m_roiManager->getROIs();
+                for (const auto& z : zones) {
+                    ImU32 col = z.active
+                        ? IM_COL32(100, 255, 80, 200)
+                        : IM_COL32(150, 150, 150, 120);
+                    ImU32 fillCol = z.active
+                        ? IM_COL32(100, 255, 80, 18)
+                        : IM_COL32(150, 150, 150, 10);
+
+                    ImVec2 rMin(view.pos_x + z.rect.x * view.scale,
+                                view.pos_y + z.rect.y * view.scale);
+                    ImVec2 rMax(view.pos_x + (z.rect.x + z.rect.width)  * view.scale,
+                                view.pos_y + (z.rect.y + z.rect.height) * view.scale);
+
+                    drawList->AddRect(rMin, rMax, col, 0.0f, 0, 1.5f);
+                    drawList->AddRectFilled(rMin, rMax, fillCol);
+
+                    char zoneLbl[80];
+                    snprintf(zoneLbl, sizeof(zoneLbl), "[%d] %s%s",
+                             z.id, z.label.c_str(), z.active ? "" : " (off)");
+                    drawList->AddText(ImVec2(rMin.x + 4, rMin.y + 3), col, zoneLbl);
+                }
+            }
+
+            // ── Regular HUD and target locking ────────────────────────
+            if (!m_roiEditMode) {
+                handleTargetLocking(view);
+            }
             m_hud->render(drawList, static_cast<int>(avail.x), static_cast<int>(avail.y),
                           m_cameraFps, m_trackedObjects, m_lockedTarget, view, m_settings);
         }
@@ -983,10 +1405,13 @@ void Application::run() {
         // ── 2. Data Panel ────────────────────────────────────────────────
         renderDataPanel();
 
-        // ── 3. Dev Console ───────────────────────────────────────────────
+        // ── 3. Zoom Window ───────────────────────────────────────────────
+        renderZoomWindow(currentFrame);
+
+        // ── 4. Dev Console ───────────────────────────────────────────────
         renderDevConsole();
 
-        // ── 4. Settings Window (floating) ────────────────────────────────
+        // ── 5. Settings Window (floating) ────────────────────────────────
         renderSettingsWindow();
 
         // Render
@@ -1007,7 +1432,6 @@ void Application::run() {
         glfwSwapBuffers(m_window);
     }
 }
-
 void Application::cleanup() {
     m_running = false;
     if (m_workerThread.joinable()) m_workerThread.join();

@@ -36,6 +36,8 @@ set(IMGUI_SRCS
 # Project Source Files (excluding main.cpp for tests)
 set(CORE_SRCS
     src/core/Application.cpp
+    src/core/DataLogger.cpp
+    src/core/ROIManager.cpp
     src/vision/CameraModule.cpp
     src/vision/VideoRenderer.cpp
     src/ui/HUD.cpp

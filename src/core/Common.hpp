@@ -117,6 +117,19 @@ struct SystemSettings {
     // ----------------------------------------------------------------
     int   logLevel = 1;    // 0=VERBOSE, 1=INFO, 2=WARN, 3=ERROR
     bool  logToFile = false;
+
+    // ----------------------------------------------------------------
+    // Data-Logging (Plan 03)
+    // ----------------------------------------------------------------
+    bool        dataLoggingEnabled     = false;
+    int         dataLoggingFormat      = 0;    // 0=CSV, 1=JSON-Lines
+    int         dataLoggingFreqFrames  = 1;    // Log every N frames (1 = every frame)
+    std::string dataLoggingOutputDir   = "";   // "" = current working directory
+
+    // ----------------------------------------------------------------
+    // ROI Settings (Plan 04)
+    // ----------------------------------------------------------------
+    bool showROIOverlay = true;   // Draw ROI zones in HUD
 };
 
 #endif // COMMON_HPP

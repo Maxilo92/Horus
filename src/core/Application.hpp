@@ -18,6 +18,8 @@
 #include "HUD.hpp"
 #include "ObjectDetector.hpp"
 #include "MultiTracker.hpp"
+#include "DataLogger.hpp"
+#include "ROIManager.hpp"
 #include "Common.hpp"
 
 // ---------------------------------------------------------------
@@ -53,6 +55,7 @@ private:
     // UI render helpers
     void renderCameraView();
     void renderDataPanel();
+    void renderZoomWindow(const cv::Mat& currentFrame);
     void renderDevConsole();
     void renderSettingsWindow();
 
@@ -63,9 +66,12 @@ private:
 
     std::unique_ptr<CameraModule>    m_camera;
     std::unique_ptr<VideoRenderer>   m_renderer;
+    std::unique_ptr<VideoRenderer>   m_zoomRenderer;
     std::unique_ptr<HUD>             m_hud;
     std::unique_ptr<ObjectDetector>  m_detector;
     std::unique_ptr<MultiTracker>    m_tracker;
+    std::unique_ptr<DataLogger>      m_dataLogger;
+    std::unique_ptr<ROIManager>      m_roiManager;
 
     std::string m_cameraAddress;
 
@@ -134,6 +140,22 @@ private:
     std::atomic<int>         m_workerDetectionCount{0};
     std::atomic<int>         m_workerTrackCount{0};
     std::atomic<int>         m_totalFramesProcessed{0};
+
+    // ---------------------------------------------------------------
+    // Logging state (Plan 03)
+    // ---------------------------------------------------------------
+    int      m_logFrameCounter    = 0;  // counts frames for loggingFreqFrames
+    uint64_t m_logSessionStartMs  = 0;  // epoch ms when logging started
+    bool     m_dataLoggingWasOn   = false; // tracks prev state for start/stop
+
+    // ---------------------------------------------------------------
+    // ROI edit state (Plan 04)
+    // ---------------------------------------------------------------
+    bool      m_roiEditMode    = false;
+    bool      m_roiDragging    = false;
+    cv::Point m_roiDragStartPx;  // video-space start point of current drag
+    // label input buffer per ROI (max kMaxZones)
+    char      m_roiLabelBuf[ROIManager::kMaxZones][64] = {};
 };
 
 #endif // APPLICATION_HPP

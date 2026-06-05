@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.9.0] - 2026-06-05
+### Added
+- **ROI Management (Plan 04):** New `ROIManager` module implementing up to 4 independent rectangular surveillance zones.
+- **Drag-to-Draw:** In Camera View, activate Edit Mode in the ROI tab and drag to define zones. Right-click cancels an in-progress drag.
+- **Detection Filtering:** Worker thread filters all YOLO detections against active ROI zones. Detections whose centroid falls outside all active zones are discarded before tracking.
+- **ROI Overlay:** Active zones rendered as semi-transparent green rectangles with labels directly on the Camera View. Inactive zones shown in gray. Controlled by `showROIOverlay` toggle.
+- **ROI Dev Console Tab:** New "ROI" tab with Edit Mode toggle, zone table (ID/Label/Rect/Enable/Delete), "Clear All" button, and zone label editing.
+- **Auto-Exit Edit Mode:** Automatically exits edit mode when 4 zones are drawn (maximum capacity reached).
+
+## [1.8.0] - 2026-06-05
+### Added
+- **Data-Logging (Plan 03):** New `DataLogger` module for automatic, session-based export of all tracking data.
+- **CSV Format:** One row per tracked object per frame with fields: `timestamp_ms, track_id, class_name, confidence, x_px, y_px, w_px, h_px, cx_px, cy_px, vx_px, vy_px, x_m, y_m`.
+- **JSON-Lines Format:** One JSON object per line for streaming-compatible machine-readable output.
+- **Atomic Persistence:** `m_file.flush()` called after every logged frame to guarantee data integrity even on unexpected termination.
+- **Configurable Frequency:** Log every N frames (1 = every frame, up to 30 for reduced I/O overhead).
+- **Logging Dev Console Tab:** New "Logging" tab with START/STOP button (color-coded), format combo, frequency slider, output directory field, and live session status (file path, row count, KB written).
+- **SystemSettings Extensions:** `dataLoggingEnabled`, `dataLoggingFormat`, `dataLoggingFreqFrames`, `dataLoggingOutputDir`, `showROIOverlay` added to `SystemSettings`.
+
+## [1.7.2] - 2026-06-05
+### Added
+- **Target Zoom Window:** Added a dedicated "Target Zoom" window in ImGui that displays a magnified view of the currently locked target with a target crosshair, tactical corner brackets, and details like track ID, class, confidence, and size. Displays a standby grid and status when no target is locked.
+### Fixed
+- **Build System Restoration:** Added missing `DataLogger.cpp` and `ROIManager.cpp` to `CMakeLists.txt`'s `CORE_SRCS` to resolve undefined symbol errors.
+- **Syntax Error Fix:** Cleaned up a corrupted copy-pasted block with literal `\n` character escape sequences in `Application.cpp`.
+- **Include Cinttypes:** Added `#include <cinttypes>` to `Application.cpp` to properly support the `PRIu64` formatting macro.
+
 ## [1.7.1] - 2026-06-05
 ### Added
 - **UI Safety Hardening:** Implemented a mandatory "Enable Admin Actions" checkbox for destructive operations (Reset/Quit) to prevent accidental closure from phantom input or glitches.
