@@ -26,19 +26,25 @@ bool Application::init(int argc, char** argv) {
     }
 
     try {
-        std::string modelPath = "../models/yolov8n.onnx";
-        std::string labelsPath = "../models/coco.txt";
+        // macOS App Bundle path check (relative to Contents/MacOS/)
+        std::string modelPath = "../Resources/yolov8n.onnx";
+        std::string labelsPath = "../Resources/coco.txt";
+        
         FILE* f = fopen(modelPath.c_str(), "r");
         if (!f) {
-            modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/models/yolov8n.onnx";
-            labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/models/coco.txt";
+            // Fallback for development/standalone
+            modelPath = "../assets/models/yolov8n.onnx";
+            labelsPath = "../assets/models/coco.txt";
             f = fopen(modelPath.c_str(), "r");
         }
-        if (f) fclose(f);
-        else {
-            modelPath = "models/yolov8n.onnx";
-            labelsPath = "models/coco.txt";
+        
+        if (!f) {
+            modelPath = "assets/models/yolov8n.onnx";
+            labelsPath = "assets/models/coco.txt";
+            f = fopen(modelPath.c_str(), "r");
         }
+        
+        if (f) fclose(f);
         m_detector = std::make_unique<ObjectDetector>(modelPath, labelsPath);
     } catch (const std::exception& e) {
         std::cerr << "[ERROR] Detector fail: " << e.what() << std::endl;

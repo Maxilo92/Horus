@@ -1,6 +1,11 @@
 # Changelog
 
-+## [1.5.4] - 2026-06-05
+## [1.6.3] - 2026-06-05
+### Fixed
+- **Critical Resource Loading Fix:** Re-implemented the resource path resolution logic that was lost during previous refactorings. The application now correctly identifies model paths within the macOS App Bundle structure and supports local development fallbacks.
+
+## [1.6.2] - 2026-06-05
+
 +### Added
 +- **UI Restoration:** Re-implemented ImGui Docking and the "Dashboard" layout.
 +- **Dedicated Windows:** Restored "Camera View" and added a new "Data Panel" for real-time object telemetry.
