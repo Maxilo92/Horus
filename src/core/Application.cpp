@@ -217,12 +217,12 @@ void Application::handleTargetLocking(const ViewportInfo& view) {
         float videoX = (mousePos.x - view.pos_x) / view.scale;
         float videoY = (mousePos.y - view.pos_y) / view.scale;
         cv::Point clickPoint(static_cast<int>(videoX), static_cast<int>(videoY));
-        for (const auto& det : m_detections) {
-            if (det.box.contains(clickPoint)) {
-                m_requestedLockTarget = det;
+        for (const auto& obj : m_trackedObjects) {
+            if (obj.box.contains(clickPoint)) {
+                m_requestedLockId.store(obj.track_id);
                 m_lockRequested.store(true);
-                log(LogLevel::INFO, "Target lock requested: " + det.className +
-                    " ID=" + std::to_string(det.class_id));
+                log(LogLevel::INFO, "Target lock requested: " + obj.className +
+                    " TrackID=" + std::to_string(obj.track_id));
                 break;
             }
         }
