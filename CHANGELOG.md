@@ -1,5 +1,46 @@
 # Changelog
 
+## [1.6.6] - 2026-06-05
+### Fixed
+- **Linker Error Resolution:** Re-implemented the `Application::log` function to ensure correct symbol resolution and cross-thread diagnostic stability.
+- **Improved Console Mirroring:** Diagnostic logs are now mirrored to stdout/stderr for easier debugging during App Bundle execution.
+
+## [1.6.4] - 2026-06-05
+
+### Added
+- **Tabbed Dev Console:** Complete overhaul with 5 tabs — System, Detector, Tracker, HUD, Console.
+- **Live FPS Graph:** Ring-buffer plot of render frame rate in the System tab (128-sample history).
+- **System Metrics:** Two-column metrics table showing Render FPS, Frame Time (ms), Camera FPS, Active Tracks, Total Detections, and Total Frames Processed.
+- **Detector Presets:** One-click "Fast", "Balanced", "Precise" preset buttons in the Detector tab.
+- **Advanced Tracker Controls:** New sliders for Min Match Score, Max Center Distance, Confirm Frames, and per-object trail fade alpha.
+- **HUD Color Pickers:** Full RGBA color pickers for HUD Color and Target Color with hue-wheel picker (ImGuiColorEditFlags_PickerHueWheel).
+- **HUD Style Controls:** New sliders for HUD Brightness, Crosshair Scale, and Box Line Width.
+- **Visibility Toggles:** Show/hide Track IDs and Confidence labels independently.
+- **In-App Console Log:** Scrollable message log with per-entry severity coloring, min-level combo filter, text search/filter, and auto-scroll toggle.
+- **Floating Settings Window:** Dedicated "Settings..." overlay window with collapsible sections (Display, HUD Elements, Detector, Tracker, Logging).
+- **Pipeline Toggles:** Enable/disable detection and tracking pipelines independently; skip-frame control for the detector.
+- **Grayscale Input Mode:** Option to convert frames to grayscale before detection for a speed boost.
+- **Reset All Settings:** Single-click reset to default SystemSettings.
+- **Thread-safe Logging:** `Application::log()` method usable from any thread; entries timestamped relative to app start.
+- **Enhanced Data Panel:** Added State column (LOCK / LOST / INIT), color-coded confidence column (green/amber/red), render FPS overlay in header.
+- **Fading Trail Alpha:** Trail segments now fade from opaque (recent) to transparent (oldest) when enabled.
+- **Status Window Accent Borders:** HUD status windows now have a thin accent-colored border.
+- **Major/Minor Tick Marks:** Tactical overlay grid now uses larger ticks every 5th increment.
+### Changed
+- `HUD::render()` resolves color from `SystemSettings` at runtime, making color picker changes instant without restart.
+- Worker thread now respects `enableDetection`, `enableTracking`, `detectionSkipFrames`, and `grayscaleInput` settings.
+- `SystemSettings` significantly expanded with new fields for tracker tuning, HUD styling, and logging.
+- Application split into `renderCameraView()`, `renderDataPanel()`, `renderDevConsole()`, `renderSettingsWindow()` helpers for maintainability.
+
+## [1.6.5] - 2026-06-05
+### Added
+- **Interactive Data Panel:** Clicking a row in the Data Panel now locks or unlocks the corresponding object.
+- **Persistent Target Locking:** Re-implemented the locking mechanism to use stable Track IDs. The system now maintains a lock even if the object is briefly occluded.
+- **Enhanced HUD Feedback:** Locked targets are now highlighted in red with thicker lines and persistent telemetry blocks.
+### Fixed
+- **Locking Logic Bug:** Resolved an issue where the locking request was never processed by the background worker thread.
+- **Right-Click Release:** Re-implemented the right-click gesture to release the current target lock.
+
 ## [1.6.4] - 2026-06-05
 ### Added
 - **Verbose Diagnostic Logging:** Added console output for each initialization stage (Camera, Models, GLFW, ImGui) to simplify crash analysis.
