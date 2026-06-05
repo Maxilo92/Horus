@@ -1,6 +1,14 @@
 # Changelog
 
-## [1.6.2] - 2026-06-05
++## [1.5.4] - 2026-06-05
++### Added
++- **UI Restoration:** Re-implemented ImGui Docking and the "Dashboard" layout.
++- **Dedicated Windows:** Restored "Camera View" and added a new "Data Panel" for real-time object telemetry.
++### Fixed
++- **Camera Config:** Set default camera ID to 1 as requested by the user.
++- **Architecture Regression:** Resolved the regression where the camera feed was rendered as a background instead of a windowed component.
++
+ ## [1.5.3] - 2026-06-05
 ### Fixed
 - **ImGui API Compatibility:** Fixed a build error where `DockSpaceOverViewport` was called with incorrect parameters. Corrected the signature to match the Dear ImGui `docking` branch.
 
