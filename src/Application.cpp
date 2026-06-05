@@ -85,12 +85,14 @@ void Application::workerLoop() {
                 currentSettings = m_sharedSettings;
             }
             auto detections = m_detector->detect(frame, currentSettings);
-            if (m_lockRequested.exchange(false)) m_tracker->lockOn(m_requestedLockTarget);
+            
             m_tracker->update(detections, currentSettings);
+            auto tracked = m_tracker->getTrackedObjects(currentSettings.trackerMaxTrailLength);
+
             std::lock_guard<std::mutex> lock(m_dataMutex);
             m_sharedFrame = frame.clone();
             m_sharedDetections = detections;
-            m_sharedLockedTarget = m_tracker->getTarget();
+            m_sharedTrackedObjects = tracked;
             m_newDataAvailable = true;
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -123,6 +125,7 @@ void Application::run() {
             if (m_newDataAvailable) {
                 currentFrame = m_sharedFrame.clone();
                 m_detections = m_sharedDetections;
+                m_trackedObjects = m_sharedTrackedObjects;
                 m_lockedTarget = m_sharedLockedTarget;
                 m_renderer->updateTexture(currentFrame);
                 m_newDataAvailable = false;
@@ -149,9 +152,16 @@ void Application::run() {
             handleTargetLocking(view);
             m_renderer->drawBackground(display_w, display_h, currentFrame);
         }
-        m_hud->render(ImGui::GetBackgroundDrawList(), display_w, display_h, ImGui::GetIO().Framerate, m_detections, m_lockedTarget, view, m_settings);
+        m_hud->render(ImGui::GetBackgroundDrawList(), display_w, display_h, ImGui::GetIO().Framerate, m_trackedObjects, view, m_settings);
+        
         ImGui::Begin("Dev Console");
-        if (ImGui::SliderFloat("Conf", &m_settings.detectorConfThreshold, 0.1f, 1.0f)) {
+        bool changed = false;
+        changed |= ImGui::SliderFloat("Conf", &m_settings.detectorConfThreshold, 0.1f, 1.0f);
+        changed |= ImGui::SliderFloat("Score", &m_settings.detectorScoreThreshold, 0.1f, 1.0f);
+        changed |= ImGui::SliderFloat("NMS", &m_settings.detectorNmsThreshold, 0.1f, 1.0f);
+        changed |= ImGui::Checkbox("Trails", &m_settings.showTrails);
+
+        if (changed) {
              std::lock_guard<std::mutex> lock(m_dataMutex);
              m_sharedSettings = m_settings;
         }
