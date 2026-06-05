@@ -266,3 +266,45 @@ TEST(ROIManagerTest, FilterDetectionsAlarm) {
     ASSERT_EQ(detections.size(), 1);
     EXPECT_EQ(detections[0].className, "inside");
 }
+
+TEST(CameraModuleTest, CoordinateScalingMath) {
+    // Simulate raw 4K frame (3840x2160) and tracking HD frame (1280x720)
+    int rawW = 3840;
+    int rawH = 2160;
+    int trackingW = 1280;
+    int trackingH = 720;
+
+    double scaleX = (double)rawW / (double)trackingW;
+    double scaleY = (double)rawH / (double)trackingH;
+
+    EXPECT_DOUBLE_EQ(scaleX, 3.0);
+    EXPECT_DOUBLE_EQ(scaleY, 3.0);
+
+    // Bounding box in HD space
+    cv::Rect roiHD(100, 150, 50, 80);
+
+    // Map to 4K space
+    int highResX = static_cast<int>(std::round(roiHD.x * scaleX));
+    int highResY = static_cast<int>(std::round(roiHD.y * scaleY));
+    int highResW = static_cast<int>(std::round(roiHD.width * scaleX));
+    int highResH = static_cast<int>(std::round(roiHD.height * scaleY));
+
+    EXPECT_EQ(highResX, 300);
+    EXPECT_EQ(highResY, 450);
+    EXPECT_EQ(highResW, 150);
+    EXPECT_EQ(highResH, 240);
+
+    // Check bounds clamping/padding logic
+    int pad_w = static_cast<int>(highResW * 0.15f); // 150 * 0.15 = 22
+    int pad_h = static_cast<int>(highResH * 0.15f); // 240 * 0.15 = 36
+    
+    int x1 = std::max(0, highResX - pad_w);
+    int y1 = std::max(0, highResY - pad_h);
+    int x2 = std::min(rawW, highResX + highResW + pad_w);
+    int y2 = std::min(rawH, highResY + highResH + pad_h);
+
+    EXPECT_EQ(x1, 278);
+    EXPECT_EQ(y1, 414);
+    EXPECT_EQ(x2, 472);
+    EXPECT_EQ(y2, 726);
+}

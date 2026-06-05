@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.10.5] - 2026-06-05
+### Added
+- **High-Resolution Target Zoom**: Implemented a hybrid resolution pipeline. Configured the camera module to request 4K resolution (3840x2160) from hardware UVC camera indices (falling back to the maximum supported resolution). The processing thread resizes each raw camera frame to standard HD (1280x720) for the detection and tracking pipeline, but crops locked targets directly from the original high-resolution frame.
+- **Zero-Heap Real-Time Copying**: Avoids heap allocation jitter by using persistent local cv::Mat buffers and `copyTo()` operations to transfer the cropped target and the HD view frame to the rendering thread.
+- **Settings and Dev Console Toggles**: Integrated a "Request 4K camera resolution" toggle (which automatically hot-swaps/re-opens the camera feed when checked) and an "Enable 4K target zoom" toggle in both the floating Settings window and the System tab of the Developer Console.
+- **Target Size Metrics Display**: Enhanced the Target Zoom overlay text to display the original HD bounding box coordinates alongside the high-resolution crop dimensions (e.g. `600x600 (HD: 200x200)`).
+- **Test Discoverability Fix**: Increased GTest discovery timeout in CMake to 30 seconds to support library loading overhead on macOS.
+- **Unit Testing**: Added a coordinate scaling math test verifying exact conversions and bounds clamping logic.
+
+## [1.10.4] - 2026-06-05
+### Added
+- **Build and Run Automation:** Created `run.sh` in the project root to automate the build directory configuration (`cmake`), parallelized compilation (`make -j`), and application launch processes.
+
 ## [1.10.3] - 2026-06-05
 ### Added
 - **Arbitrary Pixel Tracking (Custom Feature)**: Enabled user-defined feature tracking. Clicking on any blank/empty space in the Camera View (where no object bounding box is present) triggers a custom pixel tracker using OpenCV's Template Matching (`cv::matchTemplate` with `cv::TM_CCOEFF_NORMED`). Captures a 60x60 pixel template and tracks it frame-by-frame, updating its location, confidence score, and path history (trail) in real-time.

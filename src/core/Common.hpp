@@ -130,6 +130,12 @@ struct SystemSettings {
     // ROI Settings (Plan 04)
     // ----------------------------------------------------------------
     bool showROIOverlay = true;   // Draw ROI zones in HUD
+
+    // ----------------------------------------------------------------
+    // Camera Resolution & Zoom Settings
+    // ----------------------------------------------------------------
+    bool request4KCamera = true;  // Request 4K (3840x2160) from camera
+    bool enable4KZoom    = true;  // Crop target zoom from high-resolution frame
 };
 
 #endif // COMMON_HPP

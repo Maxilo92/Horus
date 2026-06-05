@@ -10,12 +10,12 @@ CameraModule::~CameraModule() {
     }
 }
 
-bool CameraModule::open(const std::string& address) {
+bool CameraModule::open(const std::string& address, int requestedWidth, int requestedHeight) {
     bool isNumber = !address.empty() && std::all_of(address.begin(), address.end(), ::isdigit);
     if (isNumber) {
         m_cap.open(std::stoi(address));
-        m_cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
-        m_cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+        m_cap.set(cv::CAP_PROP_FRAME_WIDTH, requestedWidth);
+        m_cap.set(cv::CAP_PROP_FRAME_HEIGHT, requestedHeight);
         m_cap.set(cv::CAP_PROP_FPS, 60);
         m_cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
     } else {

@@ -57,7 +57,7 @@ private:
     // UI render helpers
     void renderCameraView();
     void renderDataPanel();
-    void renderZoomWindow(const cv::Mat& currentFrame);
+    void renderZoomWindow(const cv::Mat& zoomFrame);
     void renderDevConsole();
     void renderSettingsWindow();
 
@@ -86,6 +86,7 @@ private:
     std::atomic<bool>        m_running;
     std::mutex               m_dataMutex;
     cv::Mat                  m_sharedFrame;
+    cv::Mat                  m_sharedZoomFrame;
     std::vector<Detection>     m_sharedDetections;
     std::vector<TrackedObject> m_sharedTrackedObjects;
     TrackedTarget            m_sharedLockedTarget;

@@ -9,7 +9,7 @@ public:
     CameraModule();
     ~CameraModule();
 
-    bool open(const std::string& address);
+    bool open(const std::string& address, int requestedWidth = 1280, int requestedHeight = 720);
     void close();
     bool read(cv::Mat& frame);
     bool isOpened() const;

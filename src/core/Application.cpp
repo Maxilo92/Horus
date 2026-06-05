@@ -86,7 +86,9 @@ bool Application::init(int argc, char** argv) {
     else          m_cameraAddress = "0";
 
     log(LogLevel::INFO, "Opening camera: " + m_cameraAddress);
-    if (!m_camera->open(m_cameraAddress)) {
+    int requestedW = m_settings.request4KCamera ? 3840 : 1280;
+    int requestedH = m_settings.request4KCamera ? 2160 : 720;
+    if (!m_camera->open(m_cameraAddress, requestedW, requestedH)) {
         log(LogLevel::ERR, "Camera failed to open: " + m_cameraAddress);
         std::cerr << "[ERROR] Camera fail: " << m_cameraAddress << std::endl;
         return false;
@@ -156,12 +158,33 @@ bool Application::initImGui() {
 // -----------------------------------------------------------------------
 
 void Application::workerLoop() {
-    cv::Mat frame;
+    cv::Mat rawFrame;
+    cv::Mat trackingFrame;
+    cv::Mat zoomCrop;
     float currentFps = 0.0f;
     auto lastTime = std::chrono::steady_clock::now();
     int frameSkipCounter = 0;
 
     while (m_running) {
+        // --- Read current settings ---
+        SystemSettings currentSettings;
+        {
+            std::lock_guard<std::mutex> lock(m_dataMutex);
+            currentSettings = m_sharedSettings;
+        }
+
+        // ── Camera resolution / mode change ────────────────────────────
+        static bool lastRequest4K = currentSettings.request4KCamera;
+        if (currentSettings.request4KCamera != lastRequest4K) {
+            lastRequest4K = currentSettings.request4KCamera;
+            log(LogLevel::INFO, "Camera resolution setting changed. Reopening camera...");
+            m_cameraChangeRequested.store(true);
+            {
+                std::lock_guard<std::mutex> lk(m_cameraChangeMutex);
+                m_pendingCameraAddress = m_cameraAddress;
+            }
+        }
+
         // ── Camera hot-swap ────────────────────────────────────────────
         if (m_cameraChangeRequested.load()) {
             std::string newAddr;
@@ -171,9 +194,12 @@ void Application::workerLoop() {
             }
             m_cameraChangeRequested.store(false);
 
-            log(LogLevel::INFO, "Hot-swapping camera to: " + newAddr);
+            int requestedW = currentSettings.request4KCamera ? 3840 : 1280;
+            int requestedH = currentSettings.request4KCamera ? 2160 : 720;
+
+            log(LogLevel::INFO, "Hot-swapping camera to: " + newAddr + " at resolution: " + std::to_string(requestedW) + "x" + std::to_string(requestedH));
             m_camera->close();  // release old
-            bool ok = m_camera->open(newAddr);
+            bool ok = m_camera->open(newAddr, requestedW, requestedH);
 
             // Write result back (read from render thread for status display)
             {
@@ -189,7 +215,7 @@ void Application::workerLoop() {
             }
         }
 
-        if (!m_camera->read(frame)) {
+        if (!m_camera->read(rawFrame)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
@@ -198,10 +224,11 @@ void Application::workerLoop() {
         currentFps = 1.0f / std::chrono::duration<float>(now - lastTime).count();
         lastTime = now;
 
-        SystemSettings currentSettings;
-        {
-            std::lock_guard<std::mutex> lock(m_dataMutex);
-            currentSettings = m_sharedSettings;
+        // Downscale raw frame for tracking and detection (standard HD = 1280x720)
+        if (rawFrame.cols != 1280 || rawFrame.rows != 720) {
+            cv::resize(rawFrame, trackingFrame, cv::Size(1280, 720));
+        } else {
+            trackingFrame = rawFrame;
         }
 
         std::vector<Detection> detections;
@@ -210,10 +237,10 @@ void Application::workerLoop() {
             frameSkipCounter = (frameSkipCounter + 1) % (currentSettings.detectionSkipFrames + 1);
 
             if (runDetector) {
-                cv::Mat inputFrame = frame;
+                cv::Mat inputFrame = trackingFrame;
                 if (currentSettings.grayscaleInput) {
                     cv::Mat gray;
-                    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+                    cv::cvtColor(trackingFrame, gray, cv::COLOR_BGR2GRAY);
                     cv::cvtColor(gray, inputFrame, cv::COLOR_GRAY2BGR);
                 }
                 detections = m_detector->detect(inputFrame, currentSettings);
@@ -233,6 +260,74 @@ void Application::workerLoop() {
         if (currentSettings.enableTracking) {
             m_tracker->update(detections, currentSettings);
             tracked = m_tracker->getTrackedObjects(currentSettings.trackerMaxTrailLength);
+
+            // Update pixel target using template matching if active
+            if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+                cv::Rect lastBox = m_sharedLockedTarget.box;
+
+                int pad = 40;
+                cv::Rect searchRect(lastBox.x - pad, lastBox.y - pad, lastBox.width + pad * 2, lastBox.height + pad * 2);
+
+                searchRect.x = std::max(0, searchRect.x);
+                searchRect.y = std::max(0, searchRect.y);
+                if (searchRect.x + searchRect.width > trackingFrame.cols) {
+                    searchRect.width = trackingFrame.cols - searchRect.x;
+                }
+                if (searchRect.y + searchRect.height > trackingFrame.rows) {
+                    searchRect.height = trackingFrame.rows - searchRect.y;
+                }
+
+                if (searchRect.width >= m_pixelTemplate.cols && searchRect.height >= m_pixelTemplate.rows) {
+                    cv::Mat result;
+                    cv::matchTemplate(trackingFrame(searchRect), m_pixelTemplate, result, cv::TM_CCOEFF_NORMED);
+
+                    double minVal, maxVal;
+                    cv::Point minLoc, maxLoc;
+                    cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
+
+                    if (maxVal > 0.5) {
+                        cv::Point newTopLeft(searchRect.x + maxLoc.x, searchRect.y + maxLoc.y);
+                        m_sharedLockedTarget.box = cv::Rect(newTopLeft, m_pixelTemplate.size());
+                        m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
+                        m_sharedLockedTarget.lost_frames = 0;
+                        m_sharedLockedTarget.state = TrackingState::LOCKED;
+
+                        cv::Point center(m_sharedLockedTarget.box.x + m_sharedLockedTarget.box.width / 2,
+                                         m_sharedLockedTarget.box.y + m_sharedLockedTarget.box.height / 2);
+                        m_sharedLockedTarget.trail.push_back(center);
+                        if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(currentSettings.trackerMaxTrailLength)) {
+                            m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
+                        }
+                    } else {
+                        m_sharedLockedTarget.lost_frames++;
+                        if (m_sharedLockedTarget.lost_frames > currentSettings.trackerMaxLostFrames) {
+                            m_sharedLockedTarget.state = TrackingState::LOST;
+                            m_pixelLockActive = false;
+                        } else {
+                            m_sharedLockedTarget.state = TrackingState::LOST;
+                        }
+                    }
+                } else {
+                    m_pixelLockActive = false;
+                    m_sharedLockedTarget.state = TrackingState::LOST;
+                }
+            }
+
+            // Append pixel target as a tracked object so it gets rendered in HUD, UI, etc.
+            if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+                TrackedObject pixelObj;
+                pixelObj.track_id = m_sharedLockedTarget.track_id; // 999
+                pixelObj.class_id = -1;
+                pixelObj.className = m_sharedLockedTarget.className; // "Pixel Target"
+                pixelObj.box = m_sharedLockedTarget.box;
+                pixelObj.confidence = m_sharedLockedTarget.confidence;
+                pixelObj.lost_frames = m_sharedLockedTarget.lost_frames;
+                pixelObj.is_active = (m_sharedLockedTarget.state == TrackingState::LOCKED);
+                pixelObj.is_confirmed = true;
+                pixelObj.trail = m_sharedLockedTarget.trail;
+                tracked.push_back(pixelObj);
+            }
+
             m_workerTrackCount.store(static_cast<int>(tracked.size()));
 
             // ── Alarm Zone Checks ───────────────────────────────────────
@@ -347,15 +442,15 @@ void Application::workerLoop() {
             // Clamp to frame
             templateRect.x = std::max(0, templateRect.x);
             templateRect.y = std::max(0, templateRect.y);
-            if (templateRect.x + templateRect.width > frame.cols) {
-                templateRect.width = frame.cols - templateRect.x;
+            if (templateRect.x + templateRect.width > trackingFrame.cols) {
+                templateRect.width = trackingFrame.cols - templateRect.x;
             }
-            if (templateRect.y + templateRect.height > frame.rows) {
-                templateRect.height = frame.rows - templateRect.y;
+            if (templateRect.y + templateRect.height > trackingFrame.rows) {
+                templateRect.height = trackingFrame.rows - templateRect.y;
             }
 
             if (templateRect.width > 10 && templateRect.height > 10) {
-                m_pixelTemplate = frame(templateRect).clone();
+                m_pixelTemplate = trackingFrame(templateRect).clone();
                 m_pixelLockActive = true;
 
                 m_sharedLockedTarget.state = TrackingState::LOCKED;
@@ -370,56 +465,8 @@ void Application::workerLoop() {
             }
         }
 
-        if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
-            cv::Rect lastBox = m_sharedLockedTarget.box;
-
-            int pad = 40;
-            cv::Rect searchRect(lastBox.x - pad, lastBox.y - pad, lastBox.width + pad * 2, lastBox.height + pad * 2);
-
-            searchRect.x = std::max(0, searchRect.x);
-            searchRect.y = std::max(0, searchRect.y);
-            if (searchRect.x + searchRect.width > frame.cols) {
-                searchRect.width = frame.cols - searchRect.x;
-            }
-            if (searchRect.y + searchRect.height > frame.rows) {
-                searchRect.height = frame.rows - searchRect.y;
-            }
-
-            if (searchRect.width >= m_pixelTemplate.cols && searchRect.height >= m_pixelTemplate.rows) {
-                cv::Mat result;
-                cv::matchTemplate(frame(searchRect), m_pixelTemplate, result, cv::TM_CCOEFF_NORMED);
-
-                double minVal, maxVal;
-                cv::Point minLoc, maxLoc;
-                cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
-
-                if (maxVal > 0.5) {
-                    cv::Point newTopLeft(searchRect.x + maxLoc.x, searchRect.y + maxLoc.y);
-                    m_sharedLockedTarget.box = cv::Rect(newTopLeft, m_pixelTemplate.size());
-                    m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
-                    m_sharedLockedTarget.lost_frames = 0;
-                    m_sharedLockedTarget.state = TrackingState::LOCKED;
-
-                    cv::Point center(m_sharedLockedTarget.box.x + m_sharedLockedTarget.box.width / 2,
-                                     m_sharedLockedTarget.box.y + m_sharedLockedTarget.box.height / 2);
-                    m_sharedLockedTarget.trail.push_back(center);
-                    if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(currentSettings.trackerMaxTrailLength)) {
-                        m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
-                    }
-                } else {
-                    m_sharedLockedTarget.lost_frames++;
-                    if (m_sharedLockedTarget.lost_frames > currentSettings.trackerMaxLostFrames) {
-                        m_sharedLockedTarget.state = TrackingState::LOST;
-                        m_pixelLockActive = false;
-                    } else {
-                        m_sharedLockedTarget.state = TrackingState::LOST;
-                    }
-                }
-            } else {
-                m_pixelLockActive = false;
-                m_sharedLockedTarget.state = TrackingState::LOST;
-            }
-        } else if (m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+        // Update target lock states for non-pixel objects if pixelLock is inactive
+        if (!m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
             bool found = false;
             for (const auto& t : tracked) {
                 if (t.track_id == m_sharedLockedTarget.track_id) {
@@ -435,9 +482,55 @@ void Application::workerLoop() {
             else        m_sharedLockedTarget.state = TrackingState::LOCKED;
         }
 
+        // Crop target zoom from rawFrame (or trackingFrame if disabled)
+        if (m_sharedLockedTarget.state != TrackingState::SEARCHING && !rawFrame.empty()) {
+            cv::Rect roi = m_sharedLockedTarget.box;
+            
+            // Validate bounding box in trackingFrame space (1280x720)
+            const bool bbox_valid = (roi.width > 0 && roi.height > 0 &&
+                                      roi.x >= 0 && roi.y >= 0 &&
+                                      roi.x + roi.width  <= trackingFrame.cols &&
+                                      roi.y + roi.height <= trackingFrame.rows);
+            if (bbox_valid) {
+                cv::Mat sourceFrame = rawFrame;
+                cv::Rect targetRoi = roi;
+                
+                if (currentSettings.enable4KZoom) {
+                    double scaleX = (double)rawFrame.cols / (double)trackingFrame.cols;
+                    double scaleY = (double)rawFrame.rows / (double)trackingFrame.rows;
+                    
+                    targetRoi.x = static_cast<int>(std::round(roi.x * scaleX));
+                    targetRoi.y = static_cast<int>(std::round(roi.y * scaleY));
+                    targetRoi.width = static_cast<int>(std::round(roi.width * scaleX));
+                    targetRoi.height = static_cast<int>(std::round(roi.height * scaleY));
+                } else {
+                    sourceFrame = trackingFrame;
+                }
+                
+                // Add 15% padding around the target bounding box
+                int pad_w = static_cast<int>(targetRoi.width * 0.15f);
+                int pad_h = static_cast<int>(targetRoi.height * 0.15f);
+                int x1 = std::max(0, targetRoi.x - pad_w);
+                int y1 = std::max(0, targetRoi.y - pad_h);
+                int x2 = std::min(sourceFrame.cols, targetRoi.x + targetRoi.width + pad_w);
+                int y2 = std::min(sourceFrame.rows, targetRoi.y + targetRoi.height + pad_h);
+                
+                if (x2 > x1 && y2 > y1) {
+                    sourceFrame(cv::Rect(x1, y1, x2 - x1, y2 - y1)).copyTo(zoomCrop);
+                } else {
+                    zoomCrop.release();
+                }
+            } else {
+                zoomCrop.release();
+            }
+        } else {
+            zoomCrop.release();
+        }
+
         {
             std::lock_guard<std::mutex> lock(m_dataMutex);
-            m_sharedFrame            = frame.clone();
+            trackingFrame.copyTo(m_sharedFrame);
+            zoomCrop.copyTo(m_sharedZoomFrame);
             m_sharedDetections       = detections;
             m_sharedTrackedObjects   = tracked;
             m_sharedCameraFps        = currentFps;
@@ -598,105 +691,87 @@ static ImU32 ApplyBrightnessLocal(ImU32 col, float brightness) {
     );
 }
 
-void Application::renderZoomWindow(const cv::Mat& currentFrame) {
+void Application::renderZoomWindow(const cv::Mat& zoomFrame) {
     ImGui::Begin("Target Zoom");
 
-    if (m_lockedTarget.state != TrackingState::SEARCHING && !currentFrame.empty()) {
+    if (m_lockedTarget.state != TrackingState::SEARCHING && !zoomFrame.empty()) {
         cv::Rect roi = m_lockedTarget.box;
 
-        // Validate bounding box before any crop operation
-        const bool bbox_valid = (roi.width > 0 && roi.height > 0 &&
-                                  roi.x >= 0 && roi.y >= 0 &&
-                                  roi.x + roi.width  <= currentFrame.cols &&
-                                  roi.y + roi.height <= currentFrame.rows);
-        if (bbox_valid) {
-        // Add 15% padding around the target bounding box
-        int pad_w = static_cast<int>(roi.width * 0.15f);
-        int pad_h = static_cast<int>(roi.height * 0.15f);
-        int x1 = std::max(0, roi.x - pad_w);
-        int y1 = std::max(0, roi.y - pad_h);
-        int x2 = std::min(currentFrame.cols, roi.x + roi.width + pad_w);
-        int y2 = std::min(currentFrame.rows, roi.y + roi.height + pad_h);
+        m_zoomRenderer->updateTexture(zoomFrame);
 
-        if (x2 > x1 && y2 > y1) {
-            cv::Mat cropped = currentFrame(cv::Rect(x1, y1, x2 - x1, y2 - y1));
-            m_zoomRenderer->updateTexture(cropped);
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImVec2 pos   = ImGui::GetCursorScreenPos();
 
-            ImVec2 avail = ImGui::GetContentRegionAvail();
-            ImVec2 pos   = ImGui::GetCursorScreenPos();
+        float frame_aspect  = static_cast<float>(zoomFrame.cols) / static_cast<float>(zoomFrame.rows);
+        float window_aspect = avail.x / avail.y;
 
-            float frame_aspect  = static_cast<float>(cropped.cols) / static_cast<float>(cropped.rows);
-            float window_aspect = avail.x / avail.y;
+        float target_w, target_h;
+        float draw_x, draw_y;
 
-            float target_w, target_h;
-            float draw_x, draw_y;
-
-            if (window_aspect > frame_aspect) {
-                target_h = avail.y;
-                target_w = target_h * frame_aspect;
-                draw_x    = pos.x + (avail.x - target_w) / 2.0f;
-                draw_y    = pos.y;
-            } else {
-                target_w = avail.x;
-                target_h = target_w / frame_aspect;
-                draw_y    = pos.y + (avail.y - target_h) / 2.0f;
-                draw_x    = pos.x;
-            }
-
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-            drawList->AddImage(reinterpret_cast<void*>(static_cast<intptr_t>(m_zoomRenderer->getTextureID())),
-                               ImVec2(draw_x, draw_y),
-                               ImVec2(draw_x + target_w, draw_y + target_h));
-
-            // Resolve and apply colors
-            ImU32 hudColor = (m_settings.hudColor != 0) ? m_settings.hudColor : IM_COL32(0, 200, 100, 220);
-            ImU32 targetColor = (m_settings.targetColor != 0) ? m_settings.targetColor : IM_COL32(255, 180, 0, 255);
-            
-            hudColor = ApplyBrightnessLocal(hudColor, m_settings.hudBrightness);
-            targetColor = ApplyBrightnessLocal(targetColor, m_settings.hudBrightness);
-
-            // Draw center reticle/crosshair in target zoom view
-            ImVec2 zoomCenter = ImVec2(draw_x + target_w / 2.0f, draw_y + target_h / 2.0f);
-            float reticleSize = 15.0f;
-            drawList->AddLine(ImVec2(zoomCenter.x - reticleSize, zoomCenter.y), ImVec2(zoomCenter.x - 4, zoomCenter.y), targetColor, 1.0f);
-            drawList->AddLine(ImVec2(zoomCenter.x + 4, zoomCenter.y), ImVec2(zoomCenter.x + reticleSize, zoomCenter.y), targetColor, 1.0f);
-            drawList->AddLine(ImVec2(zoomCenter.x, zoomCenter.y - reticleSize), ImVec2(zoomCenter.x, zoomCenter.y - 4), targetColor, 1.0f);
-            drawList->AddLine(ImVec2(zoomCenter.x, zoomCenter.y + 4), ImVec2(zoomCenter.x, zoomCenter.y + reticleSize), targetColor, 1.0f);
-            drawList->AddCircle(zoomCenter, 6.0f, targetColor, 12, 1.0f);
-
-            // Corner brackets inside the zoom view
-            float bracketLen = 12.0f;
-            // Top-left
-            drawList->AddLine(ImVec2(draw_x, draw_y), ImVec2(draw_x + bracketLen, draw_y), hudColor, 1.5f);
-            drawList->AddLine(ImVec2(draw_x, draw_y), ImVec2(draw_x, draw_y + bracketLen), hudColor, 1.5f);
-            // Top-right
-            drawList->AddLine(ImVec2(draw_x + target_w, draw_y), ImVec2(draw_x + target_w - bracketLen, draw_y), hudColor, 1.5f);
-            drawList->AddLine(ImVec2(draw_x + target_w, draw_y), ImVec2(draw_x + target_w, draw_y + bracketLen), hudColor, 1.5f);
-            // Bottom-left
-            drawList->AddLine(ImVec2(draw_x, draw_y + target_h), ImVec2(draw_x + bracketLen, draw_y + target_h), hudColor, 1.5f);
-            drawList->AddLine(ImVec2(draw_x, draw_y + target_h), ImVec2(draw_x, draw_y + target_h - bracketLen), hudColor, 1.5f);
-            // Bottom-right
-            drawList->AddLine(ImVec2(draw_x + target_w, draw_y + target_h), ImVec2(draw_x + target_w - bracketLen, draw_y + target_h), hudColor, 1.5f);
-            drawList->AddLine(ImVec2(draw_x + target_w, draw_y + target_h), ImVec2(draw_x + target_w, draw_y + target_h - bracketLen), hudColor, 1.5f);
-
-            // Overlay info text
-            char infoText[128];
-            snprintf(infoText, sizeof(infoText), "TRK ID: %03d | CLASS: %s", m_lockedTarget.track_id, m_lockedTarget.className.c_str());
-            drawList->AddText(ImVec2(draw_x + 8.0f, draw_y + 8.0f), hudColor, infoText);
-
-            snprintf(infoText, sizeof(infoText), "CONF: %.2f | SIZE: %dx%d", m_lockedTarget.confidence, roi.width, roi.height);
-            drawList->AddText(ImVec2(draw_x + 8.0f, draw_y + 22.0f), hudColor, infoText);
-        }   // end if (x2 > x1 && y2 > y1)
-        }   // end if (bbox_valid)
-        else {
-            // Bounding box is degenerate or out of frame
-            ImVec2 avail = ImGui::GetContentRegionAvail();
-            ImVec2 pos = ImGui::GetCursorScreenPos();
-            const char* text = "INVALID TARGET BOUNDS";
-            ImVec2 textSize = ImGui::CalcTextSize(text);
-            ImGui::SetCursorScreenPos(ImVec2(pos.x + (avail.x - textSize.x) * 0.5f, pos.y + (avail.y - textSize.y) * 0.5f));
-            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", text);
+        if (window_aspect > frame_aspect) {
+            target_h = avail.y;
+            target_w = target_h * frame_aspect;
+            draw_x    = pos.x + (avail.x - target_w) / 2.0f;
+            draw_y    = pos.y;
+        } else {
+            target_w = avail.x;
+            target_h = target_w / frame_aspect;
+            draw_y    = pos.y + (avail.y - target_h) / 2.0f;
+            draw_x    = pos.x;
         }
+
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        drawList->AddImage(reinterpret_cast<void*>(static_cast<intptr_t>(m_zoomRenderer->getTextureID())),
+                           ImVec2(draw_x, draw_y),
+                           ImVec2(draw_x + target_w, draw_y + target_h));
+
+        // Resolve and apply colors
+        ImU32 hudColor = (m_settings.hudColor != 0) ? m_settings.hudColor : IM_COL32(0, 200, 100, 220);
+        ImU32 targetColor = (m_settings.targetColor != 0) ? m_settings.targetColor : IM_COL32(255, 180, 0, 255);
+        
+        hudColor = ApplyBrightnessLocal(hudColor, m_settings.hudBrightness);
+        targetColor = ApplyBrightnessLocal(targetColor, m_settings.hudBrightness);
+
+        // Draw center reticle/crosshair in target zoom view
+        ImVec2 zoomCenter = ImVec2(draw_x + target_w / 2.0f, draw_y + target_h / 2.0f);
+        float reticleSize = 15.0f;
+        drawList->AddLine(ImVec2(zoomCenter.x - reticleSize, zoomCenter.y), ImVec2(zoomCenter.x - 4, zoomCenter.y), targetColor, 1.0f);
+        drawList->AddLine(ImVec2(zoomCenter.x + 4, zoomCenter.y), ImVec2(zoomCenter.x + reticleSize, zoomCenter.y), targetColor, 1.0f);
+        drawList->AddLine(ImVec2(zoomCenter.x, zoomCenter.y - reticleSize), ImVec2(zoomCenter.x, zoomCenter.y - 4), targetColor, 1.0f);
+        drawList->AddLine(ImVec2(zoomCenter.x, zoomCenter.y + 4), ImVec2(zoomCenter.x, zoomCenter.y + reticleSize), targetColor, 1.0f);
+        drawList->AddCircle(zoomCenter, 6.0f, targetColor, 12, 1.0f);
+
+        // Corner brackets inside the zoom view
+        float bracketLen = 12.0f;
+        // Top-left
+        drawList->AddLine(ImVec2(draw_x, draw_y), ImVec2(draw_x + bracketLen, draw_y), hudColor, 1.5f);
+        drawList->AddLine(ImVec2(draw_x, draw_y), ImVec2(draw_x, draw_y + bracketLen), hudColor, 1.5f);
+        // Top-right
+        drawList->AddLine(ImVec2(draw_x + target_w, draw_y), ImVec2(draw_x + target_w - bracketLen, draw_y), hudColor, 1.5f);
+        drawList->AddLine(ImVec2(draw_x + target_w, draw_y), ImVec2(draw_x + target_w, draw_y + bracketLen), hudColor, 1.5f);
+        // Bottom-left
+        drawList->AddLine(ImVec2(draw_x, draw_y + target_h), ImVec2(draw_x + bracketLen, draw_y + target_h), hudColor, 1.5f);
+        drawList->AddLine(ImVec2(draw_x, draw_y + target_h), ImVec2(draw_x, draw_y + target_h - bracketLen), hudColor, 1.5f);
+        // Bottom-right
+        drawList->AddLine(ImVec2(draw_x + target_w, draw_y + target_h), ImVec2(draw_x + target_w - bracketLen, draw_y + target_h), hudColor, 1.5f);
+        drawList->AddLine(ImVec2(draw_x + target_w, draw_y + target_h), ImVec2(draw_x + target_w, draw_y + target_h - bracketLen), hudColor, 1.5f);
+
+        // Overlay info text
+        char infoText[128];
+        snprintf(infoText, sizeof(infoText), "TRK ID: %03d | CLASS: %s", m_lockedTarget.track_id, m_lockedTarget.className.c_str());
+        drawList->AddText(ImVec2(draw_x + 8.0f, draw_y + 8.0f), hudColor, infoText);
+
+        snprintf(infoText, sizeof(infoText), "CONF: %.2f | SIZE: %dx%d (HD: %dx%d)", 
+                 m_lockedTarget.confidence, zoomFrame.cols, zoomFrame.rows, roi.width, roi.height);
+        drawList->AddText(ImVec2(draw_x + 8.0f, draw_y + 22.0f), hudColor, infoText);
+    } else if (m_lockedTarget.state != TrackingState::SEARCHING) {
+        // Target locked but zoom frame is empty (e.g. invalid bounds)
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        const char* text = "INVALID TARGET BOUNDS";
+        ImVec2 textSize = ImGui::CalcTextSize(text);
+        ImGui::SetCursorScreenPos(ImVec2(pos.x + (avail.x - textSize.x) * 0.5f, pos.y + (avail.y - textSize.y) * 0.5f));
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", text);
     } else {
         // Render cool standby grid and text
         ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -731,7 +806,7 @@ void Application::renderDevConsole() {
     // ── Header bar ──────────────────────────────────────────────────────
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "HORUS DEV CONSOLE");
     ImGui::SameLine();
-    ImGui::TextDisabled("v1.10.3");
+    ImGui::TextDisabled("v1.10.5");
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120.0f);
     if (ImGui::Button("Settings...", ImVec2(110, 0)))
         m_showSettingsWindow = !m_showSettingsWindow;
@@ -802,6 +877,13 @@ void Application::renderDevConsole() {
                                                 &m_settings.detectionSkipFrames, 0, 10);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Run detector every N+1 frames. 0 = every frame.");
+
+            ImGui::Separator();
+
+            ImGui::TextDisabled("Camera Resolution & Zoom");
+            settingsChanged |= ImGui::Checkbox("Request 4K Camera Resolution", &m_settings.request4KCamera);
+            ImGui::SameLine();
+            settingsChanged |= ImGui::Checkbox("Enable 4K Target Zoom", &m_settings.enable4KZoom);
 
             ImGui::Separator();
 
@@ -1467,6 +1549,8 @@ void Application::renderSettingsWindow() {
             m_settings.targetColor = Float4ToImU32(m_targetColorF);
             changed = true;
         }
+        changed |= ImGui::Checkbox("Request 4K camera resolution##s", &m_settings.request4KCamera);
+        changed |= ImGui::Checkbox("Enable 4K target zoom##s", &m_settings.enable4KZoom);
     }
 
     if (ImGui::CollapsingHeader("HUD Elements")) {
@@ -1523,6 +1607,7 @@ void Application::renderSettingsWindow() {
 
 void Application::run() {
     cv::Mat currentFrame;
+    cv::Mat currentZoomFrame;
     while (!glfwWindowShouldClose(m_window)) {
         glfwPollEvents();
 
@@ -1543,7 +1628,8 @@ void Application::run() {
         {
             std::lock_guard<std::mutex> lock(m_dataMutex);
             if (m_newDataAvailable) {
-                currentFrame       = m_sharedFrame.clone();
+                m_sharedFrame.copyTo(currentFrame);
+                m_sharedZoomFrame.copyTo(currentZoomFrame);
                 m_detections       = m_sharedDetections;
                 m_trackedObjects   = m_sharedTrackedObjects;
                 m_lockedTarget     = m_sharedLockedTarget;
@@ -1921,7 +2007,7 @@ void Application::run() {
         renderDataPanel();
 
         // ── 3. Zoom Window ───────────────────────────────────────────────
-        renderZoomWindow(currentFrame);
+        renderZoomWindow(currentZoomFrame);
 
         // ── 4. Dev Console ───────────────────────────────────────────────
         renderDevConsole();

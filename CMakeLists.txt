@@ -125,4 +125,4 @@ target_link_libraries(unit_tests
 )
 
 include(GoogleTest)
-gtest_discover_tests(unit_tests)
+gtest_discover_tests(unit_tests DISCOVERY_TIMEOUT 30)
