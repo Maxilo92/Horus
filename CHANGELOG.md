@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.10.0] - 2026-06-05
+### Added
+- **ROI Zone Functions:** Added three selectable functions/types for ROI zones:
+  - *Detection (Include)*: Restricts tracking/detection to objects inside these zones (Default).
+  - *Exclude (Ignore)*: Discards all detections/objects inside these zones, reducing noise from wind or traffic.
+  - *Alarm*: Generates console warnings (LogLevel::WARN) when tracked objects cross into the zone, and info logs on exit.
+- **Interactive Move & Resize:** Complete mouse gesture support inside the Camera View:
+  - Hit testing for corners, edges, or center of any zone in edit mode.
+  - Context-aware cursors (NWSE, NESW, EW, NS, Move) based on hover position.
+  - Smooth drag-resizing and moving of zones, with frame-boundary clamping and minimum size bounds (4x4 px).
+- **Styled Overlays & Handles:** Green borders for Detection zones, orange for Exclude zones, and bright/pulsing red borders + alarm badge for active Alarm zones with objects inside. Corner handle boxes are rendered in edit mode.
+- **Dev Console Upgrades:** Expanded ROI tab table to 5 columns with inline label edits and a dropdown Combo to choose/modify the zone's function.
+- **ROIManager Unit Tests:** 5 new test cases added to GTest suite covering setFunction, updateRect, and detection filtering for Inclusion, Exclusion, and Alarm zones.
+
 ## [1.9.1] - 2026-06-05 — HOTFIX
 ### Fixed
 - **CRASH on target lock (SIGSEGV):** `m_zoomRenderer` was declared as a `unique_ptr<VideoRenderer>` in `Application.hpp` but was never initialized in the constructor, leaving it as `nullptr`. Any call to `renderZoomWindow()` (triggered on locking a target) would immediately dereference the null pointer and crash with `EXC_BAD_ACCESS KERN_INVALID_ADDRESS at 0x0`.

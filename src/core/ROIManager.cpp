@@ -50,6 +50,26 @@ void ROIManager::setLabel(int id, const std::string& label) {
 }
 
 // -----------------------------------------------------------------------
+// setFunction
+// -----------------------------------------------------------------------
+void ROIManager::setFunction(int id, ROIFunction function) {
+    std::lock_guard<std::mutex> lk(m_mutex);
+    for (auto& z : m_zones) {
+        if (z.id == id) { z.function = function; return; }
+    }
+}
+
+// -----------------------------------------------------------------------
+// updateRect
+// -----------------------------------------------------------------------
+void ROIManager::updateRect(int id, const cv::Rect& rect) {
+    std::lock_guard<std::mutex> lk(m_mutex);
+    for (auto& z : m_zones) {
+        if (z.id == id) { z.rect = rect; return; }
+    }
+}
+
+// -----------------------------------------------------------------------
 // getROIs — returns a snapshot copy (safe from UI thread)
 // -----------------------------------------------------------------------
 std::vector<ROIZone> ROIManager::getROIs() const {
@@ -114,31 +134,50 @@ cv::Rect ROIManager::normalizeRect(const cv::Point& a, const cv::Point& b) const
 // If no active zone exists, all detections pass through unchanged.
 // -----------------------------------------------------------------------
 void ROIManager::filterDetections(std::vector<Detection>& detections) const {
-    // Take a shared snapshot of active rects to minimize lock time
-    std::vector<cv::Rect> activeRects;
+    // Take a shared snapshot of active rects classified by function to minimize lock time
+    std::vector<cv::Rect> detectionRects;
+    std::vector<cv::Rect> excludeRects;
     {
         std::lock_guard<std::mutex> lk(m_mutex);
-        activeRects.reserve(m_zones.size());
         for (const auto& z : m_zones) {
-            if (z.active) activeRects.push_back(z.rect);
+            if (z.active) {
+                if (z.function == ROIFunction::DETECTION || z.function == ROIFunction::ALARM) {
+                    detectionRects.push_back(z.rect);
+                } else if (z.function == ROIFunction::EXCLUDE) {
+                    excludeRects.push_back(z.rect);
+                }
+            }
         }
     }
 
-    if (activeRects.empty()) return;  // No filter active — pass through
+    if (detectionRects.empty() && excludeRects.empty()) return;  // No active filters
 
     detections.erase(
         std::remove_if(detections.begin(), detections.end(),
-            [&activeRects](const Detection& det) -> bool {
+            [&detectionRects, &excludeRects](const Detection& det) -> bool {
                 // Compute centroid of detection box
                 cv::Point center(
                     det.box.x + det.box.width  / 2,
                     det.box.y + det.box.height / 2);
 
-                // Keep the detection if the centroid is inside ANY active ROI
-                for (const auto& r : activeRects) {
-                    if (r.contains(center)) return false;  // keep
+                // 1. Exclude if inside any active EXCLUDE zone
+                for (const auto& r : excludeRects) {
+                    if (r.contains(center)) return true; // discard
                 }
-                return true;  // remove: outside all ROIs
+
+                // 2. If there are active inclusion zones (DETECTION/ALARM), it must be inside at least one
+                if (!detectionRects.empty()) {
+                    bool insideAny = false;
+                    for (const auto& r : detectionRects) {
+                        if (r.contains(center)) {
+                            insideAny = true;
+                            break;
+                        }
+                    }
+                    if (!insideAny) return true; // discard: outside all inclusions
+                }
+
+                return false;  // keep
             }),
         detections.end());
 }

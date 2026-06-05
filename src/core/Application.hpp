@@ -12,6 +12,8 @@
 #include <deque>
 #include <cstring>
 #include <chrono>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "CameraModule.hpp"
 #include "VideoRenderer.hpp"
@@ -148,14 +150,30 @@ private:
     uint64_t m_logSessionStartMs  = 0;  // epoch ms when logging started
     bool     m_dataLoggingWasOn   = false; // tracks prev state for start/stop
 
-    // ---------------------------------------------------------------
-    // ROI edit state (Plan 04)
-    // ---------------------------------------------------------------
-    bool      m_roiEditMode    = false;
-    bool      m_roiDragging    = false;
-    cv::Point m_roiDragStartPx;  // video-space start point of current drag
+    enum class ROIEditState {
+        NONE,
+        DRAWING,
+        MOVING,
+        RESIZING_TL,
+        RESIZING_TR,
+        RESIZING_BL,
+        RESIZING_BR,
+        RESIZING_L,
+        RESIZING_R,
+        RESIZING_T,
+        RESIZING_B
+    };
+
+    bool          m_roiEditMode    = false;
+    ROIEditState  m_editState      = ROIEditState::NONE;
+    int           m_editZoneId     = -1;
+    cv::Point     m_editDragStartMouse;
+    cv::Rect      m_editDragStartRect;
     // label input buffer per ROI (max kMaxZones)
-    char      m_roiLabelBuf[ROIManager::kMaxZones][64] = {};
+    char          m_roiLabelBuf[ROIManager::kMaxZones][64] = {};
+
+    // Active track-zone alarm states for transition warnings
+    std::unordered_map<int, std::unordered_set<int>> m_activeAlarms;
 };
 
 #endif // APPLICATION_HPP

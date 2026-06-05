@@ -8,13 +8,23 @@
 #include <mutex>
 
 // -----------------------------------------------------------------------
+// ROIFunction: The purpose/type of the ROI zone.
+// -----------------------------------------------------------------------
+enum class ROIFunction {
+    DETECTION = 0, // Keep only detections inside this zone (Default/Include)
+    EXCLUDE   = 1, // Filter out/ignore all detections inside this zone (Exclude)
+    ALARM     = 2  // Raise alarm/log when detection enters this zone
+};
+
+// -----------------------------------------------------------------------
 // ROIZone: A single axis-aligned rectangular surveillance zone.
 // -----------------------------------------------------------------------
 struct ROIZone {
-    int         id     = -1;
+    int         id       = -1;
     cv::Rect    rect;              // Pixel-space rectangle (video coordinates)
-    bool        active = true;    // Zone is enabled/disabled
+    bool        active   = true;    // Zone is enabled/disabled
     std::string label;            // Optional user-supplied label
+    ROIFunction function = ROIFunction::DETECTION;
 };
 
 // -----------------------------------------------------------------------
@@ -44,6 +54,12 @@ public:
 
     // Update the label of a zone.
     void setLabel(int id, const std::string& label);
+
+    // Update the function/purpose of a zone.
+    void setFunction(int id, ROIFunction function);
+
+    // Update the rectangle coordinates of a zone.
+    void updateRect(int id, const cv::Rect& rect);
 
     // Returns a snapshot of all zones (safe to call from UI thread).
     std::vector<ROIZone> getROIs() const;

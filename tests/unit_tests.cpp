@@ -3,6 +3,7 @@
 #include "ObjectDetector.hpp"
 #include "CameraModule.hpp"
 #include "MultiTracker.hpp"
+#include "ROIManager.hpp"
 #include <opencv2/opencv.hpp>
 #include <filesystem>
 
@@ -163,4 +164,105 @@ TEST(CameraModuleTest, ReadOnClosedCamera) {
     CameraModule camera;
     cv::Mat frame;
     EXPECT_FALSE(camera.read(frame));
+}
+
+// --- ROIManager Tests ---
+
+TEST(ROIManagerTest, AddAndRemoveROI) {
+    ROIManager rm;
+    EXPECT_FALSE(rm.hasActiveROI());
+    
+    int id = rm.addROI(cv::Rect(10, 10, 100, 100), "Test Zone");
+    EXPECT_GE(id, 0);
+    EXPECT_TRUE(rm.hasActiveROI());
+    
+    auto rois = rm.getROIs();
+    ASSERT_EQ(rois.size(), 1);
+    EXPECT_EQ(rois[0].id, id);
+    EXPECT_EQ(rois[0].label, "Test Zone");
+    EXPECT_EQ(rois[0].function, ROIFunction::DETECTION);
+    EXPECT_TRUE(rois[0].active);
+    
+    rm.removeROI(id);
+    EXPECT_FALSE(rm.hasActiveROI());
+    EXPECT_EQ(rm.getROIs().size(), 0);
+}
+
+TEST(ROIManagerTest, SetFunctionAndRect) {
+    ROIManager rm;
+    int id = rm.addROI(cv::Rect(10, 10, 100, 100));
+    
+    rm.setFunction(id, ROIFunction::EXCLUDE);
+    rm.updateRect(id, cv::Rect(20, 20, 50, 50));
+    rm.setLabel(id, "Excluded Zone");
+    
+    auto rois = rm.getROIs();
+    ASSERT_EQ(rois.size(), 1);
+    EXPECT_EQ(rois[0].function, ROIFunction::EXCLUDE);
+    EXPECT_EQ(rois[0].rect.x, 20);
+    EXPECT_EQ(rois[0].rect.width, 50);
+    EXPECT_EQ(rois[0].label, "Excluded Zone");
+}
+
+TEST(ROIManagerTest, FilterDetectionsInclusion) {
+    ROIManager rm;
+    // Add active DETECTION zone
+    int id = rm.addROI(cv::Rect(10, 10, 50, 50)); // Center x in [10, 60], y in [10, 60]
+    rm.setFunction(id, ROIFunction::DETECTION);
+
+    std::vector<Detection> detections;
+    // Inside: centroid = (30, 30)
+    Detection d1; d1.box = cv::Rect(20, 20, 20, 20); d1.className = "inside";
+    // Outside: centroid = (100, 100)
+    Detection d2; d2.box = cv::Rect(90, 90, 20, 20); d2.className = "outside";
+
+    detections.push_back(d1);
+    detections.push_back(d2);
+
+    rm.filterDetections(detections);
+
+    ASSERT_EQ(detections.size(), 1);
+    EXPECT_EQ(detections[0].className, "inside");
+}
+
+TEST(ROIManagerTest, FilterDetectionsExclusion) {
+    ROIManager rm;
+    // Add active EXCLUDE zone
+    int id = rm.addROI(cv::Rect(10, 10, 50, 50));
+    rm.setFunction(id, ROIFunction::EXCLUDE);
+
+    std::vector<Detection> detections;
+    // Inside the exclude zone: centroid = (30, 30) - should be removed
+    Detection d1; d1.box = cv::Rect(20, 20, 20, 20); d1.className = "inside";
+    // Outside the exclude zone: centroid = (100, 100) - should be kept
+    Detection d2; d2.box = cv::Rect(90, 90, 20, 20); d2.className = "outside";
+
+    detections.push_back(d1);
+    detections.push_back(d2);
+
+    rm.filterDetections(detections);
+
+    ASSERT_EQ(detections.size(), 1);
+    EXPECT_EQ(detections[0].className, "outside");
+}
+
+TEST(ROIManagerTest, FilterDetectionsAlarm) {
+    ROIManager rm;
+    // Alarm zone acts as inclusion zone for filtering (so detections are kept)
+    int id = rm.addROI(cv::Rect(10, 10, 50, 50));
+    rm.setFunction(id, ROIFunction::ALARM);
+
+    std::vector<Detection> detections;
+    // Inside: centroid = (30, 30)
+    Detection d1; d1.box = cv::Rect(20, 20, 20, 20); d1.className = "inside";
+    // Outside: centroid = (100, 100)
+    Detection d2; d2.box = cv::Rect(90, 90, 20, 20); d2.className = "outside";
+
+    detections.push_back(d1);
+    detections.push_back(d2);
+
+    rm.filterDetections(detections);
+
+    ASSERT_EQ(detections.size(), 1);
+    EXPECT_EQ(detections[0].className, "inside");
 }
