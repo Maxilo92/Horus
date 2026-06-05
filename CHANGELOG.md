@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.10.2] - 2026-06-05
+### Added
+- **Interactive Class Selection Grid**: Replaced the simple static class filter checkbox with a searchable grid (4 columns) showing all 80 COCO classes. Toggling a checkbox enables/disables the class in real-time.
+- **Preset Selections**: Added preset options to quickly select/deselect classes: Select All, Clear All, Traffic & Pedestrians, Common (25 classes), Animals, and Indoor/Objects.
+- **Expanded Default Priority Classes**: Increased default priority classes to a broader set of 25 common traffic/everyday objects (from 6).
+- **Public Getter for Class Labels**: Added public `getClasses()` to the `ObjectDetector` to query loaded class labels dynamically.
+
+### Fixed
+- **Unit Test Path Stability**: Corrected paths to models/labels in `unit_tests.cpp` to refer to `assets/models/` instead of `models/`, resolving skipped tests in the GTest suite.
+
 ## [1.10.1] - 2026-06-05
 ### Fixed
 - **Target Zoom View Distortion:** Resolved visual skewing, tiling, and horizontal tearing in the target zoom window when viewing locked targets of arbitrary size. Handled non-contiguous cv::Mat crop sub-matrices by specifying `GL_UNPACK_ROW_LENGTH` in OpenGL, and prevented skewing from unaligned row width sizes by setting `GL_UNPACK_ALIGNMENT` to 1.

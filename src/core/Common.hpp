@@ -66,7 +66,7 @@ struct SystemSettings {
     // Priority-Class-Filter
     // COCO IDs: 0=person, 1=bicycle, 2=car, 3=motorcycle, 5=bus, 7=truck
     bool filterByPriorityClasses = true;
-    std::set<int> priorityClasses = {0, 1, 2, 3, 5, 7};
+    std::set<int> priorityClasses = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 14, 15, 16, 24, 25, 26, 28, 39, 41, 56, 62, 63, 67, 74};
 
     // ----------------------------------------------------------------
     // Multi-Tracker Settings

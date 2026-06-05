@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cmath>
 #include <cinttypes>
+#include <algorithm>
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
@@ -632,7 +633,7 @@ void Application::renderDevConsole() {
     // ── Header bar ──────────────────────────────────────────────────────
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "HORUS DEV CONSOLE");
     ImGui::SameLine();
-    ImGui::TextDisabled("v1.10.1");
+    ImGui::TextDisabled("v1.10.2");
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120.0f);
     if (ImGui::Button("Settings...", ImVec2(110, 0)))
         m_showSettingsWindow = !m_showSettingsWindow;
@@ -835,10 +836,107 @@ void Application::renderDevConsole() {
             ImGui::TextDisabled("Class Filter");
             settingsChanged |= ImGui::Checkbox("Filter by Priority Classes",
                                                &m_settings.filterByPriorityClasses);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Only detect: person(0), bicycle(1), car(2), motorcycle(3), bus(5), truck(7)");
 
-            if (!m_settings.filterByPriorityClasses) {
+            if (m_settings.filterByPriorityClasses && m_detector) {
+                ImGui::Indent(10.0f);
+                
+                // Search field for filtering class list
+                static char classSearchQuery[64] = "";
+                ImGui::SetNextItemWidth(-1);
+                ImGui::InputTextWithHint("##class_search", "Search classes...", classSearchQuery, sizeof(classSearchQuery));
+                
+                std::string searchLower = classSearchQuery;
+                std::transform(searchLower.begin(), searchLower.end(), searchLower.begin(), [](unsigned char c){ return std::tolower(c); });
+
+                ImGui::Spacing();
+                
+                // Quick preset actions
+                if (ImGui::Button("Select All")) {
+                    for (int i = 0; i < m_detector->numClasses(); ++i) {
+                        m_settings.priorityClasses.insert(i);
+                    }
+                    settingsChanged = true;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Clear All")) {
+                    m_settings.priorityClasses.clear();
+                    settingsChanged = true;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Presets...")) {
+                    ImGui::OpenPopup("class_presets_popup");
+                }
+
+                if (ImGui::BeginPopup("class_presets_popup")) {
+                    if (ImGui::Selectable("Traffic & Pedestrians")) {
+                        m_settings.priorityClasses = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11};
+                        settingsChanged = true;
+                    }
+                    if (ImGui::Selectable("Common (25 classes)")) {
+                        m_settings.priorityClasses = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 14, 15, 16, 24, 25, 26, 28, 39, 41, 56, 62, 63, 67, 74};
+                        settingsChanged = true;
+                    }
+                    if (ImGui::Selectable("Animals")) {
+                        m_settings.priorityClasses = {14, 15, 16, 17, 18, 19, 20, 21, 22, 23};
+                        settingsChanged = true;
+                    }
+                    if (ImGui::Selectable("Indoor & Electronics")) {
+                        m_settings.priorityClasses = {24, 25, 26, 27, 28, 39, 40, 41, 42, 43, 44, 45, 56, 57, 58, 59, 60, 62, 63, 64, 65, 66, 67, 73, 74, 75, 76, 77, 78, 79};
+                        settingsChanged = true;
+                    }
+                    ImGui::EndPopup();
+                }
+
+                // Render checkboxes in a 4-column table layout
+                const auto& classes = m_detector->getClasses();
+                const int numCols = 4;
+                if (ImGui::BeginTable("ClassChecklistGrid", numCols,
+                                      ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_RowBg,
+                                      ImVec2(0, 180.0f))) {
+                    
+                    for (int i = 0; i < numCols; ++i) {
+                        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthStretch);
+                    }
+
+                    int visibleCount = 0;
+                    for (size_t i = 0; i < classes.size(); ++i) {
+                        std::string classNameLower = classes[i];
+                        std::transform(classNameLower.begin(), classNameLower.end(), classNameLower.begin(), [](unsigned char c){ return std::tolower(c); });
+                        
+                        if (!searchLower.empty() && classNameLower.find(searchLower) == std::string::npos) {
+                            continue;
+                        }
+
+                        if (visibleCount % numCols == 0) {
+                            ImGui::TableNextRow();
+                        }
+                        ImGui::TableSetColumnIndex(visibleCount % numCols);
+
+                        bool isChecked = (m_settings.priorityClasses.find(static_cast<int>(i)) != m_settings.priorityClasses.end());
+                        char label[128];
+                        snprintf(label, sizeof(label), "%s##cls_%zu", classes[i].c_str(), i);
+                        if (ImGui::Checkbox(label, &isChecked)) {
+                            if (isChecked) {
+                                m_settings.priorityClasses.insert(static_cast<int>(i));
+                            } else {
+                                m_settings.priorityClasses.erase(static_cast<int>(i));
+                            }
+                            settingsChanged = true;
+                        }
+                        visibleCount++;
+                    }
+                    
+                    if (visibleCount == 0) {
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::TextDisabled("No matching classes.");
+                    }
+                    
+                    ImGui::EndTable();
+                }
+                
+                ImGui::Unindent(10.0f);
+            } else if (!m_settings.filterByPriorityClasses) {
                 ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.1f, 1.0f),
                     "  WARNING: All COCO classes active");
             }

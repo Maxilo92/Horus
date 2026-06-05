@@ -116,8 +116,8 @@ TEST(ObjectDetectorTest, HandleInvalidModelPath) {
 }
 
 TEST(ObjectDetectorTest, DetectionOnEmptyFrame) {
-    std::string modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/models/yolov8n.onnx";
-    std::string labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/models/coco.txt";
+    std::string modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/yolov8n.onnx";
+    std::string labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/coco.txt";
     
     if (!fs::exists(modelPath)) {
         GTEST_SKIP() << "Model file not found, skipping test.";
@@ -133,8 +133,8 @@ TEST(ObjectDetectorTest, DetectionOnEmptyFrame) {
 }
 
 TEST(ObjectDetectorTest, DetectionOnSolidColorFrame) {
-    std::string modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/models/yolov8n.onnx";
-    std::string labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/models/coco.txt";
+    std::string modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/yolov8n.onnx";
+    std::string labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/coco.txt";
 
     if (!fs::exists(modelPath)) {
         GTEST_SKIP() << "Model file not found, skipping test.";

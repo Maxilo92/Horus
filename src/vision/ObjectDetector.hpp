@@ -130,6 +130,7 @@ public:
     }
 
     int numClasses() const { return static_cast<int>(classes.size()); }
+    const std::vector<std::string>& getClasses() const { return classes; }
 
 private:
     cv::dnn::Net net;
