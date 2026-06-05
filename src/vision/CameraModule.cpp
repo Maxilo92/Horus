@@ -25,9 +25,14 @@ bool CameraModule::open(const std::string& address) {
     return m_cap.isOpened();
 }
 
+void CameraModule::close() {
+    if (m_cap.isOpened()) m_cap.release();
+}
+
 bool CameraModule::read(cv::Mat& frame) {
     return m_cap.read(frame);
 }
+
 
 bool CameraModule::isOpened() const {
     return m_cap.isOpened();

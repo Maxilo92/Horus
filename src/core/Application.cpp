@@ -156,6 +156,33 @@ void Application::workerLoop() {
     int frameSkipCounter = 0;
 
     while (m_running) {
+        // ── Camera hot-swap ────────────────────────────────────────────
+        if (m_cameraChangeRequested.load()) {
+            std::string newAddr;
+            {
+                std::lock_guard<std::mutex> lk(m_cameraChangeMutex);
+                newAddr = m_pendingCameraAddress;
+            }
+            m_cameraChangeRequested.store(false);
+
+            log(LogLevel::INFO, "Hot-swapping camera to: " + newAddr);
+            m_camera->close();  // release old
+            bool ok = m_camera->open(newAddr);
+
+            // Write result back (read from render thread for status display)
+            {
+                std::lock_guard<std::mutex> lk(m_cameraChangeMutex);
+                m_cameraStatus   = ok ? "OK — " + newAddr : "FAILED — " + newAddr;
+                m_cameraStatusOk = ok;
+            }
+            if (ok) {
+                m_cameraAddress = newAddr;
+                log(LogLevel::INFO, "Camera opened: " + newAddr);
+            } else {
+                log(LogLevel::ERR, "Camera failed to open: " + newAddr);
+            }
+        }
+
         if (!m_camera->read(frame)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
@@ -417,8 +444,91 @@ void Application::renderDevConsole() {
                 ImGui::SetTooltip("Run detector every N+1 frames. 0 = every frame.");
 
             ImGui::Separator();
-            ImGui::TextDisabled("Camera");
-            ImGui::Text("Source: %s", m_cameraAddress.c_str());
+
+            // ── Camera Selection ────────────────────────────────────────
+            ImGui::TextDisabled("Camera Source");
+
+            // Status badge
+            {
+                std::string statusStr;
+                bool statusOk = true;
+                {
+                    std::lock_guard<std::mutex> lk(m_cameraChangeMutex);
+                    statusStr = m_cameraStatus;
+                    statusOk  = m_cameraStatusOk;
+                }
+                if (statusStr.empty()) {
+                    ImGui::TextColored(ImVec4(0.0f,0.9f,0.4f,1.0f),
+                        "ACTIVE  [%s]", m_cameraAddress.c_str());
+                } else if (statusOk) {
+                    ImGui::TextColored(ImVec4(0.0f,1.0f,0.5f,1.0f),
+                        "OK  [%s]", m_cameraAddress.c_str());
+                } else {
+                    ImGui::TextColored(ImVec4(1.0f,0.3f,0.3f,1.0f),
+                        "FAILED  [%s]", statusStr.c_str());
+                }
+            }
+
+            // Quick-select combo (camera indices 0–5 + common network URIs)
+            ImGui::SetNextItemWidth(-1);
+            static const char* kPresets[] = {
+                "0  (built-in / first cam)",
+                "1  (USB cam #1)",
+                "2  (USB cam #2)",
+                "3  (USB cam #3)",
+                "4  (USB cam #4)",
+                "5  (USB cam #5)",
+                "rtsp://  (custom RTSP)",
+                "http://  (custom HTTP)",
+            };
+            static int selectedPreset = -1;
+            if (ImGui::BeginCombo("##campreset", "Quick Select...")) {
+                for (int i = 0; i < IM_ARRAYSIZE(kPresets); ++i) {
+                    if (ImGui::Selectable(kPresets[i])) {
+                        selectedPreset = i;
+                        if (i < 6) {
+                            // Numeric index
+                            snprintf(m_cameraInputBuf, sizeof(m_cameraInputBuf), "%d", i);
+                        } else if (i == 6) {
+                            strncpy(m_cameraInputBuf, "rtsp://", sizeof(m_cameraInputBuf));
+                        } else {
+                            strncpy(m_cameraInputBuf, "http://", sizeof(m_cameraInputBuf));
+                        }
+                    }
+                }
+                ImGui::EndCombo();
+            }
+
+            // Manual text input
+            ImGui::SetNextItemWidth(-80);
+            ImGui::InputText("##camaddr", m_cameraInputBuf, sizeof(m_cameraInputBuf),
+                             ImGuiInputTextFlags_None);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Numeric ID (e.g. 0, 1) or full URI\n"
+                                  "e.g. rtsp://192.168.1.10:554/stream\n"
+                                  "     /dev/video0\n"
+                                  "     http://cam.example.com/mjpg");
+            ImGui::SameLine();
+
+            // Apply button — triggers hot-swap in worker thread
+            bool canApply = (m_cameraInputBuf[0] != '\0') &&
+                            !m_cameraChangeRequested.load();
+            if (!canApply) ImGui::BeginDisabled();
+            if (ImGui::Button("Apply", ImVec2(-1, 0))) {
+                std::string newAddr(m_cameraInputBuf);
+                {
+                    std::lock_guard<std::mutex> lk(m_cameraChangeMutex);
+                    m_pendingCameraAddress = newAddr;
+                    m_cameraStatus.clear();
+                }
+                m_cameraChangeRequested.store(true);
+                log(LogLevel::INFO, "Camera change requested: " + newAddr);
+            }
+            if (!canApply) ImGui::EndDisabled();
+
+            if (m_cameraChangeRequested.load())
+                ImGui::TextColored(ImVec4(1.0f,0.8f,0.1f,1.0f), "  Switching...");
+
 
             ImGui::Separator();
             if (ImGui::Button("Reset All Settings", ImVec2(-1, 0))) {

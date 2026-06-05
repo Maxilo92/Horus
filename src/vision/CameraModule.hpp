@@ -10,6 +10,7 @@ public:
     ~CameraModule();
 
     bool open(const std::string& address);
+    void close();
     bool read(cv::Mat& frame);
     bool isOpened() const;
 

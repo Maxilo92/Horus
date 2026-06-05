@@ -10,6 +10,7 @@
 #include <mutex>
 #include <atomic>
 #include <deque>
+#include <cstring>
 #include <chrono>
 
 #include "CameraModule.hpp"
@@ -114,6 +115,16 @@ private:
     bool  m_autoScrollLog      = true;
     char  m_logFilter[128]     = {0};
     int   m_devConsoleTab      = 0;   // 0=System, 1=Detector, 2=Tracker, 3=HUD, 4=Console
+
+    // ---------------------------------------------------------------
+    // Camera hot-swap state
+    // ---------------------------------------------------------------
+    char               m_cameraInputBuf[256] = {0};  // InputText buffer
+    std::string        m_pendingCameraAddress;         // Protected by m_cameraChangeMutex
+    std::mutex         m_cameraChangeMutex;
+    std::atomic<bool>  m_cameraChangeRequested{false};
+    std::string        m_cameraStatus;                 // e.g. "OK" / "FAILED" / "..."
+    bool               m_cameraStatusOk = true;
 
     // Color arrays for ImGui::ColorEdit4 (RGBA [0,1])
     float m_hudColorF[4]    = {0.0f, 0.784f, 0.392f, 0.863f};

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.1] - 2026-06-05
+### Added
+- **Live Camera Selection UI:** System tab now contains a full camera-source panel with:
+  - Status badge showing current active source (green = active, red = failed)
+  - Quick-select combo dropdown (Camera 0–5, RTSP, HTTP presets)
+  - Manual `InputText` field for any numeric ID, device path (`/dev/video0`), or full network URI (`rtsp://...`, `http://...`)
+  - `Apply` button (disabled during pending swap) that triggers a thread-safe hot-swap
+  - `Switching...` indicator while the worker thread is reconnecting
+- **`CameraModule::close()`:** New public method to safely release the current capture without destroying the object, enabling hot-swap.
+### Changed
+- Camera hot-swap is fully thread-safe: the UI sets an atomic flag + mutex-protected address; the worker thread performs the actual `close()`/`open()` sequence and writes the result status back.
+
 ## [1.6.8] - 2026-06-05
 ### Changed
 - **Extended Target Telemetry:** Added `trail` support to the `TrackedTarget` structure, ensuring movement history is preserved and rendered correctly when a target is locked.
