@@ -1,0 +1,37 @@
+# Build directories
+build/
+build2/
+build3/
+bin/
+lib/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific logs and output
+build_log.txt
+build_log_full.txt
+build_output.txt
+build_output2.txt
+build_output_final.txt
+app_log.txt
+imgui.ini
+
+# C++ artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.out
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*~
