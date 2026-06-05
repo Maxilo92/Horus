@@ -1,0 +1,123 @@
+Change Dir: '/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build'
+
+Run Build Command(s): /usr/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile unit_tests
+/usr/local/bin/cmake -S/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus -B/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build --check-build-system CMakeFiles/Makefile.cmake 0
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/Makefile2 unit_tests
+/usr/local/bin/cmake -S/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus -B/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build --check-build-system CMakeFiles/Makefile.cmake 0
+/usr/local/bin/cmake -E cmake_progress_start /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles 18
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/Makefile2 CMakeFiles/unit_tests.dir/all
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googletest/CMakeFiles/gtest.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest.dir/depend
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build && /usr/local/bin/cmake -E cmake_depends "Unix Makefiles" /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest/CMakeFiles/gtest.dir/DependInfo.cmake "--color=" gtest
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googletest/CMakeFiles/gtest.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest.dir/build
+make[3]: Nothing to be done for `_deps/googletest-build/googletest/CMakeFiles/gtest.dir/build'.
+[ 11%] Built target gtest
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/depend
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build && /usr/local/bin/cmake -E cmake_depends "Unix Makefiles" /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/DependInfo.cmake "--color=" gtest_main
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build
+make[3]: Nothing to be done for `_deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build'.
+[ 22%] Built target gtest_main
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/unit_tests.dir/build.make CMakeFiles/unit_tests.dir/depend
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build && /usr/local/bin/cmake -E cmake_depends "Unix Makefiles" /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/DependInfo.cmake "--color=" unit_tests
+Dependencies file "CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_glfw.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_demo.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_draw.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_tables.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_widgets.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/src/Application.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/src/CameraModule.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/src/HUD.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/src/SingleTracker.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Dependencies file "CMakeFiles/unit_tests.dir/src/VideoRenderer.cpp.o.d" is newer than depends file "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/compiler_depend.internal".
+Consolidate compiler generated dependencies of target unit_tests
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/unit_tests.dir/build.make CMakeFiles/unit_tests.dir/build
+[ 27%] Building CXX object CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o
+/usr/bin/c++  -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googlemock/include -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googlemock -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -std=gnu++17 -MD -MT CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o -MF CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o.d -o CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp:2:
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/ObjectDetector.hpp:6:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/Common.hpp:44:5: error: unknown type name 'ImU32'
+   44 |     ImU32 hudColor = 0; // Will be initialized in HUD
+      |     ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/Common.hpp:45:5: error: unknown type name 'ImU32'
+   45 |     ImU32 targetColor = 0;
+      |     ^
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp:4:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/SingleTracker.hpp:16:11: error: unknown type name 'TrackedTarget'
+   16 |     const TrackedTarget& getTarget() const { return m_target; }
+      |           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/SingleTracker.hpp:22:5: error: unknown type name 'TrackedTarget'
+   22 |     TrackedTarget m_target;
+      |     ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp:47:30: error: too few arguments to function call, expected 2, have 1
+   47 |     tracker.update(detections);
+      |     ~~~~~~~~~~~~~~           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/SingleTracker.hpp:14:10: note: 'update' declared here
+   14 |     void update(const std::vector<Detection>& detections, const SystemSettings& settings);
+      |          ^      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp:64:30: error: too few arguments to function call, expected 2, have 1
+   64 |     tracker.update(detections); // vx should be around 6 (alpha=0.6 * 10)
+      |     ~~~~~~~~~~~~~~           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/SingleTracker.hpp:14:10: note: 'update' declared here
+   14 |     void update(const std::vector<Detection>& detections, const SystemSettings& settings);
+      |          ^      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp:67:22: error: too few arguments to function call, expected 2, have 1
+   67 |     tracker.update({}); // No detections
+      |     ~~~~~~~~~~~~~~   ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/SingleTracker.hpp:14:10: note: 'update' declared here
+   14 |     void update(const std::vector<Detection>& detections, const SystemSettings& settings);
+      |          ^      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp:83:26: error: too few arguments to function call, expected 2, have 1
+   83 |         tracker.update({});
+      |         ~~~~~~~~~~~~~~   ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/SingleTracker.hpp:14:10: note: 'update' declared here
+   14 |     void update(const std::vector<Detection>& detections, const SystemSettings& settings);
+      |          ^      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp:113:35: error: too few arguments to function call, expected 2, have 1
+  113 |         detector.detect(emptyFrame);
+      |         ~~~~~~~~~~~~~~~           ^
+/usr/local/include/gtest/gtest.h:1796:25: note: expanded from macro 'EXPECT_ANY_THROW'
+ 1796 |   GTEST_TEST_ANY_THROW_(statement, GTEST_NONFATAL_FAILURE_)
+      |                         ^~~~~~~~~
+/usr/local/include/gtest/internal/gtest-internal.h:1431:54: note: expanded from macro 'GTEST_TEST_ANY_THROW_'
+ 1431 |       GTEST_SUPPRESS_UNREACHABLE_CODE_WARNING_BELOW_(statement);     \
+      |                                                      ^~~~~~~~~
+/usr/local/include/gtest/internal/gtest-internal.h:1311:5: note: expanded from macro 'GTEST_SUPPRESS_UNREACHABLE_CODE_WARNING_BELOW_'
+ 1311 |     statement;                                                    \
+      |     ^~~~~~~~~
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/ObjectDetector.hpp:23:28: note: 'detect' declared here
+   23 |     std::vector<Detection> detect(cv::Mat& frame, const SystemSettings& settings) {
+      |                            ^      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp:129:49: error: too few arguments to function call, expected 2, have 1
+  129 |     auto detections = detector.detect(blackFrame);
+      |                       ~~~~~~~~~~~~~~~           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/ObjectDetector.hpp:23:28: note: 'detect' declared here
+   23 |     std::vector<Detection> detect(cv::Mat& frame, const SystemSettings& settings) {
+      |                            ^      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp:169:37: error: reference to type 'const SystemSettings' could not bind to an rvalue of type 'float'
+  169 |         detector.detect(blackFrame, -1.0f);
+      |                                     ^~~~~
+/usr/local/include/gtest/gtest.h:1794:24: note: expanded from macro 'EXPECT_NO_THROW'
+ 1794 |   GTEST_TEST_NO_THROW_(statement, GTEST_NONFATAL_FAILURE_)
+      |                        ^~~~~~~~~
+/usr/local/include/gtest/internal/gtest-internal.h:1412:54: note: expanded from macro 'GTEST_TEST_NO_THROW_'
+ 1412 |       GTEST_SUPPRESS_UNREACHABLE_CODE_WARNING_BELOW_(statement);         \
+      |                                                      ^~~~~~~~~
+/usr/local/include/gtest/internal/gtest-internal.h:1311:5: note: expanded from macro 'GTEST_SUPPRESS_UNREACHABLE_CODE_WARNING_BELOW_'
+ 1311 |     statement;                                                    \
+      |     ^~~~~~~~~
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/ObjectDetector.hpp:23:73: note: passing argument to parameter 'settings' here
+   23 |     std::vector<Detection> detect(cv::Mat& frame, const SystemSettings& settings) {
+      |                                                                         ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp:170:37: error: reference to type 'const SystemSettings' could not bind to an rvalue of type 'float'
+  170 |         detector.detect(blackFrame, 2.0f);
+      |                                     ^~~~
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/ObjectDetector.hpp:23:73: note: passing argument to parameter 'settings' here
+   23 |     std::vector<Detection> detect(cv::Mat& frame, const SystemSettings& settings) {
+      |                                                                         ^
+12 errors generated.
+make[3]: *** [CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o] Error 1
+make[2]: *** [CMakeFiles/unit_tests.dir/all] Error 2
+make[1]: *** [CMakeFiles/unit_tests.dir/rule] Error 2
+make: *** [unit_tests] Error 2
+

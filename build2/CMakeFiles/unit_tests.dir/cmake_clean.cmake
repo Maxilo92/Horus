@@ -1,0 +1,36 @@
+file(REMOVE_RECURSE
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_glfw.cpp.o"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_glfw.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui.cpp.o"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_demo.cpp.o"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_demo.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_draw.cpp.o"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_draw.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_tables.cpp.o"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_tables.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_widgets.cpp.o"
+  "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_widgets.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/src/Application.cpp.o"
+  "CMakeFiles/unit_tests.dir/src/Application.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/src/CameraModule.cpp.o"
+  "CMakeFiles/unit_tests.dir/src/CameraModule.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/src/HUD.cpp.o"
+  "CMakeFiles/unit_tests.dir/src/HUD.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/src/SingleTracker.cpp.o"
+  "CMakeFiles/unit_tests.dir/src/SingleTracker.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/src/VideoRenderer.cpp.o"
+  "CMakeFiles/unit_tests.dir/src/VideoRenderer.cpp.o.d"
+  "CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o"
+  "CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o.d"
+  "unit_tests"
+  "unit_tests.pdb"
+  "unit_tests[1]_tests.cmake"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang CXX)
+  include(CMakeFiles/unit_tests.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

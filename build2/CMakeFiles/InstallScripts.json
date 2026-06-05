@@ -1,0 +1,10 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build2/cmake_install.cmake",
+		"/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build2/_deps/googletest-build/cmake_install.cmake",
+		"/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build2/_deps/googletest-build/googlemock/cmake_install.cmake",
+		"/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build2/_deps/googletest-build/googletest/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

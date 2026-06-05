@@ -1,0 +1,137 @@
+#pragma once
+#include <opencv2/opencv.hpp>
+#include <opencv2/dnn.hpp>
+#include <vector>
+#include <fstream>
+#include <sstream>
+#include "Common.hpp"
+
+class ObjectDetector {
+public:
+    ObjectDetector(const std::string& modelPath, const std::string& classesPath) {
+        net = cv::dnn::readNetFromONNX(modelPath);
+        net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+        net.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+
+        // Lade Klassen: eine Klasse pro Zeile
+        std::ifstream ifs(classesPath);
+        if (!ifs.is_open()) {
+            // Fallback: COCO-Standardklassen hartcodiert
+            classes = {"person","bicycle","car","motorcycle","airplane","bus","train","truck"};
+            return;
+        }
+        std::string line;
+        while (std::getline(ifs, line)) {
+            // Trim trailing whitespace/CR
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+                line.pop_back();
+            if (!line.empty())
+                classes.push_back(line);
+        }
+    }
+
+    std::vector<Detection> detect(cv::Mat& frame, const SystemSettings& settings) {
+        if (classes.empty()) return {};
+
+        // Letterbox resizing: Keep aspect ratio and pad to 640x640
+        float scale = std::min(640.0f / (float)frame.cols, 640.0f / (float)frame.rows);
+        int new_w = static_cast<int>(frame.cols * scale);
+        int new_h = static_cast<int>(frame.rows * scale);
+        int offset_x = (640 - new_w) / 2;
+        int offset_y = (640 - new_h) / 2;
+
+        cv::Mat resized;
+        cv::resize(frame, resized, cv::Size(new_w, new_h));
+        
+        cv::Mat canvas = cv::Mat::zeros(cv::Size(640, 640), frame.type());
+        resized.copyTo(canvas(cv::Rect(offset_x, offset_y, new_w, new_h)));
+
+        cv::Mat blob;
+        // YOLOv8 benötigt 640x640, Normalisierung 1/255
+        cv::dnn::blobFromImage(canvas, blob, 1.0/255.0, cv::Size(640, 640), cv::Scalar(), true, false);
+        net.setInput(blob);
+
+        std::vector<cv::Mat> outputs;
+        net.forward(outputs, net.getUnconnectedOutLayersNames());
+
+        // YOLOv8 Output Shape: [1, 84, 8400]
+        // 84 = 4 (box: cx,cy,w,h) + 80 (Klassen-Scores)
+        cv::Mat output = outputs[0];
+        if (output.dims == 3) {
+            output = output.reshape(1, output.size[1]); // [84, 8400]
+        }
+        cv::transpose(output, output); // [8400, 84]
+
+        std::vector<int> class_ids;
+        std::vector<float> confidences;
+        std::vector<cv::Rect> boxes;
+
+        const int numClasses = static_cast<int>(classes.size());
+        const float* data = reinterpret_cast<const float*>(output.data);
+        const int stride = 4 + numClasses;
+
+        for (int i = 0; i < 8400; ++i) {
+            const float* row = data + i * stride;
+            const float* class_scores = row + 4;
+
+            // Finde beste Klasse in diesem Kandidaten
+            int best_class = -1;
+            float best_score = 0.0f;
+            for (int c = 0; c < numClasses; ++c) {
+                if (class_scores[c] > best_score) {
+                    best_score = class_scores[c];
+                    best_class = c;
+                }
+            }
+
+            if (best_score < settings.detectorScoreThreshold) continue;
+
+            // Priority-Class-Filter: Nur relevante Klassen melden
+            if (settings.filterByPriorityClasses &&
+                settings.priorityClasses.find(best_class) == settings.priorityClasses.end()) {
+                continue;
+            }
+
+            confidences.push_back(best_score);
+            class_ids.push_back(best_class);
+
+            const float cx = row[0];
+            const float cy = row[1];
+            const float w  = row[2];
+            const float h  = row[3];
+
+            const int left   = static_cast<int>((cx - 0.5f * w - (float)offset_x) / scale);
+            const int top    = static_cast<int>((cy - 0.5f * h - (float)offset_y) / scale);
+            const int width  = static_cast<int>(w / scale);
+            const int height = static_cast<int>(h / scale);
+            boxes.emplace_back(left, top, width, height);
+        }
+
+        std::vector<int> nms_indices;
+        cv::dnn::NMSBoxes(boxes, confidences, settings.detectorConfThreshold,
+                          settings.detectorNmsThreshold, nms_indices);
+
+        std::vector<Detection> detections;
+        detections.reserve(nms_indices.size());
+        for (int idx : nms_indices) {
+            const int cid = class_ids[idx];
+            // Bounds-Check: Verhindert undefined behavior bei fehlerhaftem Modell-Output
+            if (cid < 0 || cid >= numClasses) continue;
+
+            Detection d;
+            d.class_id  = cid;
+            d.confidence = confidences[idx];
+            d.box       = boxes[idx];
+            d.className = classes[cid];
+            detections.push_back(d);
+        }
+
+        return detections;
+    }
+
+    int numClasses() const { return static_cast<int>(classes.size()); }
+
+private:
+    cv::dnn::Net net;
+    std::vector<std::string> classes;
+};

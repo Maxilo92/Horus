@@ -1,0 +1,770 @@
+Change Dir: '/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build'
+
+Run Clean Command: /usr/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile clean
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/Makefile2 clean
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/Tactileviewer.dir/build.make CMakeFiles/Tactileviewer.dir/clean
+/usr/local/bin/cmake -P CMakeFiles/Tactileviewer.dir/cmake_clean.cmake
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/unit_tests.dir/build.make CMakeFiles/unit_tests.dir/clean
+/usr/local/bin/cmake -P CMakeFiles/unit_tests.dir/cmake_clean.cmake
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googlemock/CMakeFiles/gmock.dir/build.make _deps/googletest-build/googlemock/CMakeFiles/gmock.dir/clean
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googlemock && /usr/local/bin/cmake -P CMakeFiles/gmock.dir/cmake_clean.cmake
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/build.make _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/clean
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googlemock && /usr/local/bin/cmake -P CMakeFiles/gmock_main.dir/cmake_clean.cmake
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googletest/CMakeFiles/gtest.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest.dir/clean
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest && /usr/local/bin/cmake -P CMakeFiles/gtest.dir/cmake_clean.cmake
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/clean
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest && /usr/local/bin/cmake -P CMakeFiles/gtest_main.dir/cmake_clean.cmake
+
+Run Build Command(s): /usr/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile unit_tests
+/usr/local/bin/cmake -S/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus -B/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build --check-build-system CMakeFiles/Makefile.cmake 0
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/Makefile2 unit_tests
+/usr/local/bin/cmake -S/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus -B/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build --check-build-system CMakeFiles/Makefile.cmake 0
+/usr/local/bin/cmake -E cmake_progress_start /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles 17
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/Makefile2 CMakeFiles/unit_tests.dir/all
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googletest/CMakeFiles/gtest.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest.dir/depend
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build && /usr/local/bin/cmake -E cmake_depends "Unix Makefiles" /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest/CMakeFiles/gtest.dir/DependInfo.cmake "--color=" gtest
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googletest/CMakeFiles/gtest.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest.dir/build
+[  5%] Building CXX object _deps/googletest-build/googletest/CMakeFiles/gtest.dir/src/gtest-all.cc.o
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest && /usr/bin/clang++  -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17  -DGTEST_HAS_PTHREAD=1   -MD -MT _deps/googletest-build/googletest/CMakeFiles/gtest.dir/src/gtest-all.cc.o -MF CMakeFiles/gtest.dir/src/gtest-all.cc.o.d -o CMakeFiles/gtest.dir/src/gtest-all.cc.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/src/gtest-all.cc
+[ 11%] Linking CXX static library ../../../lib/libgtest.a
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest && /usr/local/bin/cmake -P CMakeFiles/gtest.dir/cmake_clean_target.cmake
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest && /usr/local/bin/cmake -E cmake_link_script CMakeFiles/gtest.dir/link.txt --verbose=1
+/usr/bin/ar qc ../../../lib/libgtest.a "CMakeFiles/gtest.dir/src/gtest-all.cc.o"
+/usr/bin/ranlib ../../../lib/libgtest.a
+[ 11%] Built target gtest
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/depend
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build && /usr/local/bin/cmake -E cmake_depends "Unix Makefiles" /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/DependInfo.cmake "--color=" gtest_main
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build
+[ 17%] Building CXX object _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/src/gtest_main.cc.o
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest && /usr/bin/clang++  -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17  -DGTEST_HAS_PTHREAD=1   -MD -MT _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/src/gtest_main.cc.o -MF CMakeFiles/gtest_main.dir/src/gtest_main.cc.o.d -o CMakeFiles/gtest_main.dir/src/gtest_main.cc.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[ 23%] Linking CXX static library ../../../lib/libgtest_main.a
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest && /usr/local/bin/cmake -P CMakeFiles/gtest_main.dir/cmake_clean_target.cmake
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-build/googletest && /usr/local/bin/cmake -E cmake_link_script CMakeFiles/gtest_main.dir/link.txt --verbose=1
+/usr/bin/ar qc ../../../lib/libgtest_main.a CMakeFiles/gtest_main.dir/src/gtest_main.cc.o
+/usr/bin/ranlib ../../../lib/libgtest_main.a
+[ 23%] Built target gtest_main
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/unit_tests.dir/build.make CMakeFiles/unit_tests.dir/depend
+cd /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build && /usr/local/bin/cmake -E cmake_depends "Unix Makefiles" /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/CMakeFiles/unit_tests.dir/DependInfo.cmake "--color=" unit_tests
+/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/unit_tests.dir/build.make CMakeFiles/unit_tests.dir/build
+[ 29%] Building CXX object CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o -MF CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o.d -o CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/tests/unit_tests.cpp
+[ 35%] Building CXX object CMakeFiles/unit_tests.dir/src/Application.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/src/Application.cpp.o -MF CMakeFiles/unit_tests.dir/src/Application.cpp.o.d -o CMakeFiles/unit_tests.dir/src/Application.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/Application.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/Application.cpp:1:
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/Application.hpp:14:
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/VideoRenderer.hpp:6:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSplitter' [-Wnontrivial-memcall]
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: note: explicitly cast the pointer to silence this warning
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+      |                                           (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawList' [-Wnontrivial-memcall]
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: note: explicitly cast the pointer to silence this warning
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+      |                                                            (void*)
+2 warnings generated.
+[ 41%] Building CXX object CMakeFiles/unit_tests.dir/src/CameraModule.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/src/CameraModule.cpp.o -MF CMakeFiles/unit_tests.dir/src/CameraModule.cpp.o.d -o CMakeFiles/unit_tests.dir/src/CameraModule.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/CameraModule.cpp
+[ 47%] Building CXX object CMakeFiles/unit_tests.dir/src/VideoRenderer.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/src/VideoRenderer.cpp.o -MF CMakeFiles/unit_tests.dir/src/VideoRenderer.cpp.o.d -o CMakeFiles/unit_tests.dir/src/VideoRenderer.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/VideoRenderer.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/VideoRenderer.cpp:1:
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/VideoRenderer.hpp:6:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSplitter' [-Wnontrivial-memcall]
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: note: explicitly cast the pointer to silence this warning
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+      |                                           (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawList' [-Wnontrivial-memcall]
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: note: explicitly cast the pointer to silence this warning
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+      |                                                            (void*)
+2 warnings generated.
+[ 52%] Building CXX object CMakeFiles/unit_tests.dir/src/HUD.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/src/HUD.cpp.o -MF CMakeFiles/unit_tests.dir/src/HUD.cpp.o.d -o CMakeFiles/unit_tests.dir/src/HUD.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/HUD.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/HUD.cpp:1:
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src/HUD.hpp:6:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSplitter' [-Wnontrivial-memcall]
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: note: explicitly cast the pointer to silence this warning
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+      |                                           (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawList' [-Wnontrivial-memcall]
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: note: explicitly cast the pointer to silence this warning
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+      |                                                            (void*)
+2 warnings generated.
+[ 58%] Building CXX object CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui.cpp.o -MF CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui.cpp.o.d -o CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:958:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSplitter' [-Wnontrivial-memcall]
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: note: explicitly cast the pointer to silence this warning
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+      |                                           (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawList' [-Wnontrivial-memcall]
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: note: explicitly cast the pointer to silence this warning
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+      |                                                            (void*)
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:960:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:793:54: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawDataBuilder' [-Wnontrivial-memcall]
+  793 |     ImDrawDataBuilder()                     { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:793:54: note: explicitly cast the pointer to silence this warning
+  793 |     ImDrawDataBuilder()                     { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+      |                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1097:50: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiInputTextDeactivatedState' [-Wnontrivial-memcall]
+ 1097 |     ImGuiInputTextDeactivatedState()    { memset(this, 0, sizeof(*this)); }
+      |                                                  ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1097:50: note: explicitly cast the pointer to silence this warning
+ 1097 |     ImGuiInputTextDeactivatedState()    { memset(this, 0, sizeof(*this)); }
+      |                                                  ^
+      |                                                  (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1120:54: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiInputTextState' [-Wnontrivial-memcall]
+ 1120 |     ImGuiInputTextState()                   { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1120:54: note: explicitly cast the pointer to silence this warning
+ 1120 |     ImGuiInputTextState()                   { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+      |                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1487:46: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiListClipperData' [-Wnontrivial-memcall]
+ 1487 |     ImGuiListClipperData()          { memset(this, 0, sizeof(*this)); }
+      |                                              ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1487:46: note: explicitly cast the pointer to silence this warning
+ 1487 |     ImGuiListClipperData()          { memset(this, 0, sizeof(*this)); }
+      |                                              ^
+      |                                              (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1662:34: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiOldColumns' [-Wnontrivial-memcall]
+ 1662 |     ImGuiOldColumns()   { memset(this, 0, sizeof(*this)); }
+      |                                  ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1662:34: note: explicitly cast the pointer to silence this warning
+ 1662 |     ImGuiOldColumns()   { memset(this, 0, sizeof(*this)); }
+      |                                  ^
+      |                                  (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1850:38: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiIDStackTool' [-Wnontrivial-memcall]
+ 1850 |     ImGuiIDStackTool()      { memset(this, 0, sizeof(*this)); CopyToClipboardLastTime = -FLT_MAX; }
+      |                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1850:38: note: explicitly cast the pointer to silence this warning
+ 1850 |     ImGuiIDStackTool()      { memset(this, 0, sizeof(*this)); CopyToClipboardLastTime = -FLT_MAX; }
+      |                                      ^
+      |                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2850:42: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiTable' [-Wnontrivial-memcall]
+ 2850 |     ImGuiTable()                { memset(this, 0, sizeof(*this)); LastFrameActive = -1; }
+      |                                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2850:42: note: explicitly cast the pointer to silence this warning
+ 2850 |     ImGuiTable()                { memset(this, 0, sizeof(*this)); LastFrameActive = -1; }
+      |                                          ^
+      |                                          (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2876:42: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiTableTempData' [-Wnontrivial-memcall]
+ 2876 |     ImGuiTableTempData()        { memset(this, 0, sizeof(*this)); LastTimeActive = -1.0f; }
+      |                                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2876:42: note: explicitly cast the pointer to silence this warning
+ 2876 |     ImGuiTableTempData()        { memset(this, 0, sizeof(*this)); LastTimeActive = -1.0f; }
+      |                                          ^
+      |                                          (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:1267:12: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiIO' [-Wnontrivial-memcall]
+ 1267 |     memset(this, 0, sizeof(*this));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:1267:12: note: explicitly cast the pointer to silence this warning
+ 1267 |     memset(this, 0, sizeof(*this));
+      |            ^
+      |            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:2791:12: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiListClipper' [-Wnontrivial-memcall]
+ 2791 |     memset(this, 0, sizeof(*this));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:2791:12: note: explicitly cast the pointer to silence this warning
+ 2791 |     memset(this, 0, sizeof(*this));
+      |            ^
+      |            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:3724:12: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiWindow' [-Wnontrivial-memcall]
+ 3724 |     memset(this, 0, sizeof(*this));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:3724:12: note: explicitly cast the pointer to silence this warning
+ 3724 |     memset(this, 0, sizeof(*this));
+      |            ^
+      |            (void*)
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:958:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1940:189: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImGuiListClipperData' [-Wnontrivial-memcall]
+ 1940 |     inline void         resize(int new_size, const T& v)    { if (new_size > Capacity) reserve(_grow_capacity(new_size)); if (new_size > Size) for (int n = Size; n < new_size; n++) memcpy(&Data[n], &v, sizeof(v)); Size = new_size; }
+      |                                                                                                                                                                                             ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:2820:27: note: in instantiation of member function 'ImVector<ImGuiListClipperData>::resize' requested here
+ 2820 |         g.ClipperTempData.resize(g.ClipperTempDataStacked, ImGuiListClipperData());
+      |                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1940:189: note: explicitly cast the pointer to silence this warning
+ 1940 |     inline void         resize(int new_size, const T& v)    { if (new_size > Capacity) reserve(_grow_capacity(new_size)); if (new_size > Size) for (int n = Size; n < new_size; n++) memcpy(&Data[n], &v, sizeof(v)); Size = new_size; }
+      |                                                                                                                                                                                             ^
+      |                                                                                                                                                                                             (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImGuiListClipperData' [-Wnontrivial-memcall]
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1940:88: note: in instantiation of member function 'ImVector<ImGuiListClipperData>::reserve' requested here
+ 1940 |     inline void         resize(int new_size, const T& v)    { if (new_size > Capacity) reserve(_grow_capacity(new_size)); if (new_size > Size) for (int n = Size; n < new_size; n++) memcpy(&Data[n], &v, sizeof(v)); Size = new_size; }
+      |                                                                                        ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.cpp:2820:27: note: in instantiation of member function 'ImVector<ImGuiListClipperData>::resize' requested here
+ 2820 |         g.ClipperTempData.resize(g.ClipperTempDataStacked, ImGuiListClipperData());
+      |                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: note: explicitly cast the pointer to silence this warning
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+      |                                                                                                                                                                                      (void*)
+15 warnings generated.
+[ 64%] Building CXX object CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_draw.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_draw.cpp.o -MF CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_draw.cpp.o.d -o CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_draw.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:33:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSplitter' [-Wnontrivial-memcall]
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: note: explicitly cast the pointer to silence this warning
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+      |                                           (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawList' [-Wnontrivial-memcall]
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: note: explicitly cast the pointer to silence this warning
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+      |                                                            (void*)
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:35:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:793:54: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawDataBuilder' [-Wnontrivial-memcall]
+  793 |     ImDrawDataBuilder()                     { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:793:54: note: explicitly cast the pointer to silence this warning
+  793 |     ImDrawDataBuilder()                     { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+      |                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1097:50: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiInputTextDeactivatedState' [-Wnontrivial-memcall]
+ 1097 |     ImGuiInputTextDeactivatedState()    { memset(this, 0, sizeof(*this)); }
+      |                                                  ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1097:50: note: explicitly cast the pointer to silence this warning
+ 1097 |     ImGuiInputTextDeactivatedState()    { memset(this, 0, sizeof(*this)); }
+      |                                                  ^
+      |                                                  (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1120:54: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiInputTextState' [-Wnontrivial-memcall]
+ 1120 |     ImGuiInputTextState()                   { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1120:54: note: explicitly cast the pointer to silence this warning
+ 1120 |     ImGuiInputTextState()                   { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+      |                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1487:46: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiListClipperData' [-Wnontrivial-memcall]
+ 1487 |     ImGuiListClipperData()          { memset(this, 0, sizeof(*this)); }
+      |                                              ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1487:46: note: explicitly cast the pointer to silence this warning
+ 1487 |     ImGuiListClipperData()          { memset(this, 0, sizeof(*this)); }
+      |                                              ^
+      |                                              (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1662:34: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiOldColumns' [-Wnontrivial-memcall]
+ 1662 |     ImGuiOldColumns()   { memset(this, 0, sizeof(*this)); }
+      |                                  ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1662:34: note: explicitly cast the pointer to silence this warning
+ 1662 |     ImGuiOldColumns()   { memset(this, 0, sizeof(*this)); }
+      |                                  ^
+      |                                  (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1850:38: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiIDStackTool' [-Wnontrivial-memcall]
+ 1850 |     ImGuiIDStackTool()      { memset(this, 0, sizeof(*this)); CopyToClipboardLastTime = -FLT_MAX; }
+      |                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1850:38: note: explicitly cast the pointer to silence this warning
+ 1850 |     ImGuiIDStackTool()      { memset(this, 0, sizeof(*this)); CopyToClipboardLastTime = -FLT_MAX; }
+      |                                      ^
+      |                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2850:42: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiTable' [-Wnontrivial-memcall]
+ 2850 |     ImGuiTable()                { memset(this, 0, sizeof(*this)); LastFrameActive = -1; }
+      |                                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2850:42: note: explicitly cast the pointer to silence this warning
+ 2850 |     ImGuiTable()                { memset(this, 0, sizeof(*this)); LastFrameActive = -1; }
+      |                                          ^
+      |                                          (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2876:42: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiTableTempData' [-Wnontrivial-memcall]
+ 2876 |     ImGuiTableTempData()        { memset(this, 0, sizeof(*this)); LastTimeActive = -1.0f; }
+      |                                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2876:42: note: explicitly cast the pointer to silence this warning
+ 2876 |     ImGuiTableTempData()        { memset(this, 0, sizeof(*this)); LastTimeActive = -1.0f; }
+      |                                          ^
+      |                                          (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:361:12: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSharedData' [-Wnontrivial-memcall]
+  361 |     memset(this, 0, sizeof(*this));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:361:12: note: explicitly cast the pointer to silence this warning
+  361 |     memset(this, 0, sizeof(*this));
+      |            ^
+      |            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1715:20: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawChannel' [-Wnontrivial-memcall]
+ 1715 |             memset(&_Channels[i], 0, sizeof(_Channels[i]));  // Current channel is a copy of CmdBuffer/IdxBuffer, don't destruct again
+      |                    ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1715:20: note: explicitly cast the pointer to silence this warning
+ 1715 |             memset(&_Channels[i], 0, sizeof(_Channels[i]));  // Current channel is a copy of CmdBuffer/IdxBuffer, don't destruct again
+      |                    ^
+      |                    (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1739:12: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawChannel' [-Wnontrivial-memcall]
+ 1739 |     memset(&_Channels[0], 0, sizeof(ImDrawChannel));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1739:12: note: explicitly cast the pointer to silence this warning
+ 1739 |     memset(&_Channels[0], 0, sizeof(ImDrawChannel));
+      |            ^
+      |            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1832:12: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImVector<ImDrawCmd>' [-Wnontrivial-memcall]
+ 1832 |     memcpy(&_Channels.Data[_Current]._CmdBuffer, &draw_list->CmdBuffer, sizeof(draw_list->CmdBuffer));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1832:12: note: explicitly cast the pointer to silence this warning
+ 1832 |     memcpy(&_Channels.Data[_Current]._CmdBuffer, &draw_list->CmdBuffer, sizeof(draw_list->CmdBuffer));
+      |            ^
+      |            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1833:12: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImVector<ImDrawIdx>' (aka 'ImVector<unsigned short>') [-Wnontrivial-memcall]
+ 1833 |     memcpy(&_Channels.Data[_Current]._IdxBuffer, &draw_list->IdxBuffer, sizeof(draw_list->IdxBuffer));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1833:12: note: explicitly cast the pointer to silence this warning
+ 1833 |     memcpy(&_Channels.Data[_Current]._IdxBuffer, &draw_list->IdxBuffer, sizeof(draw_list->IdxBuffer));
+      |            ^
+      |            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1835:12: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImVector<ImDrawCmd>' [-Wnontrivial-memcall]
+ 1835 |     memcpy(&draw_list->CmdBuffer, &_Channels.Data[idx]._CmdBuffer, sizeof(draw_list->CmdBuffer));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1835:12: note: explicitly cast the pointer to silence this warning
+ 1835 |     memcpy(&draw_list->CmdBuffer, &_Channels.Data[idx]._CmdBuffer, sizeof(draw_list->CmdBuffer));
+      |            ^
+      |            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1836:12: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImVector<ImDrawIdx>' (aka 'ImVector<unsigned short>') [-Wnontrivial-memcall]
+ 1836 |     memcpy(&draw_list->IdxBuffer, &_Channels.Data[idx]._IdxBuffer, sizeof(draw_list->IdxBuffer));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1836:12: note: explicitly cast the pointer to silence this warning
+ 1836 |     memcpy(&draw_list->IdxBuffer, &_Channels.Data[idx]._IdxBuffer, sizeof(draw_list->IdxBuffer));
+      |            ^
+      |            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:2072:12: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImFontAtlas' [-Wnontrivial-memcall]
+ 2072 |     memset(this, 0, sizeof(*this));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:2072:12: note: explicitly cast the pointer to silence this warning
+ 2072 |     memset(this, 0, sizeof(*this));
+      |            ^
+      |            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:2461:26: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImFontBuildSrcData' [-Wnontrivial-memcall]
+ 2461 |     memset(src_tmp_array.Data, 0, (size_t)src_tmp_array.size_in_bytes());
+      |                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:2461:26: note: explicitly cast the pointer to silence this warning
+ 2461 |     memset(src_tmp_array.Data, 0, (size_t)src_tmp_array.size_in_bytes());
+      |                          ^
+      |            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:2462:26: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImFontBuildDstData' [-Wnontrivial-memcall]
+ 2462 |     memset(dst_tmp_array.Data, 0, (size_t)dst_tmp_array.size_in_bytes());
+      |                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:2462:26: note: explicitly cast the pointer to silence this warning
+ 2462 |     memset(dst_tmp_array.Data, 0, (size_t)dst_tmp_array.size_in_bytes());
+      |                          ^
+      |            (void*)
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:33:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImDrawChannel' [-Wnontrivial-memcall]
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:1731:19: note: in instantiation of member function 'ImVector<ImDrawChannel>::reserve' requested here
+ 1731 |         _Channels.reserve(channels_count); // Avoid over reserving since this is likely to stay stable
+      |                   ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: note: explicitly cast the pointer to silence this warning
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+      |                                                                                                                                                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImFontBuildSrcData' [-Wnontrivial-memcall]
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1939:88: note: in instantiation of member function 'ImVector<ImFontBuildSrcData>::reserve' requested here
+ 1939 |     inline void         resize(int new_size)                { if (new_size > Capacity) reserve(_grow_capacity(new_size)); Size = new_size; }
+      |                                                                                        ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:2459:19: note: in instantiation of member function 'ImVector<ImFontBuildSrcData>::resize' requested here
+ 2459 |     src_tmp_array.resize(atlas->ConfigData.Size);
+      |                   ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: note: explicitly cast the pointer to silence this warning
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+      |                                                                                                                                                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImFontBuildDstData' [-Wnontrivial-memcall]
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1939:88: note: in instantiation of member function 'ImVector<ImFontBuildDstData>::reserve' requested here
+ 1939 |     inline void         resize(int new_size)                { if (new_size > Capacity) reserve(_grow_capacity(new_size)); Size = new_size; }
+      |                                                                                        ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_draw.cpp:2460:19: note: in instantiation of member function 'ImVector<ImFontBuildDstData>::resize' requested here
+ 2460 |     dst_tmp_array.resize(atlas->Fonts.Size);
+      |                   ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: note: explicitly cast the pointer to silence this warning
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+      |                                                                                                                                                                                      (void*)
+23 warnings generated.
+[ 70%] Building CXX object CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_widgets.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_widgets.cpp.o -MF CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_widgets.cpp.o.d -o CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_widgets.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_widgets.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_widgets.cpp:41:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSplitter' [-Wnontrivial-memcall]
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: note: explicitly cast the pointer to silence this warning
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+      |                                           (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawList' [-Wnontrivial-memcall]
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: note: explicitly cast the pointer to silence this warning
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+      |                                                            (void*)
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_widgets.cpp:43:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:793:54: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawDataBuilder' [-Wnontrivial-memcall]
+  793 |     ImDrawDataBuilder()                     { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:793:54: note: explicitly cast the pointer to silence this warning
+  793 |     ImDrawDataBuilder()                     { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+      |                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1097:50: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiInputTextDeactivatedState' [-Wnontrivial-memcall]
+ 1097 |     ImGuiInputTextDeactivatedState()    { memset(this, 0, sizeof(*this)); }
+      |                                                  ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1097:50: note: explicitly cast the pointer to silence this warning
+ 1097 |     ImGuiInputTextDeactivatedState()    { memset(this, 0, sizeof(*this)); }
+      |                                                  ^
+      |                                                  (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1120:54: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiInputTextState' [-Wnontrivial-memcall]
+ 1120 |     ImGuiInputTextState()                   { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1120:54: note: explicitly cast the pointer to silence this warning
+ 1120 |     ImGuiInputTextState()                   { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+      |                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1487:46: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiListClipperData' [-Wnontrivial-memcall]
+ 1487 |     ImGuiListClipperData()          { memset(this, 0, sizeof(*this)); }
+      |                                              ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1487:46: note: explicitly cast the pointer to silence this warning
+ 1487 |     ImGuiListClipperData()          { memset(this, 0, sizeof(*this)); }
+      |                                              ^
+      |                                              (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1662:34: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiOldColumns' [-Wnontrivial-memcall]
+ 1662 |     ImGuiOldColumns()   { memset(this, 0, sizeof(*this)); }
+      |                                  ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1662:34: note: explicitly cast the pointer to silence this warning
+ 1662 |     ImGuiOldColumns()   { memset(this, 0, sizeof(*this)); }
+      |                                  ^
+      |                                  (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1850:38: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiIDStackTool' [-Wnontrivial-memcall]
+ 1850 |     ImGuiIDStackTool()      { memset(this, 0, sizeof(*this)); CopyToClipboardLastTime = -FLT_MAX; }
+      |                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1850:38: note: explicitly cast the pointer to silence this warning
+ 1850 |     ImGuiIDStackTool()      { memset(this, 0, sizeof(*this)); CopyToClipboardLastTime = -FLT_MAX; }
+      |                                      ^
+      |                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2850:42: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiTable' [-Wnontrivial-memcall]
+ 2850 |     ImGuiTable()                { memset(this, 0, sizeof(*this)); LastFrameActive = -1; }
+      |                                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2850:42: note: explicitly cast the pointer to silence this warning
+ 2850 |     ImGuiTable()                { memset(this, 0, sizeof(*this)); LastFrameActive = -1; }
+      |                                          ^
+      |                                          (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2876:42: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiTableTempData' [-Wnontrivial-memcall]
+ 2876 |     ImGuiTableTempData()        { memset(this, 0, sizeof(*this)); LastTimeActive = -1.0f; }
+      |                                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2876:42: note: explicitly cast the pointer to silence this warning
+ 2876 |     ImGuiTableTempData()        { memset(this, 0, sizeof(*this)); LastTimeActive = -1.0f; }
+      |                                          ^
+      |                                          (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_widgets.cpp:7764:12: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiTabBar' [-Wnontrivial-memcall]
+ 7764 |     memset(this, 0, sizeof(*this));
+      |            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_widgets.cpp:7764:12: note: explicitly cast the pointer to silence this warning
+ 7764 |     memset(this, 0, sizeof(*this));
+      |            ^
+      |            (void*)
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_widgets.cpp:41:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImGuiTabBar' [-Wnontrivial-memcall]
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1939:88: note: in instantiation of member function 'ImVector<ImGuiTabBar>::reserve' requested here
+ 1939 |     inline void         resize(int new_size)                { if (new_size > Capacity) reserve(_grow_capacity(new_size)); Size = new_size; }
+      |                                                                                        ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:681:101: note: in instantiation of member function 'ImVector<ImGuiTabBar>::resize' requested here
+  681 |     T*          Add()                               { int idx = FreeIdx; if (idx == Buf.Size) { Buf.resize(Buf.Size + 1); FreeIdx++; } else { FreeIdx = *(int*)&Buf[idx]; } IM_PLACEMENT_NEW(&Buf[idx]) T(); AliveCount++; return &Buf[idx]; }
+      |                                                                                                     ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:678:156: note: in instantiation of member function 'ImPool<ImGuiTabBar>::Add' requested here
+  678 |     T*          GetOrAddByKey(ImGuiID key)          { int* p_idx = Map.GetIntRef(key, -1); if (*p_idx != -1) return &Buf[*p_idx]; *p_idx = FreeIdx; return Add(); }
+      |                                                                                                                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_widgets.cpp:7814:38: note: in instantiation of member function 'ImPool<ImGuiTabBar>::GetOrAddByKey' requested here
+ 7814 |     ImGuiTabBar* tab_bar = g.TabBars.GetOrAddByKey(id);
+      |                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: note: explicitly cast the pointer to silence this warning
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+      |                                                                                                                                                                                      (void*)
+12 warnings generated.
+[ 76%] Building CXX object CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_tables.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_tables.cpp.o -MF CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_tables.cpp.o.d -o CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_tables.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:197:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSplitter' [-Wnontrivial-memcall]
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: note: explicitly cast the pointer to silence this warning
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+      |                                           (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawList' [-Wnontrivial-memcall]
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: note: explicitly cast the pointer to silence this warning
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+      |                                                            (void*)
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:199:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:793:54: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawDataBuilder' [-Wnontrivial-memcall]
+  793 |     ImDrawDataBuilder()                     { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:793:54: note: explicitly cast the pointer to silence this warning
+  793 |     ImDrawDataBuilder()                     { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+      |                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1097:50: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiInputTextDeactivatedState' [-Wnontrivial-memcall]
+ 1097 |     ImGuiInputTextDeactivatedState()    { memset(this, 0, sizeof(*this)); }
+      |                                                  ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1097:50: note: explicitly cast the pointer to silence this warning
+ 1097 |     ImGuiInputTextDeactivatedState()    { memset(this, 0, sizeof(*this)); }
+      |                                                  ^
+      |                                                  (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1120:54: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiInputTextState' [-Wnontrivial-memcall]
+ 1120 |     ImGuiInputTextState()                   { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1120:54: note: explicitly cast the pointer to silence this warning
+ 1120 |     ImGuiInputTextState()                   { memset(this, 0, sizeof(*this)); }
+      |                                                      ^
+      |                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1487:46: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiListClipperData' [-Wnontrivial-memcall]
+ 1487 |     ImGuiListClipperData()          { memset(this, 0, sizeof(*this)); }
+      |                                              ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1487:46: note: explicitly cast the pointer to silence this warning
+ 1487 |     ImGuiListClipperData()          { memset(this, 0, sizeof(*this)); }
+      |                                              ^
+      |                                              (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1662:34: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiOldColumns' [-Wnontrivial-memcall]
+ 1662 |     ImGuiOldColumns()   { memset(this, 0, sizeof(*this)); }
+      |                                  ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1662:34: note: explicitly cast the pointer to silence this warning
+ 1662 |     ImGuiOldColumns()   { memset(this, 0, sizeof(*this)); }
+      |                                  ^
+      |                                  (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1850:38: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiIDStackTool' [-Wnontrivial-memcall]
+ 1850 |     ImGuiIDStackTool()      { memset(this, 0, sizeof(*this)); CopyToClipboardLastTime = -FLT_MAX; }
+      |                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:1850:38: note: explicitly cast the pointer to silence this warning
+ 1850 |     ImGuiIDStackTool()      { memset(this, 0, sizeof(*this)); CopyToClipboardLastTime = -FLT_MAX; }
+      |                                      ^
+      |                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2850:42: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiTable' [-Wnontrivial-memcall]
+ 2850 |     ImGuiTable()                { memset(this, 0, sizeof(*this)); LastFrameActive = -1; }
+      |                                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2850:42: note: explicitly cast the pointer to silence this warning
+ 2850 |     ImGuiTable()                { memset(this, 0, sizeof(*this)); LastFrameActive = -1; }
+      |                                          ^
+      |                                          (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2876:42: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImGuiTableTempData' [-Wnontrivial-memcall]
+ 2876 |     ImGuiTableTempData()        { memset(this, 0, sizeof(*this)); LastTimeActive = -1.0f; }
+      |                                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:2876:42: note: explicitly cast the pointer to silence this warning
+ 2876 |     ImGuiTableTempData()        { memset(this, 0, sizeof(*this)); LastTimeActive = -1.0f; }
+      |                                          ^
+      |                                          (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:2610:35: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImDrawChannel' [-Wnontrivial-memcall]
+ 2610 |                     memcpy(dst_tmp++, channel, sizeof(ImDrawChannel));
+      |                                   ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:2610:35: note: explicitly cast the pointer to silence this warning
+ 2610 |                     memcpy(dst_tmp++, channel, sizeof(ImDrawChannel));
+      |                                   ^
+      |                            (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:2616:31: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImDrawChannel' [-Wnontrivial-memcall]
+ 2616 |                 memcpy(dst_tmp++, &splitter->_Channels[table->Bg2DrawChannelUnfrozen], sizeof(ImDrawChannel));
+      |                               ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:2616:31: note: explicitly cast the pointer to silence this warning
+ 2616 |                 memcpy(dst_tmp++, &splitter->_Channels[table->Bg2DrawChannelUnfrozen], sizeof(ImDrawChannel));
+      |                               ^
+      |                        (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:2625:27: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImDrawChannel' [-Wnontrivial-memcall]
+ 2625 |             memcpy(dst_tmp++, channel, sizeof(ImDrawChannel));
+      |                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:2625:27: note: explicitly cast the pointer to silence this warning
+ 2625 |             memcpy(dst_tmp++, channel, sizeof(ImDrawChannel));
+      |                           ^
+      |                    (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:2629:41: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImDrawChannel' [-Wnontrivial-memcall]
+ 2629 |         memcpy(splitter->_Channels.Data + LEADING_DRAW_CHANNELS, g.DrawChannelsTempMergeBuffer.Data, (splitter->_Count - LEADING_DRAW_CHANNELS) * sizeof(ImDrawChannel));
+      |                                         ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:2629:41: note: explicitly cast the pointer to silence this warning
+ 2629 |         memcpy(splitter->_Channels.Data + LEADING_DRAW_CHANNELS, g.DrawChannelsTempMergeBuffer.Data, (splitter->_Count - LEADING_DRAW_CHANNELS) * sizeof(ImDrawChannel));
+      |                                         ^
+      |                (void*)
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:197:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImGuiTable' [-Wnontrivial-memcall]
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1939:88: note: in instantiation of member function 'ImVector<ImGuiTable>::reserve' requested here
+ 1939 |     inline void         resize(int new_size)                { if (new_size > Capacity) reserve(_grow_capacity(new_size)); Size = new_size; }
+      |                                                                                        ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:681:101: note: in instantiation of member function 'ImVector<ImGuiTable>::resize' requested here
+  681 |     T*          Add()                               { int idx = FreeIdx; if (idx == Buf.Size) { Buf.resize(Buf.Size + 1); FreeIdx++; } else { FreeIdx = *(int*)&Buf[idx]; } IM_PLACEMENT_NEW(&Buf[idx]) T(); AliveCount++; return &Buf[idx]; }
+      |                                                                                                     ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_internal.h:678:156: note: in instantiation of member function 'ImPool<ImGuiTable>::Add' requested here
+  678 |     T*          GetOrAddByKey(ImGuiID key)          { int* p_idx = Map.GetIntRef(key, -1); if (*p_idx != -1) return &Buf[*p_idx]; *p_idx = FreeIdx; return Add(); }
+      |                                                                                                                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:337:34: note: in instantiation of member function 'ImPool<ImGuiTable>::GetOrAddByKey' requested here
+  337 |     ImGuiTable* table = g.Tables.GetOrAddByKey(id);
+      |                                  ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: note: explicitly cast the pointer to silence this warning
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+      |                                                                                                                                                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1940:189: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImGuiTableTempData' [-Wnontrivial-memcall]
+ 1940 |     inline void         resize(int new_size, const T& v)    { if (new_size > Capacity) reserve(_grow_capacity(new_size)); if (new_size > Size) for (int n = Size; n < new_size; n++) memcpy(&Data[n], &v, sizeof(v)); Size = new_size; }
+      |                                                                                                                                                                                             ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:343:26: note: in instantiation of member function 'ImVector<ImGuiTableTempData>::resize' requested here
+  343 |         g.TablesTempData.resize(g.TablesTempDataStacked, ImGuiTableTempData());
+      |                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1940:189: note: explicitly cast the pointer to silence this warning
+ 1940 |     inline void         resize(int new_size, const T& v)    { if (new_size > Capacity) reserve(_grow_capacity(new_size)); if (new_size > Size) for (int n = Size; n < new_size; n++) memcpy(&Data[n], &v, sizeof(v)); Size = new_size; }
+      |                                                                                                                                                                                             ^
+      |                                                                                                                                                                                             (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImGuiTableTempData' [-Wnontrivial-memcall]
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1940:88: note: in instantiation of member function 'ImVector<ImGuiTableTempData>::reserve' requested here
+ 1940 |     inline void         resize(int new_size, const T& v)    { if (new_size > Capacity) reserve(_grow_capacity(new_size)); if (new_size > Size) for (int n = Size; n < new_size; n++) memcpy(&Data[n], &v, sizeof(v)); Size = new_size; }
+      |                                                                                        ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:343:26: note: in instantiation of member function 'ImVector<ImGuiTableTempData>::resize' requested here
+  343 |         g.TablesTempData.resize(g.TablesTempDataStacked, ImGuiTableTempData());
+      |                          ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: note: explicitly cast the pointer to silence this warning
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+      |                                                                                                                                                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImDrawChannel' [-Wnontrivial-memcall]
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1939:88: note: in instantiation of member function 'ImVector<ImDrawChannel>::reserve' requested here
+ 1939 |     inline void         resize(int new_size)                { if (new_size > Capacity) reserve(_grow_capacity(new_size)); Size = new_size; }
+      |                                                                                        ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:2563:39: note: in instantiation of member function 'ImVector<ImDrawChannel>::resize' requested here
+ 2563 |         g.DrawChannelsTempMergeBuffer.resize(splitter->_Count - LEADING_DRAW_CHANNELS); // Use shared temporary storage so the allocation gets amortized
+      |                                       ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: note: explicitly cast the pointer to silence this warning
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+      |                                                                                                                                                                                      (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1946:127: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImGuiOldColumns' [-Wnontrivial-memcall]
+ 1946 |     inline void         push_back(const T& v)               { if (Size == Capacity) reserve(_grow_capacity(Size + 1)); memcpy(&Data[Size], &v, sizeof(v)); Size++; }
+      |                                                                                                                               ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:4103:28: note: in instantiation of member function 'ImVector<ImGuiOldColumns>::push_back' requested here
+ 4103 |     window->ColumnsStorage.push_back(ImGuiOldColumns());
+      |                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1946:127: note: explicitly cast the pointer to silence this warning
+ 1946 |     inline void         push_back(const T& v)               { if (Size == Capacity) reserve(_grow_capacity(Size + 1)); memcpy(&Data[Size], &v, sizeof(v)); Size++; }
+      |                                                                                                                               ^
+      |                                                                                                                               (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: warning: first argument in call to 'memcpy' is a pointer to non-trivially copyable type 'ImGuiOldColumns' [-Wnontrivial-memcall]
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1946:85: note: in instantiation of member function 'ImVector<ImGuiOldColumns>::reserve' requested here
+ 1946 |     inline void         push_back(const T& v)               { if (Size == Capacity) reserve(_grow_capacity(Size + 1)); memcpy(&Data[Size], &v, sizeof(v)); Size++; }
+      |                                                                                     ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_tables.cpp:4103:28: note: in instantiation of member function 'ImVector<ImGuiOldColumns>::push_back' requested here
+ 4103 |     window->ColumnsStorage.push_back(ImGuiOldColumns());
+      |                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:1942:182: note: explicitly cast the pointer to silence this warning
+ 1942 |     inline void         reserve(int new_capacity)           { if (new_capacity <= Capacity) return; T* new_data = (T*)IM_ALLOC((size_t)new_capacity * sizeof(T)); if (Data) { memcpy(new_data, Data, (size_t)Size * sizeof(T)); IM_FREE(Data); } Data = new_data; Capacity = new_capacity; }
+      |                                                                                                                                                                                      ^
+      |                                                                                                                                                                                      (void*)
+20 warnings generated.
+[ 82%] Building CXX object CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_demo.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_demo.cpp.o -MF CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_demo.cpp.o.d -o CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_demo.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_demo.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui_demo.cpp:96:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSplitter' [-Wnontrivial-memcall]
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: note: explicitly cast the pointer to silence this warning
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+      |                                           (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawList' [-Wnontrivial-memcall]
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: note: explicitly cast the pointer to silence this warning
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+      |                                                            (void*)
+2 warnings generated.
+[ 88%] Building CXX object CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_glfw.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_glfw.cpp.o -MF CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_glfw.cpp.o.d -o CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_glfw.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends/imgui_impl_glfw.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends/imgui_impl_glfw.cpp:72:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSplitter' [-Wnontrivial-memcall]
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: note: explicitly cast the pointer to silence this warning
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+      |                                           (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawList' [-Wnontrivial-memcall]
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: note: explicitly cast the pointer to silence this warning
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+      |                                                            (void*)
+2 warnings generated.
+[ 94%] Building CXX object CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o
+/usr/bin/clang++ -DGTEST_HAS_STD_WSTRING=0 -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src -I/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends -I/usr/local/Cellar/glfw/3.4/include -I/usr/local/Cellar/glew/2.3.1/include -isystem /usr/local/Cellar/opencv/4.13.0_12/include/opencv4 -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest/include -isystem /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/googletest-src/googletest -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks -D_LIBCPP_ABI_NAMESPACE=__1 -std=c++17 -MD -MT CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o -MF CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o.d -o CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o -c /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends/imgui_impl_opengl3.cpp
+In file included from /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/backends/imgui_impl_opengl3.cpp:112:
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawListSplitter' [-Wnontrivial-memcall]
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2649:43: note: explicitly cast the pointer to silence this warning
+ 2649 |     inline ImDrawListSplitter()  { memset(this, 0, sizeof(*this)); }
+      |                                           ^
+      |                                           (void*)
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: warning: first argument in call to 'memset' is a pointer to non-trivially copyable type 'ImDrawList' [-Wnontrivial-memcall]
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build/_deps/imgui-src/imgui.h:2720:60: note: explicitly cast the pointer to silence this warning
+ 2720 |     ImDrawList(ImDrawListSharedData* shared_data) { memset(this, 0, sizeof(*this)); _Data = shared_data; }
+      |                                                            ^
+      |                                                            (void*)
+2 warnings generated.
+[100%] Linking CXX executable unit_tests
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/unit_tests.dir/link.txt --verbose=1
+Undefined symbols for architecture x86_64:
+  "testing::internal::MakeAndRegisterTestInfo(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>, char const*, char const*, char const*, testing::internal::CodeLocation, void const*, void (*)(), void (*)(), testing::internal::TestFactoryBase*)", referenced from:
+      ___cxx_global_var_init in unit_tests.cpp.o
+      ___cxx_global_var_init.6 in unit_tests.cpp.o
+      ___cxx_global_var_init.13 in unit_tests.cpp.o
+      ___cxx_global_var_init.17 in unit_tests.cpp.o
+      ___cxx_global_var_init.24 in unit_tests.cpp.o
+      ___cxx_global_var_init.27 in unit_tests.cpp.o
+      ___cxx_global_var_init.30 in unit_tests.cpp.o
+      ...
+ld: symbol(s) not found for architecture x86_64
+clang++: error: linker command failed with exit code 1 (use -v to see invocation)
+/usr/bin/clang++ -D_LIBCPP_ABI_NAMESPACE=__1 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/unit_tests.dir/tests/unit_tests.cpp.o CMakeFiles/unit_tests.dir/src/Application.cpp.o CMakeFiles/unit_tests.dir/src/CameraModule.cpp.o CMakeFiles/unit_tests.dir/src/VideoRenderer.cpp.o CMakeFiles/unit_tests.dir/src/HUD.cpp.o "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui.cpp.o" "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_draw.cpp.o" "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_widgets.cpp.o" "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_tables.cpp.o" "CMakeFiles/unit_tests.dir/_deps/imgui-src/imgui_demo.cpp.o" "CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_glfw.cpp.o" "CMakeFiles/unit_tests.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o" -o unit_tests  -Wl,-rpath,/usr/local/lib lib/libgtest_main.a lib/libgtest.a /usr/local/lib/libopencv_gapi.4.13.0.dylib /usr/local/lib/libopencv_stitching.4.13.0.dylib /usr/local/lib/libopencv_alphamat.4.13.0.dylib /usr/local/lib/libopencv_aruco.4.13.0.dylib /usr/local/lib/libopencv_bgsegm.4.13.0.dylib /usr/local/lib/libopencv_bioinspired.4.13.0.dylib /usr/local/lib/libopencv_ccalib.4.13.0.dylib /usr/local/lib/libopencv_dnn_objdetect.4.13.0.dylib /usr/local/lib/libopencv_dnn_superres.4.13.0.dylib /usr/local/lib/libopencv_dpm.4.13.0.dylib /usr/local/lib/libopencv_face.4.13.0.dylib /usr/local/lib/libopencv_freetype.4.13.0.dylib /usr/local/lib/libopencv_fuzzy.4.13.0.dylib /usr/local/lib/libopencv_hfs.4.13.0.dylib /usr/local/lib/libopencv_img_hash.4.13.0.dylib /usr/local/lib/libopencv_intensity_transform.4.13.0.dylib /usr/local/lib/libopencv_line_descriptor.4.13.0.dylib /usr/local/lib/libopencv_mcc.4.13.0.dylib /usr/local/lib/libopencv_quality.4.13.0.dylib /usr/local/lib/libopencv_rapid.4.13.0.dylib /usr/local/lib/libopencv_reg.4.13.0.dylib /usr/local/lib/libopencv_rgbd.4.13.0.dylib /usr/local/lib/libopencv_saliency.4.13.0.dylib /usr/local/lib/libopencv_sfm.4.13.0.dylib /usr/local/lib/libopencv_signal.4.13.0.dylib /usr/local/lib/libopencv_stereo.4.13.0.dylib /usr/local/lib/libopencv_structured_light.4.13.0.dylib /usr/local/lib/libopencv_superres.4.13.0.dylib /usr/local/lib/libopencv_surface_matching.4.13.0.dylib /usr/local/lib/libopencv_tracking.4.13.0.dylib /usr/local/lib/libopencv_videostab.4.13.0.dylib /usr/local/lib/libopencv_viz.4.13.0.dylib /usr/local/lib/libopencv_wechat_qrcode.4.13.0.dylib /usr/local/lib/libopencv_xfeatures2d.4.13.0.dylib /usr/local/lib/libopencv_xobjdetect.4.13.0.dylib /usr/local/lib/libopencv_xphoto.4.13.0.dylib -framework OpenGL -lglfw -lGLEW /usr/local/lib/libopencv_shape.4.13.0.dylib /usr/local/lib/libopencv_highgui.4.13.0.dylib /usr/local/lib/libopencv_datasets.4.13.0.dylib /usr/local/lib/libopencv_plot.4.13.0.dylib /usr/local/lib/libopencv_text.4.13.0.dylib /usr/local/lib/libopencv_ml.4.13.0.dylib /usr/local/lib/libopencv_phase_unwrapping.4.13.0.dylib /usr/local/lib/libopencv_optflow.4.13.0.dylib /usr/local/lib/libopencv_ximgproc.4.13.0.dylib /usr/local/lib/libopencv_video.4.13.0.dylib /usr/local/lib/libopencv_videoio.4.13.0.dylib /usr/local/lib/libopencv_imgcodecs.4.13.0.dylib /usr/local/lib/libopencv_objdetect.4.13.0.dylib /usr/local/lib/libopencv_calib3d.4.13.0.dylib /usr/local/lib/libopencv_dnn.4.13.0.dylib /usr/local/lib/libopencv_features2d.4.13.0.dylib /usr/local/lib/libopencv_flann.4.13.0.dylib /usr/local/lib/libopencv_photo.4.13.0.dylib /usr/local/lib/libopencv_imgproc.4.13.0.dylib /usr/local/lib/libopencv_core.4.13.0.dylib
+make[3]: *** [unit_tests] Error 1
+make[2]: *** [CMakeFiles/unit_tests.dir/all] Error 2
+make[1]: *** [CMakeFiles/unit_tests.dir/rule] Error 2
+make: *** [unit_tests] Error 2
+
