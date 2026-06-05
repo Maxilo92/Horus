@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.10.14] - 2026-06-05
+
+### Added
+
+- **Persistente Einstellungen**: Die wichtigsten App-Settings werden jetzt beim Start aus `~/.tactileviewer/settings.ini` geladen und bei Änderungen automatisch gespeichert.
+- **Menüleisten-Presets**: Eine neue `Settings`-Menüleiste bietet jetzt `Standard` sowie die Presets `Performance`, `Balanced`, `Precision` und `Low Light`.
+- **Schneller Reset auf Standard**: Der Standardzustand kann jetzt direkt aus der Menüleiste oder über den Reset in den Settings zurückgesetzt werden.
+
+## [1.10.13] - 2026-06-05
+
+### Changed
+
+- **Dev Console trennt jetzt Capture, Tracking und Zoom**: Die System-Metrik zeigt nun explizit die Capture-Auflösung der Kamera, die Tracking-Auflösung des HD-Pipelineschritts und die aktuelle Zoom-Auflösung des aktiven Ausschnitts.
+- **Zoom-Auflösung an 4K-Status gekoppelt**: Die Dev Console zeigt jetzt zusätzlich die Zoom-Quelle getrennt vom Zoom-Crop; bei deaktiviertem 4K-Zoom fällt die Quelle auf die Tracking-Auflösung zurück.
+
+## [1.10.12] - 2026-06-05
+
+### Changed
+
+- **Target Zoom Default auf neutral gesetzt**: `targetZoomMagnification` startet jetzt bei `1.0f`, sodass der Target-Zoom standardmäßig ohne zusätzliche digitale Vergrößerung arbeitet.
+- **Pixel-Target-Crop konsistent editierbar**: Der Rechteck-Ausschnitt des Pixel Targets wird jetzt als eigene, synchronisierte Rect-Quelle behandelt und beim Drag/Resize wie eine ROI-Zone angepasst, bevor daraus der Template-Crop aktualisiert wird.
+
+## [1.10.11] - 2026-06-05
+### Added
+- **Echte Zoom-Verstärkung für Target Zoom**: Ergänzt um `targetZoomMagnification` (Standard `1.8x`). Der Zoom-Ausschnitt wird nun um das Zielzentrum verkleinert berechnet, sodass bei aktivem 4K-Zoom ein deutlich stärkerer visueller Zoom entsteht statt nur gleicher Bildausschnitt in höherer Auflösung.
+- **Neue UI-Regler für Zoom-Faktor**: In Dev Console und Settings gibt es jetzt einen Slider `Target Zoom Magnification` (`1.0x` bis `4.0x`) für direkte Live-Anpassung.
+- **Zoom-Overlay-Status**: Das Target-Zoom-Overlay zeigt jetzt zusätzlich `4K ZOOM: ON/OFF` und den aktuellen Vergrößerungsfaktor an.
+
+### Changed
+- **4K-Aushandlung für Netzwerkquellen verbessert**: Kamera-Parameter (Breite, Höhe, FPS, Buffer) werden nun auch für nicht-numerische Quellen (z. B. RTSP/HTTP/iPhone-Stream) aktiv gesetzt.
+- **Backend-Fallback für Streams**: Für URL-Quellen wird zuerst FFmpeg versucht und bei Bedarf auf das Standard-Backend zurückgefallen.
+- **Klare Ist/Soll-Diagnose im Log**: Nach Kamera-Öffnung wird jetzt `requested` gegen `actual` inklusive Backend geloggt. Bei Fallback auf niedrigere Auflösung wird explizit eine Warnung ausgegeben.
+
+## [1.10.10] - 2026-06-05
+### Added
+- **Feedback Mechanism**: Added a "Help -> Send Feedback" menu option in the main menu bar. Opens a modal window to capture feedback, which is then saved as a timestamped JSON file in `Project_Horus/feedback/`.
+- **Data Panel Filtering and Sorting**: The Data Panel list can now be filtered with a text box and sorted by clicking the table headers, including ID, class, position, confidence, and state.
+
 ## [1.10.9] - 2026-06-05
 ### Added
 - **Motion Prediction & Template Adaptation for Active Pixel Tracking**: Implemented a Constant Velocity Motion Model to predict the target's position and center the search region dynamically. Added template adaptation (5% blend rate on highly confident matches) to handle appearance variations due to rotation, scale, or lighting changes. Increased default search padding from 40 to 80 pixels.

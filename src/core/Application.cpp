@@ -3,7 +3,13 @@
 #include <cstring>
 #include <cmath>
 #include <cinttypes>
+#include <cctype>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <cstdlib>
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
@@ -28,6 +34,56 @@ static ImU32 Float4ToImU32(const float col[4]) {
 
 static float GetAppSeconds(std::chrono::steady_clock::time_point start) {
     return std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
+}
+
+static constexpr ImU32 kDefaultHudColor = IM_COL32(0, 200, 100, 220);
+static constexpr ImU32 kDefaultTargetColor = IM_COL32(255, 180, 0, 255);
+
+static std::string GetDefaultSettingsPath() {
+    const char* home = std::getenv("HOME");
+    std::filesystem::path base = home ? home : ".";
+    base /= ".tactileviewer";
+    return (base / "settings.ini").string();
+}
+
+static bool ParseBoolSetting(const std::string& value) {
+    std::string lowered = value;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on";
+}
+
+static std::set<int> ParsePriorityClasses(const std::string& value) {
+    std::set<int> classes;
+    std::stringstream stream(value);
+    std::string token;
+    while (std::getline(stream, token, ',')) {
+        if (token.empty()) continue;
+        try {
+            classes.insert(std::stoi(token));
+        } catch (...) {
+        }
+    }
+    return classes;
+}
+
+static std::string SerializePriorityClasses(const std::set<int>& classes) {
+    std::ostringstream out;
+    bool first = true;
+    for (int classId : classes) {
+        if (!first) out << ',';
+        out << classId;
+        first = false;
+    }
+    return out.str();
+}
+
+static SystemSettings MakeStandardSettings() {
+    SystemSettings settings;
+    settings.hudColor = kDefaultHudColor;
+    settings.targetColor = kDefaultTargetColor;
+    return settings;
 }
 
 // -----------------------------------------------------------------------
@@ -82,9 +138,17 @@ void Application::log(LogLevel level, const std::string& msg) {
 }
 
 bool Application::init(int argc, char** argv) {
-    if (argc > 1) m_cameraAddress = argv[1];
-    else          m_cameraAddress = "1";
+    m_settingsPath = GetDefaultSettingsPath();
+    loadPersistedSettings();
+
+    if (argc > 1) {
+        m_cameraAddress = argv[1];
+    }
+    if (m_cameraAddress.empty()) {
+        m_cameraAddress = "1";
+    }
     snprintf(m_cameraInputBuf, sizeof(m_cameraInputBuf), "%s", m_cameraAddress.c_str());
+    syncSettingsToSharedState();
 
     log(LogLevel::INFO, "Opening camera: " + m_cameraAddress);
     int requestedW = m_settings.request4KCamera ? 3840 : 1280;
@@ -94,7 +158,16 @@ bool Application::init(int argc, char** argv) {
         std::cerr << "[ERROR] Camera fail: " << m_cameraAddress << std::endl;
         return false;
     }
-    log(LogLevel::INFO, "Camera opened successfully");
+    int actualW = m_camera->getWidth();
+    int actualH = m_camera->getHeight();
+    std::string backend = m_camera->getBackendName();
+    log(LogLevel::INFO, "Camera opened successfully (backend=" + backend + ")");
+    log(LogLevel::INFO, "Camera resolution requested=" + std::to_string(requestedW) + "x" + std::to_string(requestedH) +
+        ", actual=" + std::to_string(actualW) + "x" + std::to_string(actualH));
+    if (actualW < requestedW || actualH < requestedH) {
+        log(LogLevel::WARN, "Camera did not accept requested 4K mode. Source likely limited to " +
+            std::to_string(actualW) + "x" + std::to_string(actualH));
+    }
 
     try {
         std::string modelPath  = "../Resources/yolov8n.onnx";
@@ -115,12 +188,7 @@ bool Application::init(int argc, char** argv) {
     if (!initGLFW()) { log(LogLevel::ERR, "GLFW init failed"); return false; }
     if (!initImGui()) { log(LogLevel::ERR, "ImGui init failed"); return false; }
 
-    // Initialize color float arrays from defaults
-    ImU32ToFloat4(IM_COL32(0, 200, 100, 220), m_hudColorF);
-    ImU32ToFloat4(IM_COL32(255, 180, 0, 255),  m_targetColorF);
-
-    m_settings.hudColor    = Float4ToImU32(m_hudColorF);
-    m_settings.targetColor = Float4ToImU32(m_targetColorF);
+    syncColorEditorsFromSettings();
 
     log(LogLevel::INFO, "System initialized — starting worker thread");
 
@@ -154,6 +222,233 @@ bool Application::initImGui() {
     return true;
 }
 
+void Application::syncColorEditorsFromSettings() {
+    ImU32 hudColor = (m_settings.hudColor != 0) ? m_settings.hudColor : kDefaultHudColor;
+    ImU32 targetColor = (m_settings.targetColor != 0) ? m_settings.targetColor : kDefaultTargetColor;
+    ImU32ToFloat4(hudColor, m_hudColorF);
+    ImU32ToFloat4(targetColor, m_targetColorF);
+    m_settings.hudColor = hudColor;
+    m_settings.targetColor = targetColor;
+}
+
+void Application::syncSettingsToSharedState() {
+    std::lock_guard<std::mutex> lock(m_dataMutex);
+    m_sharedSettings = m_settings;
+}
+
+void Application::savePersistedSettings() const {
+    std::filesystem::path settingsPath(m_settingsPath.empty() ? GetDefaultSettingsPath() : m_settingsPath);
+    std::error_code ec;
+    std::filesystem::create_directories(settingsPath.parent_path(), ec);
+
+    const std::string cameraAddress = m_cameraAddress.empty() ? "1" : m_cameraAddress;
+
+    std::ofstream out(settingsPath);
+    if (!out) {
+        std::cerr << "[WARN] Could not save settings to " << settingsPath.string() << std::endl;
+        return;
+    }
+
+    out << "# Tactileviewer persistent settings\n";
+    out << "cameraAddress=" << cameraAddress << '\n';
+    out << "detectorConfThreshold=" << m_settings.detectorConfThreshold << '\n';
+    out << "detectorScoreThreshold=" << m_settings.detectorScoreThreshold << '\n';
+    out << "detectorNmsThreshold=" << m_settings.detectorNmsThreshold << '\n';
+    out << "filterByPriorityClasses=" << (m_settings.filterByPriorityClasses ? 1 : 0) << '\n';
+    out << "priorityClasses=" << SerializePriorityClasses(m_settings.priorityClasses) << '\n';
+    out << "trackerMaxLostFrames=" << m_settings.trackerMaxLostFrames << '\n';
+    out << "trackerMinMatchIOU=" << m_settings.trackerMinMatchIOU << '\n';
+    out << "trackerMaxTrailLength=" << m_settings.trackerMaxTrailLength << '\n';
+    out << "showTrails=" << (m_settings.showTrails ? 1 : 0) << '\n';
+    out << "trackerMinMatchScore=" << m_settings.trackerMinMatchScore << '\n';
+    out << "trackerMaxCenterDistPx=" << m_settings.trackerMaxCenterDistPx << '\n';
+    out << "trackerConfirmFrames=" << m_settings.trackerConfirmFrames << '\n';
+    out << "trackerVelocitySmoothing=" << m_settings.trackerVelocitySmoothing << '\n';
+    out << "trackerDeadReckoningDamping=" << m_settings.trackerDeadReckoningDamping << '\n';
+    out << "showTacticalOverlay=" << (m_settings.showTacticalOverlay ? 1 : 0) << '\n';
+    out << "showCrosshair=" << (m_settings.showCrosshair ? 1 : 0) << '\n';
+    out << "showCornerBrackets=" << (m_settings.showCornerBrackets ? 1 : 0) << '\n';
+    out << "showStatusWindows=" << (m_settings.showStatusWindows ? 1 : 0) << '\n';
+    out << "showDetections=" << (m_settings.showDetections ? 1 : 0) << '\n';
+    out << "showTrackIDs=" << (m_settings.showTrackIDs ? 1 : 0) << '\n';
+    out << "showConfidence=" << (m_settings.showConfidence ? 1 : 0) << '\n';
+    out << "showTrailFade=" << (m_settings.showTrailFade ? 1 : 0) << '\n';
+    out << "hudBrightness=" << m_settings.hudBrightness << '\n';
+    out << "crosshairScale=" << m_settings.crosshairScale << '\n';
+    out << "boxLineWidth=" << m_settings.boxLineWidth << '\n';
+    out << "hudColor=" << m_settings.hudColor << '\n';
+    out << "targetColor=" << m_settings.targetColor << '\n';
+    out << "enableDetection=" << (m_settings.enableDetection ? 1 : 0) << '\n';
+    out << "enableTracking=" << (m_settings.enableTracking ? 1 : 0) << '\n';
+    out << "detectionSkipFrames=" << m_settings.detectionSkipFrames << '\n';
+    out << "grayscaleInput=" << (m_settings.grayscaleInput ? 1 : 0) << '\n';
+    out << "logLevel=" << m_settings.logLevel << '\n';
+    out << "logToFile=" << (m_settings.logToFile ? 1 : 0) << '\n';
+    out << "dataLoggingEnabled=" << (m_settings.dataLoggingEnabled ? 1 : 0) << '\n';
+    out << "dataLoggingFormat=" << m_settings.dataLoggingFormat << '\n';
+    out << "dataLoggingFreqFrames=" << m_settings.dataLoggingFreqFrames << '\n';
+    out << "dataLoggingOutputDir=" << m_settings.dataLoggingOutputDir << '\n';
+    out << "showROIOverlay=" << (m_settings.showROIOverlay ? 1 : 0) << '\n';
+    out << "request4KCamera=" << (m_settings.request4KCamera ? 1 : 0) << '\n';
+    out << "enable4KZoom=" << (m_settings.enable4KZoom ? 1 : 0) << '\n';
+    out << "targetZoomMagnification=" << m_settings.targetZoomMagnification << '\n';
+    out << "lowLightEnhancement=" << (m_settings.lowLightEnhancement ? 1 : 0) << '\n';
+    out << "lowLightClipLimit=" << m_settings.lowLightClipLimit << '\n';
+    out << "lowLightDenoiseKernel=" << m_settings.lowLightDenoiseKernel << '\n';
+}
+
+void Application::loadPersistedSettings() {
+    m_settings = MakeStandardSettings();
+    syncColorEditorsFromSettings();
+
+    std::filesystem::path settingsPath(m_settingsPath.empty() ? GetDefaultSettingsPath() : m_settingsPath);
+    std::ifstream in(settingsPath);
+    if (!in) {
+        if (m_cameraAddress.empty()) {
+            m_cameraAddress = "1";
+        }
+        std::filesystem::create_directories(settingsPath.parent_path());
+        savePersistedSettings();
+        return;
+    }
+
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        const std::size_t separator = line.find('=');
+        if (separator == std::string::npos) continue;
+
+        const std::string key = line.substr(0, separator);
+        const std::string value = line.substr(separator + 1);
+
+        try {
+            if (key == "cameraAddress") m_cameraAddress = value;
+            else if (key == "detectorConfThreshold") m_settings.detectorConfThreshold = std::stof(value);
+            else if (key == "detectorScoreThreshold") m_settings.detectorScoreThreshold = std::stof(value);
+            else if (key == "detectorNmsThreshold") m_settings.detectorNmsThreshold = std::stof(value);
+            else if (key == "filterByPriorityClasses") m_settings.filterByPriorityClasses = ParseBoolSetting(value);
+            else if (key == "priorityClasses") m_settings.priorityClasses = ParsePriorityClasses(value);
+            else if (key == "trackerMaxLostFrames") m_settings.trackerMaxLostFrames = std::stoi(value);
+            else if (key == "trackerMinMatchIOU") m_settings.trackerMinMatchIOU = std::stof(value);
+            else if (key == "trackerMaxTrailLength") m_settings.trackerMaxTrailLength = std::stoi(value);
+            else if (key == "showTrails") m_settings.showTrails = ParseBoolSetting(value);
+            else if (key == "trackerMinMatchScore") m_settings.trackerMinMatchScore = std::stof(value);
+            else if (key == "trackerMaxCenterDistPx") m_settings.trackerMaxCenterDistPx = std::stof(value);
+            else if (key == "trackerConfirmFrames") m_settings.trackerConfirmFrames = std::stoi(value);
+            else if (key == "trackerVelocitySmoothing") m_settings.trackerVelocitySmoothing = std::stof(value);
+            else if (key == "trackerDeadReckoningDamping") m_settings.trackerDeadReckoningDamping = std::stof(value);
+            else if (key == "showTacticalOverlay") m_settings.showTacticalOverlay = ParseBoolSetting(value);
+            else if (key == "showCrosshair") m_settings.showCrosshair = ParseBoolSetting(value);
+            else if (key == "showCornerBrackets") m_settings.showCornerBrackets = ParseBoolSetting(value);
+            else if (key == "showStatusWindows") m_settings.showStatusWindows = ParseBoolSetting(value);
+            else if (key == "showDetections") m_settings.showDetections = ParseBoolSetting(value);
+            else if (key == "showTrackIDs") m_settings.showTrackIDs = ParseBoolSetting(value);
+            else if (key == "showConfidence") m_settings.showConfidence = ParseBoolSetting(value);
+            else if (key == "showTrailFade") m_settings.showTrailFade = ParseBoolSetting(value);
+            else if (key == "hudBrightness") m_settings.hudBrightness = std::stof(value);
+            else if (key == "crosshairScale") m_settings.crosshairScale = std::stof(value);
+            else if (key == "boxLineWidth") m_settings.boxLineWidth = std::stof(value);
+            else if (key == "hudColor") m_settings.hudColor = static_cast<uint32_t>(std::stoul(value));
+            else if (key == "targetColor") m_settings.targetColor = static_cast<uint32_t>(std::stoul(value));
+            else if (key == "enableDetection") m_settings.enableDetection = ParseBoolSetting(value);
+            else if (key == "enableTracking") m_settings.enableTracking = ParseBoolSetting(value);
+            else if (key == "detectionSkipFrames") m_settings.detectionSkipFrames = std::stoi(value);
+            else if (key == "grayscaleInput") m_settings.grayscaleInput = ParseBoolSetting(value);
+            else if (key == "logLevel") m_settings.logLevel = std::stoi(value);
+            else if (key == "logToFile") m_settings.logToFile = ParseBoolSetting(value);
+            else if (key == "dataLoggingEnabled") m_settings.dataLoggingEnabled = ParseBoolSetting(value);
+            else if (key == "dataLoggingFormat") m_settings.dataLoggingFormat = std::stoi(value);
+            else if (key == "dataLoggingFreqFrames") m_settings.dataLoggingFreqFrames = std::stoi(value);
+            else if (key == "dataLoggingOutputDir") m_settings.dataLoggingOutputDir = value;
+            else if (key == "showROIOverlay") m_settings.showROIOverlay = ParseBoolSetting(value);
+            else if (key == "request4KCamera") m_settings.request4KCamera = ParseBoolSetting(value);
+            else if (key == "enable4KZoom") m_settings.enable4KZoom = ParseBoolSetting(value);
+            else if (key == "targetZoomMagnification") m_settings.targetZoomMagnification = std::stof(value);
+            else if (key == "lowLightEnhancement") m_settings.lowLightEnhancement = ParseBoolSetting(value);
+            else if (key == "lowLightClipLimit") m_settings.lowLightClipLimit = std::stof(value);
+            else if (key == "lowLightDenoiseKernel") m_settings.lowLightDenoiseKernel = std::stoi(value);
+        } catch (...) {
+            std::cerr << "[WARN] Ignoring invalid settings entry: " << key << std::endl;
+        }
+    }
+
+    if (m_cameraAddress.empty()) {
+        m_cameraAddress = "1";
+    }
+    syncColorEditorsFromSettings();
+}
+
+void Application::applyStandardPreset() {
+    m_settings = MakeStandardSettings();
+    syncColorEditorsFromSettings();
+    syncSettingsToSharedState();
+    savePersistedSettings();
+    log(LogLevel::INFO, "Settings preset applied: Standard");
+}
+
+void Application::applyPresetPerformance() {
+    m_settings = MakeStandardSettings();
+    m_settings.request4KCamera = false;
+    m_settings.enable4KZoom = false;
+    m_settings.grayscaleInput = true;
+    m_settings.detectionSkipFrames = 2;
+    m_settings.lowLightEnhancement = false;
+    m_settings.showTrails = false;
+    syncColorEditorsFromSettings();
+    syncSettingsToSharedState();
+    savePersistedSettings();
+    log(LogLevel::INFO, "Settings preset applied: Performance");
+}
+
+void Application::applyPresetBalanced() {
+    m_settings = MakeStandardSettings();
+    m_settings.request4KCamera = true;
+    m_settings.enable4KZoom = true;
+    m_settings.grayscaleInput = false;
+    m_settings.detectionSkipFrames = 0;
+    m_settings.lowLightEnhancement = false;
+    m_settings.showTrails = true;
+    m_settings.showStatusWindows = true;
+    syncColorEditorsFromSettings();
+    syncSettingsToSharedState();
+    savePersistedSettings();
+    log(LogLevel::INFO, "Settings preset applied: Balanced");
+}
+
+void Application::applyPresetPrecision() {
+    m_settings = MakeStandardSettings();
+    m_settings.request4KCamera = true;
+    m_settings.enable4KZoom = true;
+    m_settings.detectorConfThreshold = 0.10f;
+    m_settings.detectorScoreThreshold = 0.10f;
+    m_settings.detectorNmsThreshold = 0.35f;
+    m_settings.detectionSkipFrames = 0;
+    m_settings.lowLightEnhancement = true;
+    m_settings.lowLightClipLimit = 3.5f;
+    m_settings.lowLightDenoiseKernel = 3;
+    m_settings.showTrails = true;
+    syncColorEditorsFromSettings();
+    syncSettingsToSharedState();
+    savePersistedSettings();
+    log(LogLevel::INFO, "Settings preset applied: Precision");
+}
+
+void Application::applyPresetLowLight() {
+    m_settings = MakeStandardSettings();
+    m_settings.request4KCamera = true;
+    m_settings.enable4KZoom = true;
+    m_settings.lowLightEnhancement = true;
+    m_settings.lowLightClipLimit = 4.5f;
+    m_settings.lowLightDenoiseKernel = 5;
+    m_settings.grayscaleInput = false;
+    m_settings.detectionSkipFrames = 0;
+    m_settings.showTrails = true;
+    syncColorEditorsFromSettings();
+    syncSettingsToSharedState();
+    savePersistedSettings();
+    log(LogLevel::INFO, "Settings preset applied: Low Light");
+}
+
 // -----------------------------------------------------------------------
 // Worker Thread
 // -----------------------------------------------------------------------
@@ -161,6 +456,13 @@ bool Application::initImGui() {
 void Application::workerLoop() {
     cv::Mat rawFrame;
     cv::Mat trackingFrame;
+    // Persistent buffers for zero-heap low-light processing
+    cv::Mat labFrame;
+    std::vector<cv::Mat> labChannels;
+    cv::Ptr<cv::CLAHE> clahe;
+    cv::Mat zoomLab;
+    std::vector<cv::Mat> zoomChannels;
+    cv::Ptr<cv::CLAHE> zoomClahe;
     cv::Mat zoomCrop;
     float currentFps = 0.0f;
     auto lastTime = std::chrono::steady_clock::now();
@@ -210,7 +512,16 @@ void Application::workerLoop() {
             }
             if (ok) {
                 m_cameraAddress = newAddr;
-                log(LogLevel::INFO, "Camera opened: " + newAddr);
+                int actualW = m_camera->getWidth();
+                int actualH = m_camera->getHeight();
+                std::string backend = m_camera->getBackendName();
+                log(LogLevel::INFO, "Camera opened: " + newAddr + " (backend=" + backend + ")");
+                log(LogLevel::INFO, "Camera resolution requested=" + std::to_string(requestedW) + "x" + std::to_string(requestedH) +
+                    ", actual=" + std::to_string(actualW) + "x" + std::to_string(actualH));
+                if (actualW < requestedW || actualH < requestedH) {
+                    log(LogLevel::WARN, "Camera did not accept requested 4K mode. Source likely limited to " +
+                        std::to_string(actualW) + "x" + std::to_string(actualH));
+                }
             } else {
                 log(LogLevel::ERR, "Camera failed to open: " + newAddr);
             }
@@ -229,7 +540,12 @@ void Application::workerLoop() {
         if (rawFrame.cols != 1280 || rawFrame.rows != 720) {
             cv::resize(rawFrame, trackingFrame, cv::Size(1280, 720));
         } else {
-            trackingFrame = rawFrame;
+            rawFrame.copyTo(trackingFrame);
+        }
+
+        // Apply low-light enhancement to tracking frame (HD) if enabled
+        if (currentSettings.lowLightEnhancement && !trackingFrame.empty()) {
+            ImageUtils::enhanceLowLight(trackingFrame, labFrame, labChannels, clahe, currentSettings.lowLightClipLimit, currentSettings.lowLightDenoiseKernel);
         }
 
         std::vector<Detection> detections;
@@ -485,6 +801,7 @@ void Application::workerLoop() {
                 m_pixelLockActive = true;
                 m_pixelVx = 0.0f;
                 m_pixelVy = 0.0f;
+                m_pixelLockRect = templateRect;
 
                 m_sharedLockedTarget.state = TrackingState::LOCKED;
                 m_sharedLockedTarget.track_id = 999; // Special ID for pixel target
@@ -521,6 +838,7 @@ void Application::workerLoop() {
                 m_pixelLockActive = true;
                 m_pixelVx = 0.0f;
                 m_pixelVy = 0.0f;
+                m_pixelLockRect = rect;
 
                 m_sharedLockedTarget.state = TrackingState::LOCKED;
                 m_sharedLockedTarget.track_id = 999;
@@ -580,6 +898,25 @@ void Application::workerLoop() {
                 } else {
                     sourceFrame = trackingFrame;
                 }
+
+                // Apply additional digital magnification by shrinking the crop
+                // around the target center (values >1.0 zoom in stronger).
+                float zoomMag = std::max(1.0f, currentSettings.targetZoomMagnification);
+                if (zoomMag > 1.0f) {
+                    int centerX = targetRoi.x + targetRoi.width / 2;
+                    int centerY = targetRoi.y + targetRoi.height / 2;
+
+                    int zoomW = static_cast<int>(std::round(targetRoi.width / zoomMag));
+                    int zoomH = static_cast<int>(std::round(targetRoi.height / zoomMag));
+
+                    zoomW = std::max(8, zoomW);
+                    zoomH = std::max(8, zoomH);
+
+                    targetRoi.x = centerX - zoomW / 2;
+                    targetRoi.y = centerY - zoomH / 2;
+                    targetRoi.width = zoomW;
+                    targetRoi.height = zoomH;
+                }
                 
                 // Add 15% padding around the target bounding box
                 int pad_w = static_cast<int>(targetRoi.width * 0.15f);
@@ -589,11 +926,15 @@ void Application::workerLoop() {
                 int x2 = std::min(sourceFrame.cols, targetRoi.x + targetRoi.width + pad_w);
                 int y2 = std::min(sourceFrame.rows, targetRoi.y + targetRoi.height + pad_h);
                 
-                if (x2 > x1 && y2 > y1) {
-                    sourceFrame(cv::Rect(x1, y1, x2 - x1, y2 - y1)).copyTo(zoomCrop);
-                } else {
-                    zoomCrop.release();
-                }
+                    if (x2 > x1 && y2 > y1) {
+                        sourceFrame(cv::Rect(x1, y1, x2 - x1, y2 - y1)).copyTo(zoomCrop);
+                        // If using 4K zoom, apply enhancement to the zoom crop separately
+                        if (currentSettings.enable4KZoom && currentSettings.lowLightEnhancement && !zoomCrop.empty()) {
+                            ImageUtils::enhanceLowLight(zoomCrop, zoomLab, zoomChannels, zoomClahe, currentSettings.lowLightClipLimit, currentSettings.lowLightDenoiseKernel);
+                        }
+                    } else {
+                        zoomCrop.release();
+                    }
             } else {
                 zoomCrop.release();
             }
@@ -610,6 +951,10 @@ void Application::workerLoop() {
             m_sharedCameraFps        = currentFps;
             m_sharedCameraWidth      = rawFrame.cols;
             m_sharedCameraHeight     = rawFrame.rows;
+            m_sharedTrackingWidth    = trackingFrame.cols;
+            m_sharedTrackingHeight   = trackingFrame.rows;
+            m_sharedZoomWidth        = zoomCrop.cols;
+            m_sharedZoomHeight       = zoomCrop.rows;
             m_newDataAvailable       = true;
         }
     }
@@ -685,18 +1030,111 @@ void Application::renderDataPanel() {
     ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "  |  RENDER FPS: %.1f", m_renderFps);
     ImGui::Separator();
 
+    ImGui::SetNextItemWidth(220.0f);
+    ImGui::InputTextWithHint("##DataPanelFilter", "Filter by ID, class, or state", m_dataPanelFilter, sizeof(m_dataPanelFilter));
+    ImGui::SameLine();
+    if (ImGui::Button("Clear##DataPanelFilter")) {
+        m_dataPanelFilter[0] = '\0';
+    }
+    ImGui::Separator();
+
+    auto toLowerCopy = [](const std::string& value) {
+        std::string lowered = value;
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        return lowered;
+    };
+
+    std::vector<TrackedObject> visibleObjects;
+    visibleObjects.reserve(m_trackedObjects.size());
+
+    const std::string filterText = toLowerCopy(m_dataPanelFilter);
+    for (const auto& obj : m_trackedObjects) {
+        if (filterText.empty()) {
+            visibleObjects.push_back(obj);
+            continue;
+        }
+
+        std::string stateText;
+        if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == obj.track_id) {
+            stateText = "locked";
+        } else if (obj.is_confirmed) {
+            stateText = "lock";
+        } else if (obj.lost_frames > 0) {
+            stateText = "lost";
+        } else {
+            stateText = "init";
+        }
+
+        const std::string searchable = toLowerCopy(std::to_string(obj.track_id) + " " + obj.className + " " + stateText);
+        if (searchable.find(filterText) != std::string::npos) {
+            visibleObjects.push_back(obj);
+        }
+    }
+
+    auto stateRank = [&](const TrackedObject& obj) {
+        if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == obj.track_id) return 3;
+        if (obj.is_confirmed) return 2;
+        if (obj.lost_frames > 0) return 1;
+        return 0;
+    };
+
+    auto compareObjects = [&](const TrackedObject& lhs, const TrackedObject& rhs, int column, bool descending) {
+        auto less = [&](const auto& a, const auto& b) {
+            return descending ? b < a : a < b;
+        };
+
+        switch (column) {
+            case 0:
+                return less(lhs.track_id, rhs.track_id);
+            case 1:
+                return less(toLowerCopy(lhs.className), toLowerCopy(rhs.className));
+            case 2: {
+                float lhsCx = static_cast<float>(lhs.box.x) + lhs.box.width / 2.0f;
+                float lhsCy = static_cast<float>(lhs.box.y) + lhs.box.height / 2.0f;
+                float rhsCx = static_cast<float>(rhs.box.x) + rhs.box.width / 2.0f;
+                float rhsCy = static_cast<float>(rhs.box.y) + rhs.box.height / 2.0f;
+                if (lhsCx == rhsCx) return less(lhsCy, rhsCy);
+                return less(lhsCx, rhsCx);
+            }
+            case 3:
+                return less(lhs.confidence, rhs.confidence);
+            case 4:
+                return less(stateRank(lhs), stateRank(rhs));
+            default:
+                return less(lhs.track_id, rhs.track_id);
+        }
+    };
+
     if (ImGui::BeginTable("Tracks", 5,
             ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-            ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable)) {
+            ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable |
+            ImGuiTableFlags_Sortable)) {
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("ID",       ImGuiTableColumnFlags_WidthFixed, 35.0f);
+        ImGui::TableSetupColumn("ID",       ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultSort, 35.0f);
         ImGui::TableSetupColumn("Class",    ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Pos (X,Y)",ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Conf",     ImGuiTableColumnFlags_WidthFixed, 50.0f);
         ImGui::TableSetupColumn("State",    ImGuiTableColumnFlags_WidthFixed, 55.0f);
         ImGui::TableHeadersRow();
 
-        for (const auto& obj : m_trackedObjects) {
+        std::vector<TrackedObject> sortedObjects = visibleObjects;
+        if (ImGuiTableSortSpecs* sortSpecs = ImGui::TableGetSortSpecs(); sortSpecs && sortSpecs->SpecsCount > 0) {
+            const ImGuiTableColumnSortSpecs& sortSpec = sortSpecs->Specs[0];
+            std::stable_sort(sortedObjects.begin(), sortedObjects.end(), [&](const TrackedObject& lhs, const TrackedObject& rhs) {
+                if (compareObjects(lhs, rhs, sortSpec.ColumnIndex, sortSpec.SortDirection == ImGuiSortDirection_Descending)) {
+                    return true;
+                }
+                if (compareObjects(rhs, lhs, sortSpec.ColumnIndex, sortSpec.SortDirection == ImGuiSortDirection_Descending)) {
+                    return false;
+                }
+                return lhs.track_id < rhs.track_id;
+            });
+            sortSpecs->SpecsDirty = false;
+        }
+
+        for (const auto& obj : sortedObjects) {
             ImGui::TableNextRow();
             
             bool isSelected = (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == obj.track_id);
@@ -840,6 +1278,10 @@ void Application::renderZoomWindow(const cv::Mat& zoomFrame) {
         snprintf(infoText, sizeof(infoText), "CONF: %.2f | SIZE: %dx%d (HD: %dx%d)", 
                  m_lockedTarget.confidence, zoomFrame.cols, zoomFrame.rows, roi.width, roi.height);
         drawList->AddText(ImVec2(draw_x + 8.0f, draw_y + 22.0f), hudColor, infoText);
+
+        snprintf(infoText, sizeof(infoText), "4K ZOOM: %s | MAG: %.1fx",
+             (m_settings.enable4KZoom ? "ON" : "OFF"), m_settings.targetZoomMagnification);
+        drawList->AddText(ImVec2(draw_x + 8.0f, draw_y + 36.0f), hudColor, infoText);
     } else if (m_lockedTarget.state != TrackingState::SEARCHING) {
         // Target locked but zoom frame is empty (e.g. invalid bounds)
         ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -924,9 +1366,27 @@ void Application::renderDevConsole() {
             ImGui::Text("%.2f", m_cameraFps);
             ImGui::NextColumn();
 
-            ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Camera Resolution");
+            ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Capture Resolution");
             ImGui::NextColumn();
             ImGui::Text("%dx%d", m_cameraWidth, m_cameraHeight);
+            ImGui::NextColumn();
+
+            ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Tracking Resolution");
+            ImGui::NextColumn();
+            ImGui::Text("%dx%d", m_trackingWidth, m_trackingHeight);
+            ImGui::NextColumn();
+
+            const int zoomSourceW = m_settings.enable4KZoom ? m_cameraWidth : m_trackingWidth;
+            const int zoomSourceH = m_settings.enable4KZoom ? m_cameraHeight : m_trackingHeight;
+
+            ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Zoom Source Resolution");
+            ImGui::NextColumn();
+            ImGui::Text("%dx%d", zoomSourceW, zoomSourceH);
+            ImGui::NextColumn();
+
+            ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Zoom Crop Resolution");
+            ImGui::NextColumn();
+            ImGui::Text("%dx%d", m_zoomWidth, m_zoomHeight);
             ImGui::NextColumn();
 
             ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Active Tracks");
@@ -965,6 +1425,20 @@ void Application::renderDevConsole() {
             settingsChanged |= ImGui::Checkbox("Request 4K Camera Resolution", &m_settings.request4KCamera);
             ImGui::SameLine();
             settingsChanged |= ImGui::Checkbox("Enable 4K Target Zoom", &m_settings.enable4KZoom);
+            ImGui::SetNextItemWidth(220.0f);
+            settingsChanged |= ImGui::SliderFloat("Target Zoom Magnification", &m_settings.targetZoomMagnification, 1.0f, 4.0f, "%.1fx");
+
+            ImGui::Separator();
+
+            ImGui::TextDisabled("Low-Light Enhancement");
+            settingsChanged |= ImGui::Checkbox("Enable Low-Light Enhancement", &m_settings.lowLightEnhancement);
+            if (m_settings.lowLightEnhancement) {
+                ImGui::SetNextItemWidth(140);
+                settingsChanged |= ImGui::SliderFloat("Contrast Clip Limit##ll", &m_settings.lowLightClipLimit, 1.0f, 10.0f, "%.1f");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(140);
+                settingsChanged |= ImGui::SliderInt("Noise Filter Kernel##ll", &m_settings.lowLightDenoiseKernel, 0, 9);
+            }
 
             ImGui::Separator();
 
@@ -1001,6 +1475,7 @@ void Application::renderDevConsole() {
                 "3  (USB cam #3)",
                 "4  (USB cam #4)",
                 "5  (USB cam #5)",
+                "VDO.Ninja Viewer (open browser)",
                 "rtsp://  (custom RTSP)",
                 "http://  (custom HTTP)",
             };
@@ -1012,11 +1487,20 @@ void Application::renderDevConsole() {
                         if (i < 6) {
                             // Numeric index
                             snprintf(m_cameraInputBuf, sizeof(m_cameraInputBuf), "%d", i);
-                        } else if (i == 6) {
-                            strncpy(m_cameraInputBuf, "rtsp://", sizeof(m_cameraInputBuf));
-                        } else {
-                            strncpy(m_cameraInputBuf, "http://", sizeof(m_cameraInputBuf));
-                        }
+                            } else if (i == 6) {
+                                // VDO.Ninja quick viewer — open in default browser and prefill the viewer URL
+                                const char* vdoUrl = "https://vdo.ninja/v24/?view=sKXtRAj";
+                                strncpy(m_cameraInputBuf, vdoUrl, sizeof(m_cameraInputBuf));
+    #ifdef __APPLE__
+                                // open default browser on macOS
+                                std::string cmd = std::string("open \"") + vdoUrl + "\"";
+                                system(cmd.c_str());
+    #endif
+                            } else if (i == 7) {
+                                strncpy(m_cameraInputBuf, "rtsp://", sizeof(m_cameraInputBuf));
+                            } else {
+                                strncpy(m_cameraInputBuf, "http://", sizeof(m_cameraInputBuf));
+                            }
                     }
                 }
                 ImGui::EndCombo();
@@ -1044,6 +1528,8 @@ void Application::renderDevConsole() {
                     m_pendingCameraAddress = newAddr;
                     m_cameraStatus.clear();
                 }
+                m_cameraAddress = newAddr;
+                savePersistedSettings();
                 m_cameraChangeRequested.store(true);
                 log(LogLevel::INFO, "Camera change requested: " + newAddr);
             }
@@ -1057,9 +1543,7 @@ void Application::renderDevConsole() {
             ImGui::Checkbox("Enable Admin Actions", &confirmQuit);
             if (confirmQuit) {
                 if (ImGui::Button("Reset All Settings", ImVec2(-1, 0))) {
-                    m_settings = SystemSettings{};
-                    m_settings.hudColor    = Float4ToImU32(m_hudColorF);
-                    m_settings.targetColor = Float4ToImU32(m_targetColorF);
+                    applyStandardPreset();
                     settingsChanged = true;
                     log(LogLevel::WARN, "All settings reset to defaults");
                 }
@@ -1591,6 +2075,7 @@ void Application::renderDevConsole() {
     if (settingsChanged) {
         std::lock_guard<std::mutex> lock(m_dataMutex);
         m_sharedSettings = m_settings;
+        savePersistedSettings();
     }
 
     ImGui::End();
@@ -1632,6 +2117,12 @@ void Application::renderSettingsWindow() {
         }
         changed |= ImGui::Checkbox("Request 4K camera resolution##s", &m_settings.request4KCamera);
         changed |= ImGui::Checkbox("Enable 4K target zoom##s", &m_settings.enable4KZoom);
+        changed |= ImGui::SliderFloat("Target zoom magnification##s", &m_settings.targetZoomMagnification, 1.0f, 4.0f, "%.1fx");
+        changed |= ImGui::Checkbox("Enable Low-Light Enhancement##s", &m_settings.lowLightEnhancement);
+        if (m_settings.lowLightEnhancement) {
+            changed |= ImGui::SliderFloat("Contrast Clip Limit##s_ll", &m_settings.lowLightClipLimit, 1.0f, 10.0f, "%.1f");
+            changed |= ImGui::SliderInt("Noise Filter Kernel##s_ll", &m_settings.lowLightDenoiseKernel, 0, 9);
+        }
     }
 
     if (ImGui::CollapsingHeader("HUD Elements")) {
@@ -1677,6 +2168,7 @@ void Application::renderSettingsWindow() {
     if (changed) {
         std::lock_guard<std::mutex> lock(m_dataMutex);
         m_sharedSettings = m_settings;
+        savePersistedSettings();
     }
 
     ImGui::End();
@@ -1717,6 +2209,10 @@ void Application::run() {
                 m_cameraFps        = m_sharedCameraFps;
                 m_cameraWidth      = m_sharedCameraWidth.load();
                 m_cameraHeight     = m_sharedCameraHeight.load();
+                m_trackingWidth    = m_sharedTrackingWidth.load();
+                m_trackingHeight   = m_sharedTrackingHeight.load();
+                m_zoomWidth        = m_sharedZoomWidth.load();
+                m_zoomHeight       = m_sharedZoomHeight.load();
                 m_renderer->updateTexture(currentFrame);
                 m_newDataAvailable = false;
             }
@@ -1725,6 +2221,56 @@ void Application::run() {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        if (ImGui::BeginMainMenuBar()) {
+            if (ImGui::BeginMenu("Settings")) {
+                if (ImGui::MenuItem("Open Settings Window", nullptr, m_showSettingsWindow)) {
+                    m_showSettingsWindow = !m_showSettingsWindow;
+                }
+                if (ImGui::MenuItem("Save Current Settings")) {
+                    savePersistedSettings();
+                    log(LogLevel::INFO, "Settings saved to disk");
+                }
+                if (ImGui::MenuItem("Standard")) {
+                    applyStandardPreset();
+                }
+                if (ImGui::BeginMenu("Presets")) {
+                    if (ImGui::MenuItem("Performance")) applyPresetPerformance();
+                    if (ImGui::MenuItem("Balanced"))    applyPresetBalanced();
+                    if (ImGui::MenuItem("Precision"))    applyPresetPrecision();
+                    if (ImGui::MenuItem("Low Light"))    applyPresetLowLight();
+                    ImGui::EndMenu();
+                }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Help")) {
+                if (ImGui::MenuItem("Send Feedback")) {
+                    m_showFeedbackWindow = true;
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMainMenuBar();
+        }
+
+        if (m_showFeedbackWindow) {
+            ImGui::OpenPopup("Feedback");
+        }
+        if (ImGui::BeginPopupModal("Feedback", &m_showFeedbackWindow, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Enter your feedback:");
+            ImGui::InputTextMultiline("##feedback", m_feedbackBuf, IM_ARRAYSIZE(m_feedbackBuf), ImVec2(400, 150));
+            if (ImGui::Button("Submit")) {
+                saveFeedback(m_feedbackBuf);
+                m_showFeedbackWindow = false;
+                memset(m_feedbackBuf, 0, sizeof(m_feedbackBuf));
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) {
+                m_showFeedbackWindow = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
 
         ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
@@ -1913,7 +2459,14 @@ void Application::run() {
                         m_editDragStartMouse = mVideo;
                         // Get the zone starting rect
                         if (m_editZoneId == 999) {
-                            m_editDragStartRect = m_lockedTarget.box;
+                            {
+                                std::lock_guard<std::mutex> lock(m_dataMutex);
+                                if (m_pixelLockRect.width > 0 && m_pixelLockRect.height > 0) {
+                                    m_editDragStartRect = m_pixelLockRect;
+                                } else {
+                                    m_editDragStartRect = m_lockedTarget.box;
+                                }
+                            }
                             m_pixelLockDragging.store(true);
                         } else {
                             for (const auto& z : zones) {
@@ -2001,6 +2554,7 @@ void Application::run() {
                             newRect.height = std::clamp(newRect.height, 4, rows - newRect.y);
 
                             std::lock_guard<std::mutex> lock(m_dataMutex);
+                            m_pixelLockRect = newRect;
                             m_sharedLockedTarget.box = newRect;
                             m_lockedTarget.box = newRect;
                         } else {
@@ -2047,6 +2601,7 @@ void Application::run() {
                         m_pixelLockDragging.store(false);
                         // Revert the box to original before dragging
                         std::lock_guard<std::mutex> lock(m_dataMutex);
+                        m_pixelLockRect = m_editDragStartRect;
                         m_sharedLockedTarget.box = m_editDragStartRect;
                         m_lockedTarget.box = m_editDragStartRect;
                     }
@@ -2212,17 +2767,35 @@ void Application::run() {
         glViewport(0, 0, display_w, display_h);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-            GLFWwindow* backup = glfwGetCurrentContext();
-            ImGui::UpdatePlatformWindows();
-            ImGui::RenderPlatformWindowsDefault();
-            glfwMakeContextCurrent(backup);
-        }
-
-        glfwSwapBuffers(m_window);
-    }
+if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+    GLFWwindow* backup = glfwGetCurrentContext();
+    ImGui::UpdatePlatformWindows();
+    ImGui::RenderPlatformWindowsDefault();
+    glfwMakeContextCurrent(backup);
 }
+
+glfwSwapBuffers(m_window);
+}
+
+void Application::saveFeedback(const std::string& feedback) {
+auto now = std::chrono::system_clock::now();
+auto in_time_t = std::chrono::system_clock::to_time_t(now);
+std::stringstream ss;
+ss << "Project_Horus/feedback/feedback_" << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S") << ".json";
+
+std::ofstream file(ss.str());
+if (file.is_open()) {
+    file << "{\n";
+    file << "  \"timestamp\": \"" << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S") << "\",\n";
+    file << "  \"feedback\": \"" << feedback << "\"\n";
+    file << "}\n";
+    file.close();
+    log(LogLevel::INFO, "Feedback saved to " + ss.str());
+} else {
+    log(LogLevel::ERR, "Failed to save feedback to " + ss.str());
+}
+}
+
 void Application::cleanup() {
     m_running = false;
     if (m_workerThread.joinable()) m_workerThread.join();

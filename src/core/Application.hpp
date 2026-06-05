@@ -53,6 +53,15 @@ private:
     void cleanup();
     void workerLoop();
     void handleTargetLocking(const ViewportInfo& view);
+    void loadPersistedSettings();
+    void savePersistedSettings() const;
+    void applyStandardPreset();
+    void applyPresetPerformance();
+    void applyPresetBalanced();
+    void applyPresetPrecision();
+    void applyPresetLowLight();
+    void syncSettingsToSharedState();
+    void syncColorEditorsFromSettings();
 
     // UI render helpers
     void renderCameraView();
@@ -65,6 +74,7 @@ private:
     int         m_width;
     int         m_height;
     std::string m_title;
+    std::string m_settingsPath;
 
     std::unique_ptr<CameraModule>    m_camera;
     std::unique_ptr<VideoRenderer>   m_renderer;
@@ -94,6 +104,10 @@ private:
     float                    m_sharedCameraFps = 0.0f;
     std::atomic<int>         m_sharedCameraWidth{0};
     std::atomic<int>         m_sharedCameraHeight{0};
+    std::atomic<int>         m_sharedTrackingWidth{0};
+    std::atomic<int>         m_sharedTrackingHeight{0};
+    std::atomic<int>         m_sharedZoomWidth{0};
+    std::atomic<int>         m_sharedZoomHeight{0};
     std::atomic<bool>        m_lockRequested;
     std::atomic<int>         m_requestedLockId;
     std::atomic<bool>        m_releaseLockRequested;
@@ -110,6 +124,10 @@ private:
     float                    m_cameraFps = 0.0f;
     int                      m_cameraWidth = 0;
     int                      m_cameraHeight = 0;
+    int                      m_trackingWidth = 0;
+    int                      m_trackingHeight = 0;
+    int                      m_zoomWidth = 0;
+    int                      m_zoomHeight = 0;
 
     // ---------------------------------------------------------------
     // Dev Console state
@@ -136,6 +154,7 @@ private:
     bool  m_showSettingsWindow = false;
     bool  m_autoScrollLog      = true;
     char  m_logFilter[128]     = {0};
+    char  m_dataPanelFilter[128] = {0};
     int   m_devConsoleTab      = 0;   // 0=System, 1=Detector, 2=Tracker, 3=HUD, 4=Console
 
     // ---------------------------------------------------------------
@@ -188,6 +207,11 @@ private:
 
     // Active track-zone alarm states for transition warnings
     std::unordered_map<int, std::unordered_set<int>> m_activeAlarms;
+
+    // Feedback UI state
+    bool m_showFeedbackWindow = false;
+    char m_feedbackBuf[1024] = {0};
+    void saveFeedback(const std::string& feedback);
 };
 
 #endif // APPLICATION_HPP
