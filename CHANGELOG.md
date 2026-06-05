@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.2] - 2026-06-05
+### Added
+- **Formal Source Control Integration:** Initialized local Git repository with optimized `.gitignore` for C++ development.
+- **Git Usage Mandates:** Updated `GEMINI.md` with binding rules for atomic commits and meaningful messages for all agents.
+- **Enhanced Dev Console:** Added real-time sliders for Score Threshold, NMS Threshold, and a toggle for movement trails (MOT).
+### Changed
+- **MOT HUD Integration:** Refactored HUD rendering to use tracked objects vector instead of raw detections.
+- **Version Management:** Synchronized `VERSION` and `CHANGELOG.md` with the new repository state.
+
 ## [1.5.1] - 2026-06-05
 ### Changed
 - **Optimized MultiTracker Responsiveness:** Eliminated the 1-frame "confirmation lag" for new detections. Tracks are now displayed immediately upon first detection (if fresh), while retaining the confirmed/unconfirmed distinction for persistent dead-reckoning.
