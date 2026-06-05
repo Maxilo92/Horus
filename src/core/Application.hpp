@@ -104,6 +104,8 @@ private:
     std::atomic<bool>        m_pixelLockDragging{false};
     std::atomic<bool>        m_pixelLockRectUpdateRequested{false};
     cv::Rect                 m_pixelLockRect;
+    float                    m_pixelVx = 0.0f;
+    float                    m_pixelVy = 0.0f;
     bool                     m_newDataAvailable;
     float                    m_cameraFps = 0.0f;
     int                      m_cameraWidth = 0;

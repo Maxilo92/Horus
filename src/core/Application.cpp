@@ -269,8 +269,13 @@ void Application::workerLoop() {
                 } else {
                     cv::Rect lastBox = m_sharedLockedTarget.box;
 
-                    int pad = 40;
-                    cv::Rect searchRect(lastBox.x - pad, lastBox.y - pad, lastBox.width + pad * 2, lastBox.height + pad * 2);
+                    // Predict next position using constant velocity motion model
+                    cv::Rect predictedBox = lastBox;
+                    predictedBox.x += static_cast<int>(std::round(m_pixelVx));
+                    predictedBox.y += static_cast<int>(std::round(m_pixelVy));
+
+                    int pad = 80; // Larger search window to prevent tracking loss
+                    cv::Rect searchRect(predictedBox.x - pad, predictedBox.y - pad, predictedBox.width + pad * 2, predictedBox.height + pad * 2);
 
                     searchRect.x = std::max(0, searchRect.x);
                     searchRect.y = std::max(0, searchRect.y);
@@ -291,19 +296,40 @@ void Application::workerLoop() {
 
                         if (maxVal > 0.5) {
                             cv::Point newTopLeft(searchRect.x + maxLoc.x, searchRect.y + maxLoc.y);
-                            m_sharedLockedTarget.box = cv::Rect(newTopLeft, m_pixelTemplate.size());
+                            cv::Rect newBox(newTopLeft, m_pixelTemplate.size());
+
+                            // Calculate velocity based on actual displacement
+                            cv::Point lastCenter(lastBox.x + lastBox.width / 2, lastBox.y + lastBox.height / 2);
+                            cv::Point newCenter(newBox.x + newBox.width / 2, newBox.y + newBox.height / 2);
+
+                            float alpha = 0.5f;
+                            m_pixelVx = alpha * (newCenter.x - lastCenter.x) + (1.0f - alpha) * m_pixelVx;
+                            m_pixelVy = alpha * (newCenter.y - lastCenter.y) + (1.0f - alpha) * m_pixelVy;
+
+                            m_sharedLockedTarget.box = newBox;
                             m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
                             m_sharedLockedTarget.lost_frames = 0;
                             m_sharedLockedTarget.state = TrackingState::LOCKED;
 
-                            cv::Point center(m_sharedLockedTarget.box.x + m_sharedLockedTarget.box.width / 2,
-                                             m_sharedLockedTarget.box.y + m_sharedLockedTarget.box.height / 2);
-                            m_sharedLockedTarget.trail.push_back(center);
+                            m_sharedLockedTarget.trail.push_back(newCenter);
                             if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(currentSettings.trackerMaxTrailLength)) {
                                 m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
                             }
+
+                            // Adapt template dynamically on highly confident matches to handle rotation/lighting
+                            if (maxVal > 0.85) {
+                                cv::Mat matchedPatch = trackingFrame(newBox);
+                                if (matchedPatch.size() == m_pixelTemplate.size() && matchedPatch.type() == m_pixelTemplate.type()) {
+                                    double beta = 0.05; // 5% adaptation blend rate
+                                    cv::addWeighted(m_pixelTemplate, 1.0 - beta, matchedPatch, beta, 0.0, m_pixelTemplate);
+                                }
+                            }
                         } else {
                             m_sharedLockedTarget.lost_frames++;
+                            // Decay velocity when target is missed
+                            m_pixelVx *= 0.8f;
+                            m_pixelVy *= 0.8f;
+
                             if (m_sharedLockedTarget.lost_frames > currentSettings.trackerMaxLostFrames) {
                                 m_sharedLockedTarget.state = TrackingState::LOST;
                                 m_pixelLockActive = false;
@@ -457,6 +483,8 @@ void Application::workerLoop() {
             if (templateRect.width > 10 && templateRect.height > 10) {
                 m_pixelTemplate = trackingFrame(templateRect).clone();
                 m_pixelLockActive = true;
+                m_pixelVx = 0.0f;
+                m_pixelVy = 0.0f;
 
                 m_sharedLockedTarget.state = TrackingState::LOCKED;
                 m_sharedLockedTarget.track_id = 999; // Special ID for pixel target
@@ -491,6 +519,8 @@ void Application::workerLoop() {
             if (rect.width > 4 && rect.height > 4) {
                 m_pixelTemplate = trackingFrame(rect).clone();
                 m_pixelLockActive = true;
+                m_pixelVx = 0.0f;
+                m_pixelVy = 0.0f;
 
                 m_sharedLockedTarget.state = TrackingState::LOCKED;
                 m_sharedLockedTarget.track_id = 999;
@@ -852,7 +882,7 @@ void Application::renderDevConsole() {
     // ── Header bar ──────────────────────────────────────────────────────
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "HORUS DEV CONSOLE");
     ImGui::SameLine();
-    ImGui::TextDisabled("v1.10.8");
+    ImGui::TextDisabled("v1.10.9");
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120.0f);
     if (ImGui::Button("Settings...", ImVec2(110, 0)))
         m_showSettingsWindow = !m_showSettingsWindow;

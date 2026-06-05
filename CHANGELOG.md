@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.10.9] - 2026-06-05
+### Added
+- **Motion Prediction & Template Adaptation for Active Pixel Tracking**: Implemented a Constant Velocity Motion Model to predict the target's position and center the search region dynamically. Added template adaptation (5% blend rate on highly confident matches) to handle appearance variations due to rotation, scale, or lighting changes. Increased default search padding from 40 to 80 pixels.
+
 ## [1.10.8] - 2026-06-05
 ### Added
 - **Interactive Pixel Zoom Box Adjustment**: Enabled dragging, resizing, and positioning of the active pixel target's template box (ID 999) directly in the viewport during ROI edit mode. Moving the box or resizing its corners/edges dynamically crops a new template from the frame and resumes tracking seamlessly.
