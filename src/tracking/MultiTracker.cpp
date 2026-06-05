@@ -129,7 +129,7 @@ void MultiTracker::update(const std::vector<Detection>& detections,
     // Max. erlaubte Zentrum-Distanz für ein Match:
     // Skaliert mit der typischen Objektgröße, mind. 150px.
     // Erlaubt schnell-bewegten Objekten dennoch gematcht zu werden.
-    const float maxCenterDist = 200.0f; // Frame-Pixel
+    const float maxCenterDist = settings.trackerMaxCenterDistPx; // Frame-Pixel
 
     std::vector<int>  matchedTracks(nTracks, -1);
     std::vector<bool> matchedDets(nDets, false);
@@ -140,7 +140,7 @@ void MultiTracker::update(const std::vector<Detection>& detections,
                                             maxCenterDist);
         // Mindest-Score für ein gültiges Match:
         // IoU-only wäre 0.25, aber durch hybrides Scoring auch bei IoU=0 möglich
-        const float minScore = 0.15f;
+        const float minScore = settings.trackerMinMatchScore;
         greedyMatch(costMatrix, minScore, matchedTracks, matchedDets);
     }
 

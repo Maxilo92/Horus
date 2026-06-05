@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.10.3] - 2026-06-05
+### Added
+- **Arbitrary Pixel Tracking (Custom Feature)**: Enabled user-defined feature tracking. Clicking on any blank/empty space in the Camera View (where no object bounding box is present) triggers a custom pixel tracker using OpenCV's Template Matching (`cv::matchTemplate` with `cv::TM_CCOEFF_NORMED`). Captures a 60x60 pixel template and tracks it frame-by-frame, updating its location, confidence score, and path history (trail) in real-time.
+- **Full Zoom Support for Pixel Targets**: Custom pixel targets are fully integrated into the "Target Zoom" window, showing real-time zoom magnification and custom reticle overlay.
+
+### Fixed
+- **Improved Detection Recall**: Lowered default `detectorConfThreshold` and `detectorScoreThreshold` from `0.25f` to `0.15f` to successfully detect and track small, distant background vehicles (such as background cars on driveways or lanes).
+- **Tracker Parameter Synchronization Bug**: Restored Developer Console slider control by updating `MultiTracker.cpp` to respect `trackerMinMatchScore` and `trackerMaxCenterDistPx` settings from the user interface instead of using hardcoded limits.
+
 ## [1.10.2] - 2026-06-05
 ### Added
 - **Interactive Class Selection Grid**: Replaced the simple static class filter checkbox with a searchable grid (4 columns) showing all 80 COCO classes. Toggling a checkbox enables/disables the class in real-time.

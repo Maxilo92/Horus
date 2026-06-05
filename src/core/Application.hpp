@@ -94,6 +94,10 @@ private:
     std::atomic<bool>        m_lockRequested;
     std::atomic<int>         m_requestedLockId;
     std::atomic<bool>        m_releaseLockRequested;
+    std::atomic<bool>        m_pixelLockRequested{false};
+    cv::Point                m_pixelLockPoint;
+    bool                     m_pixelLockActive = false;
+    cv::Mat                  m_pixelTemplate;
     bool                     m_newDataAvailable;
     float                    m_cameraFps = 0.0f;
 

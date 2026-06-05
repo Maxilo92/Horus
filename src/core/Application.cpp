@@ -324,14 +324,102 @@ void Application::workerLoop() {
         if (m_lockRequested.exchange(false)) {
             m_sharedLockedTarget.track_id = m_requestedLockId.load();
             m_sharedLockedTarget.state = TrackingState::LOCKED;
+            m_pixelLockActive = false;
         }
 
         if (m_releaseLockRequested.exchange(false)) {
             m_sharedLockedTarget.state = TrackingState::SEARCHING;
             m_sharedLockedTarget.track_id = -1;
+            m_pixelLockActive = false;
         }
 
-        if (m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+        // Process pixel lock request
+        if (m_pixelLockRequested.exchange(false)) {
+            cv::Point pt;
+            {
+                std::lock_guard<std::mutex> lock(m_dataMutex);
+                pt = m_pixelLockPoint;
+            }
+
+            int templateSize = 60;
+            cv::Rect templateRect(pt.x - templateSize / 2, pt.y - templateSize / 2, templateSize, templateSize);
+
+            // Clamp to frame
+            templateRect.x = std::max(0, templateRect.x);
+            templateRect.y = std::max(0, templateRect.y);
+            if (templateRect.x + templateRect.width > frame.cols) {
+                templateRect.width = frame.cols - templateRect.x;
+            }
+            if (templateRect.y + templateRect.height > frame.rows) {
+                templateRect.height = frame.rows - templateRect.y;
+            }
+
+            if (templateRect.width > 10 && templateRect.height > 10) {
+                m_pixelTemplate = frame(templateRect).clone();
+                m_pixelLockActive = true;
+
+                m_sharedLockedTarget.state = TrackingState::LOCKED;
+                m_sharedLockedTarget.track_id = 999; // Special ID for pixel target
+                m_sharedLockedTarget.class_id = -1;
+                m_sharedLockedTarget.className = "Pixel Target";
+                m_sharedLockedTarget.box = templateRect;
+                m_sharedLockedTarget.confidence = 1.0f;
+                m_sharedLockedTarget.lost_frames = 0;
+                m_sharedLockedTarget.trail.clear();
+                m_sharedLockedTarget.trail.push_back(pt);
+            }
+        }
+
+        if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+            cv::Rect lastBox = m_sharedLockedTarget.box;
+
+            int pad = 40;
+            cv::Rect searchRect(lastBox.x - pad, lastBox.y - pad, lastBox.width + pad * 2, lastBox.height + pad * 2);
+
+            searchRect.x = std::max(0, searchRect.x);
+            searchRect.y = std::max(0, searchRect.y);
+            if (searchRect.x + searchRect.width > frame.cols) {
+                searchRect.width = frame.cols - searchRect.x;
+            }
+            if (searchRect.y + searchRect.height > frame.rows) {
+                searchRect.height = frame.rows - searchRect.y;
+            }
+
+            if (searchRect.width >= m_pixelTemplate.cols && searchRect.height >= m_pixelTemplate.rows) {
+                cv::Mat result;
+                cv::matchTemplate(frame(searchRect), m_pixelTemplate, result, cv::TM_CCOEFF_NORMED);
+
+                double minVal, maxVal;
+                cv::Point minLoc, maxLoc;
+                cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
+
+                if (maxVal > 0.5) {
+                    cv::Point newTopLeft(searchRect.x + maxLoc.x, searchRect.y + maxLoc.y);
+                    m_sharedLockedTarget.box = cv::Rect(newTopLeft, m_pixelTemplate.size());
+                    m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
+                    m_sharedLockedTarget.lost_frames = 0;
+                    m_sharedLockedTarget.state = TrackingState::LOCKED;
+
+                    cv::Point center(m_sharedLockedTarget.box.x + m_sharedLockedTarget.box.width / 2,
+                                     m_sharedLockedTarget.box.y + m_sharedLockedTarget.box.height / 2);
+                    m_sharedLockedTarget.trail.push_back(center);
+                    if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(currentSettings.trackerMaxTrailLength)) {
+                        m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
+                    }
+                } else {
+                    m_sharedLockedTarget.lost_frames++;
+                    if (m_sharedLockedTarget.lost_frames > currentSettings.trackerMaxLostFrames) {
+                        m_sharedLockedTarget.state = TrackingState::LOST;
+                        m_pixelLockActive = false;
+                    } else {
+                        m_sharedLockedTarget.state = TrackingState::LOST;
+                    }
+                }
+            } else {
+                m_pixelLockActive = false;
+                m_sharedLockedTarget.state = TrackingState::LOST;
+            }
+        } else if (m_sharedLockedTarget.state != TrackingState::SEARCHING) {
             bool found = false;
             for (const auto& t : tracked) {
                 if (t.track_id == m_sharedLockedTarget.track_id) {
@@ -371,14 +459,24 @@ void Application::handleTargetLocking(const ViewportInfo& view) {
             float videoX = (mousePos.x - view.pos_x) / view.scale;
             float videoY = (mousePos.y - view.pos_y) / view.scale;
             cv::Point clickPoint(static_cast<int>(videoX), static_cast<int>(videoY));
+            bool lockedOnObj = false;
             for (const auto& obj : m_trackedObjects) {
                 if (obj.box.contains(clickPoint)) {
                     m_requestedLockId.store(obj.track_id);
                     m_lockRequested.store(true);
                     log(LogLevel::INFO, "Target lock requested: " + obj.className +
                         " TrackID=" + std::to_string(obj.track_id));
+                    lockedOnObj = true;
                     break;
                 }
+            }
+            if (!lockedOnObj) {
+                // Trigger pixel tracking on empty space click
+                std::lock_guard<std::mutex> lock(m_dataMutex);
+                m_pixelLockPoint = clickPoint;
+                m_pixelLockRequested.store(true);
+                log(LogLevel::INFO, "Pixel target lock requested at position: (" +
+                    std::to_string(clickPoint.x) + ", " + std::to_string(clickPoint.y) + ")");
             }
         }
     }
@@ -633,7 +731,7 @@ void Application::renderDevConsole() {
     // ── Header bar ──────────────────────────────────────────────────────
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "HORUS DEV CONSOLE");
     ImGui::SameLine();
-    ImGui::TextDisabled("v1.10.2");
+    ImGui::TextDisabled("v1.10.3");
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120.0f);
     if (ImGui::Button("Settings...", ImVec2(110, 0)))
         m_showSettingsWindow = !m_showSettingsWindow;

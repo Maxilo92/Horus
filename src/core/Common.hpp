@@ -59,8 +59,8 @@ struct SystemSettings {
     // ----------------------------------------------------------------
     // Detector Settings
     // ----------------------------------------------------------------
-    float detectorConfThreshold  = 0.25f;
-    float detectorScoreThreshold = 0.25f;
+    float detectorConfThreshold  = 0.15f;
+    float detectorScoreThreshold = 0.15f;
     float detectorNmsThreshold   = 0.45f;
 
     // Priority-Class-Filter
@@ -75,7 +75,7 @@ struct SystemSettings {
     float trackerMinMatchIOU      = 0.25f;
     int   trackerMaxTrailLength   = 30;
     bool  showTrails              = true;
-    float trackerMinMatchScore    = 0.30f;   // Greedy-Matching minimum combined score
+    float trackerMinMatchScore    = 0.15f;   // Greedy-Matching minimum combined score
     float trackerMaxCenterDistPx  = 200.0f;  // Max center distance for matching
     int   trackerConfirmFrames    = 2;        // Frames until a track is confirmed
 
