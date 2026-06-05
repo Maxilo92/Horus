@@ -101,6 +101,9 @@ private:
     cv::Point                m_pixelLockPoint;
     bool                     m_pixelLockActive = false;
     cv::Mat                  m_pixelTemplate;
+    std::atomic<bool>        m_pixelLockDragging{false};
+    std::atomic<bool>        m_pixelLockRectUpdateRequested{false};
+    cv::Rect                 m_pixelLockRect;
     bool                     m_newDataAvailable;
     float                    m_cameraFps = 0.0f;
     int                      m_cameraWidth = 0;

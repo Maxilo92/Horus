@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.10.8] - 2026-06-05
+### Added
+- **Interactive Pixel Zoom Box Adjustment**: Enabled dragging, resizing, and positioning of the active pixel target's template box (ID 999) directly in the viewport during ROI edit mode. Moving the box or resizing its corners/edges dynamically crops a new template from the frame and resumes tracking seamlessly.
+
 ## [1.10.7] - 2026-06-05
 ### Fixed
 - **Optimized 4K Camera Request (FPS & Format compatibility)**: Added MJPEG format request (`CAP_PROP_FOURCC`) to bypass USB bandwidth limitations for high-resolution streams on macOS/UVC. Reduced requested framerate from 60 FPS to 30 FPS for 4K streams to match hardware support, preventing the UVC camera driver from silently falling back to lower resolutions.

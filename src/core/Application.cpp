@@ -264,53 +264,57 @@ void Application::workerLoop() {
 
             // Update pixel target using template matching if active
             if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
-                cv::Rect lastBox = m_sharedLockedTarget.box;
+                if (m_pixelLockDragging.load()) {
+                    // Skip template matching while dragging
+                } else {
+                    cv::Rect lastBox = m_sharedLockedTarget.box;
 
-                int pad = 40;
-                cv::Rect searchRect(lastBox.x - pad, lastBox.y - pad, lastBox.width + pad * 2, lastBox.height + pad * 2);
+                    int pad = 40;
+                    cv::Rect searchRect(lastBox.x - pad, lastBox.y - pad, lastBox.width + pad * 2, lastBox.height + pad * 2);
 
-                searchRect.x = std::max(0, searchRect.x);
-                searchRect.y = std::max(0, searchRect.y);
-                if (searchRect.x + searchRect.width > trackingFrame.cols) {
-                    searchRect.width = trackingFrame.cols - searchRect.x;
-                }
-                if (searchRect.y + searchRect.height > trackingFrame.rows) {
-                    searchRect.height = trackingFrame.rows - searchRect.y;
-                }
+                    searchRect.x = std::max(0, searchRect.x);
+                    searchRect.y = std::max(0, searchRect.y);
+                    if (searchRect.x + searchRect.width > trackingFrame.cols) {
+                        searchRect.width = trackingFrame.cols - searchRect.x;
+                    }
+                    if (searchRect.y + searchRect.height > trackingFrame.rows) {
+                        searchRect.height = trackingFrame.rows - searchRect.y;
+                    }
 
-                if (searchRect.width >= m_pixelTemplate.cols && searchRect.height >= m_pixelTemplate.rows) {
-                    cv::Mat result;
-                    cv::matchTemplate(trackingFrame(searchRect), m_pixelTemplate, result, cv::TM_CCOEFF_NORMED);
+                    if (searchRect.width >= m_pixelTemplate.cols && searchRect.height >= m_pixelTemplate.rows) {
+                        cv::Mat result;
+                        cv::matchTemplate(trackingFrame(searchRect), m_pixelTemplate, result, cv::TM_CCOEFF_NORMED);
 
-                    double minVal, maxVal;
-                    cv::Point minLoc, maxLoc;
-                    cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
+                        double minVal, maxVal;
+                        cv::Point minLoc, maxLoc;
+                        cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
 
-                    if (maxVal > 0.5) {
-                        cv::Point newTopLeft(searchRect.x + maxLoc.x, searchRect.y + maxLoc.y);
-                        m_sharedLockedTarget.box = cv::Rect(newTopLeft, m_pixelTemplate.size());
-                        m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
-                        m_sharedLockedTarget.lost_frames = 0;
-                        m_sharedLockedTarget.state = TrackingState::LOCKED;
+                        if (maxVal > 0.5) {
+                            cv::Point newTopLeft(searchRect.x + maxLoc.x, searchRect.y + maxLoc.y);
+                            m_sharedLockedTarget.box = cv::Rect(newTopLeft, m_pixelTemplate.size());
+                            m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
+                            m_sharedLockedTarget.lost_frames = 0;
+                            m_sharedLockedTarget.state = TrackingState::LOCKED;
 
-                        cv::Point center(m_sharedLockedTarget.box.x + m_sharedLockedTarget.box.width / 2,
-                                         m_sharedLockedTarget.box.y + m_sharedLockedTarget.box.height / 2);
-                        m_sharedLockedTarget.trail.push_back(center);
-                        if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(currentSettings.trackerMaxTrailLength)) {
-                            m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
+                            cv::Point center(m_sharedLockedTarget.box.x + m_sharedLockedTarget.box.width / 2,
+                                             m_sharedLockedTarget.box.y + m_sharedLockedTarget.box.height / 2);
+                            m_sharedLockedTarget.trail.push_back(center);
+                            if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(currentSettings.trackerMaxTrailLength)) {
+                                m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
+                            }
+                        } else {
+                            m_sharedLockedTarget.lost_frames++;
+                            if (m_sharedLockedTarget.lost_frames > currentSettings.trackerMaxLostFrames) {
+                                m_sharedLockedTarget.state = TrackingState::LOST;
+                                m_pixelLockActive = false;
+                            } else {
+                                m_sharedLockedTarget.state = TrackingState::LOST;
+                            }
                         }
                     } else {
-                        m_sharedLockedTarget.lost_frames++;
-                        if (m_sharedLockedTarget.lost_frames > currentSettings.trackerMaxLostFrames) {
-                            m_sharedLockedTarget.state = TrackingState::LOST;
-                            m_pixelLockActive = false;
-                        } else {
-                            m_sharedLockedTarget.state = TrackingState::LOST;
-                        }
+                        m_pixelLockActive = false;
+                        m_sharedLockedTarget.state = TrackingState::LOST;
                     }
-                } else {
-                    m_pixelLockActive = false;
-                    m_sharedLockedTarget.state = TrackingState::LOST;
                 }
             }
 
@@ -463,6 +467,45 @@ void Application::workerLoop() {
                 m_sharedLockedTarget.lost_frames = 0;
                 m_sharedLockedTarget.trail.clear();
                 m_sharedLockedTarget.trail.push_back(pt);
+            }
+        }
+
+        // Process pixel lock template update request (manual resize/drag)
+        if (m_pixelLockRectUpdateRequested.exchange(false)) {
+            cv::Rect rect;
+            {
+                std::lock_guard<std::mutex> lock(m_dataMutex);
+                rect = m_pixelLockRect;
+            }
+
+            // Clamp to frame
+            rect.x = std::max(0, rect.x);
+            rect.y = std::max(0, rect.y);
+            if (rect.x + rect.width > trackingFrame.cols) {
+                rect.width = trackingFrame.cols - rect.x;
+            }
+            if (rect.y + rect.height > trackingFrame.rows) {
+                rect.height = trackingFrame.rows - rect.y;
+            }
+
+            if (rect.width > 4 && rect.height > 4) {
+                m_pixelTemplate = trackingFrame(rect).clone();
+                m_pixelLockActive = true;
+
+                m_sharedLockedTarget.state = TrackingState::LOCKED;
+                m_sharedLockedTarget.track_id = 999;
+                m_sharedLockedTarget.class_id = -1;
+                m_sharedLockedTarget.className = "Pixel Target";
+                m_sharedLockedTarget.box = rect;
+                m_sharedLockedTarget.confidence = 1.0f;
+                m_sharedLockedTarget.lost_frames = 0;
+
+                cv::Point newCenter(rect.x + rect.width / 2, rect.y + rect.height / 2);
+                if (!m_sharedLockedTarget.trail.empty()) {
+                    m_sharedLockedTarget.trail.back() = newCenter;
+                } else {
+                    m_sharedLockedTarget.trail.push_back(newCenter);
+                }
             }
         }
 
@@ -809,7 +852,7 @@ void Application::renderDevConsole() {
     // ── Header bar ──────────────────────────────────────────────────────
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "HORUS DEV CONSOLE");
     ImGui::SameLine();
-    ImGui::TextDisabled("v1.10.7");
+    ImGui::TextDisabled("v1.10.8");
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120.0f);
     if (ImGui::Button("Settings...", ImVec2(110, 0)))
         m_showSettingsWindow = !m_showSettingsWindow;
@@ -1700,28 +1743,63 @@ void Application::run() {
 
                 if (m_editState == ROIEditState::NONE) {
                     // Check corners first
-                    for (const auto& z : zones) {
-                        cv::Rect r = z.rect;
+                    if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == 999) {
+                        cv::Rect r = m_lockedTarget.box;
                         cv::Point tl(r.x, r.y);
                         cv::Point tr(r.x + r.width, r.y);
                         cv::Point bl(r.x, r.y + r.height);
                         cv::Point br(r.x + r.width, r.y + r.height);
 
                         if (std::hypot(mVideo.x - tl.x, mVideo.y - tl.y) <= tol) {
-                            hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_TL; break;
+                            hoveredZoneId = 999; hoveredAction = ROIEditState::RESIZING_TL;
+                        } else if (std::hypot(mVideo.x - tr.x, mVideo.y - tr.y) <= tol) {
+                            hoveredZoneId = 999; hoveredAction = ROIEditState::RESIZING_TR;
+                        } else if (std::hypot(mVideo.x - bl.x, mVideo.y - bl.y) <= tol) {
+                            hoveredZoneId = 999; hoveredAction = ROIEditState::RESIZING_BL;
+                        } else if (std::hypot(mVideo.x - br.x, mVideo.y - br.y) <= tol) {
+                            hoveredZoneId = 999; hoveredAction = ROIEditState::RESIZING_BR;
                         }
-                        if (std::hypot(mVideo.x - tr.x, mVideo.y - tr.y) <= tol) {
-                            hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_TR; break;
-                        }
-                        if (std::hypot(mVideo.x - bl.x, mVideo.y - bl.y) <= tol) {
-                            hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_BL; break;
-                        }
-                        if (std::hypot(mVideo.x - br.x, mVideo.y - br.y) <= tol) {
-                            hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_BR; break;
+                    }
+
+                    if (hoveredZoneId == -1) {
+                        for (const auto& z : zones) {
+                            cv::Rect r = z.rect;
+                            cv::Point tl(r.x, r.y);
+                            cv::Point tr(r.x + r.width, r.y);
+                            cv::Point bl(r.x, r.y + r.height);
+                            cv::Point br(r.x + r.width, r.y + r.height);
+
+                            if (std::hypot(mVideo.x - tl.x, mVideo.y - tl.y) <= tol) {
+                                hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_TL; break;
+                            }
+                            if (std::hypot(mVideo.x - tr.x, mVideo.y - tr.y) <= tol) {
+                                hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_TR; break;
+                            }
+                            if (std::hypot(mVideo.x - bl.x, mVideo.y - bl.y) <= tol) {
+                                hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_BL; break;
+                            }
+                            if (std::hypot(mVideo.x - br.x, mVideo.y - br.y) <= tol) {
+                                hoveredZoneId = z.id; hoveredAction = ROIEditState::RESIZING_BR; break;
+                            }
                         }
                     }
 
                     // Check edges if no corner hovered
+                    if (hoveredZoneId == -1) {
+                        if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == 999) {
+                            cv::Rect r = m_lockedTarget.box;
+                            if (std::abs(mVideo.x - r.x) <= tol && mVideo.y >= r.y && mVideo.y <= r.y + r.height) {
+                                hoveredZoneId = 999; hoveredAction = ROIEditState::RESIZING_L;
+                            } else if (std::abs(mVideo.x - (r.x + r.width)) <= tol && mVideo.y >= r.y && mVideo.y <= r.y + r.height) {
+                                hoveredZoneId = 999; hoveredAction = ROIEditState::RESIZING_R;
+                            } else if (std::abs(mVideo.y - r.y) <= tol && mVideo.x >= r.x && mVideo.x <= r.x + r.width) {
+                                hoveredZoneId = 999; hoveredAction = ROIEditState::RESIZING_T;
+                            } else if (std::abs(mVideo.y - (r.y + r.height)) <= tol && mVideo.x >= r.x && mVideo.x <= r.x + r.width) {
+                                hoveredZoneId = 999; hoveredAction = ROIEditState::RESIZING_B;
+                            }
+                        }
+                    }
+
                     if (hoveredZoneId == -1) {
                         for (const auto& z : zones) {
                             cv::Rect r = z.rect;
@@ -1741,6 +1819,16 @@ void Application::run() {
                     }
 
                     // Check center (moving) if no edge/corner hovered
+                    if (hoveredZoneId == -1) {
+                        if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == 999) {
+                            cv::Rect r = m_lockedTarget.box;
+                            if (mVideo.x > r.x && mVideo.x < r.x + r.width &&
+                                mVideo.y > r.y && mVideo.y < r.y + r.height) {
+                                hoveredZoneId = 999; hoveredAction = ROIEditState::MOVING;
+                            }
+                        }
+                    }
+
                     if (hoveredZoneId == -1) {
                         for (const auto& z : zones) {
                             cv::Rect r = z.rect;
@@ -1794,10 +1882,15 @@ void Application::run() {
                         m_editZoneId = hoveredZoneId;
                         m_editDragStartMouse = mVideo;
                         // Get the zone starting rect
-                        for (const auto& z : zones) {
-                            if (z.id == m_editZoneId) {
-                                m_editDragStartRect = z.rect;
-                                break;
+                        if (m_editZoneId == 999) {
+                            m_editDragStartRect = m_lockedTarget.box;
+                            m_pixelLockDragging.store(true);
+                        } else {
+                            for (const auto& z : zones) {
+                                if (z.id == m_editZoneId) {
+                                    m_editDragStartRect = z.rect;
+                                    break;
+                                }
                             }
                         }
                     } else if (zones.size() < ROIManager::kMaxZones) {
@@ -1870,7 +1963,19 @@ void Application::run() {
                             default:
                                 break;
                         }
-                        m_roiManager->updateRect(m_editZoneId, newRect);
+                        if (m_editZoneId == 999) {
+                            // Clamp newRect to frame boundaries
+                            newRect.x = std::clamp(newRect.x, 0, cols - 4);
+                            newRect.y = std::clamp(newRect.y, 0, rows - 4);
+                            newRect.width = std::clamp(newRect.width, 4, cols - newRect.x);
+                            newRect.height = std::clamp(newRect.height, 4, rows - newRect.y);
+
+                            std::lock_guard<std::mutex> lock(m_dataMutex);
+                            m_sharedLockedTarget.box = newRect;
+                            m_lockedTarget.box = newRect;
+                        } else {
+                            m_roiManager->updateRect(m_editZoneId, newRect);
+                        }
                     }
                 }
 
@@ -1890,6 +1995,16 @@ void Application::run() {
                         }
                         if (static_cast<int>(m_roiManager->getROIs().size()) >= ROIManager::kMaxZones)
                             m_roiEditMode = false;
+                    } else if (m_editZoneId == 999) {
+                        m_pixelLockDragging.store(false);
+                        {
+                            std::lock_guard<std::mutex> lock(m_dataMutex);
+                            m_pixelLockRect = m_lockedTarget.box;
+                            m_pixelLockRectUpdateRequested.store(true);
+                        }
+                        log(LogLevel::INFO, "Pixel target template updated via manual drag/resize to: (" +
+                            std::to_string(m_lockedTarget.box.x) + ", " + std::to_string(m_lockedTarget.box.y) + ", " +
+                            std::to_string(m_lockedTarget.box.width) + "x" + std::to_string(m_lockedTarget.box.height) + ")");
                     }
                     m_editState = ROIEditState::NONE;
                     m_editZoneId = -1;
@@ -1898,6 +2013,12 @@ void Application::run() {
                 if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
                     if (m_editState == ROIEditState::DRAWING && m_roiManager->isDragging()) {
                         m_roiManager->cancelDrag();
+                    } else if (m_editZoneId == 999) {
+                        m_pixelLockDragging.store(false);
+                        // Revert the box to original before dragging
+                        std::lock_guard<std::mutex> lock(m_dataMutex);
+                        m_sharedLockedTarget.box = m_editDragStartRect;
+                        m_lockedTarget.box = m_editDragStartRect;
                     }
                     m_editState = ROIEditState::NONE;
                     m_editZoneId = -1;
@@ -2002,6 +2123,35 @@ void Application::run() {
                              funcPrefix.c_str(), z.id, z.label.c_str(), z.active ? "" : " (off)");
                     drawList->AddText(ImVec2(rMin.x + 4, rMin.y + 3), col, zoneLbl);
                 }
+            }
+
+            // Draw pixel target handles in edit mode
+            if (m_roiEditMode && m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == 999) {
+                bool isHovered = (hoveredZoneId == 999);
+                bool isEditing = (m_editZoneId == 999);
+                ImU32 col = (isHovered || isEditing) ? IM_COL32(255, 255, 0, 255) : IM_COL32(255, 50, 50, 255);
+                float borderThickness = (isHovered || isEditing) ? 2.5f : 1.5f;
+
+                ImVec2 rMin(view.pos_x + m_lockedTarget.box.x * view.scale,
+                            view.pos_y + m_lockedTarget.box.y * view.scale);
+                ImVec2 rMax(view.pos_x + (m_lockedTarget.box.x + m_lockedTarget.box.width)  * view.scale,
+                            view.pos_y + (m_lockedTarget.box.y + m_lockedTarget.box.height) * view.scale);
+
+                ImVec2 tl(rMin.x, rMin.y);
+                ImVec2 tr(rMax.x, rMin.y);
+                ImVec2 bl(rMin.x, rMax.y);
+                ImVec2 br(rMax.x, rMax.y);
+
+                drawList->AddRect(rMin, rMax, col, 0.0f, 0, borderThickness);
+                drawList->AddRectFilled(rMin, rMax, IM_COL32(255, 50, 50, 25)); // Faint red fill
+                drawList->AddRectFilled(ImVec2(tl.x - 3, tl.y - 3), ImVec2(tl.x + 3, tl.y + 3), col);
+                drawList->AddRectFilled(ImVec2(tr.x - 3, tr.y - 3), ImVec2(tr.x + 3, tr.y + 3), col);
+                drawList->AddRectFilled(ImVec2(bl.x - 3, bl.y - 3), ImVec2(bl.x + 3, bl.y + 3), col);
+                drawList->AddRectFilled(ImVec2(br.x - 3, br.y - 3), ImVec2(br.x + 3, br.y + 3), col);
+
+                char targetLbl[64];
+                snprintf(targetLbl, sizeof(targetLbl), "[PIXEL TARGET] ID:999");
+                drawList->AddText(ImVec2(rMin.x + 4, rMin.y + 3), col, targetLbl);
             }
 
             // ── Regular HUD and target locking ────────────────────────
