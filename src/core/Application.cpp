@@ -83,7 +83,8 @@ void Application::log(LogLevel level, const std::string& msg) {
 
 bool Application::init(int argc, char** argv) {
     if (argc > 1) m_cameraAddress = argv[1];
-    else          m_cameraAddress = "0";
+    else          m_cameraAddress = "1";
+    snprintf(m_cameraInputBuf, sizeof(m_cameraInputBuf), "%s", m_cameraAddress.c_str());
 
     log(LogLevel::INFO, "Opening camera: " + m_cameraAddress);
     int requestedW = m_settings.request4KCamera ? 3840 : 1280;
@@ -806,7 +807,7 @@ void Application::renderDevConsole() {
     // ── Header bar ──────────────────────────────────────────────────────
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "HORUS DEV CONSOLE");
     ImGui::SameLine();
-    ImGui::TextDisabled("v1.10.5");
+    ImGui::TextDisabled("v1.10.6");
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120.0f);
     if (ImGui::Button("Settings...", ImVec2(110, 0)))
         m_showSettingsWindow = !m_showSettingsWindow;

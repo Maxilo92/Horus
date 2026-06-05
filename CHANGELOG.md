@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.10.6] - 2026-06-05
+### Changed
+- **Default Camera Source**: Swapped the default camera UVC device index from `"0"` to `"1"` (representing USB camera #1) and ensured the UI text input displays this default on startup.
+
 ## [1.10.5] - 2026-06-05
 ### Added
 - **HUD Bounding Box for Pixel Targets**: Custom pixel targets (ID 999) are now appended to the tracked objects list. This ensures the target's bounding box is rendered directly on the main Camera View HUD just like any standard YOLO-detected object.
