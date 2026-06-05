@@ -22,5 +22,12 @@ Diese Datei definiert die absolut bindenden Standards für Project Horus. Da die
 - **Memory Safety**: Bevorzugung von RAII und Smart Pointern. Verzicht auf rohe Pointer-Arithmetik, wo immer möglich.
 - **Input-Validierung**: Jedes Signal vom Sensor (Kamera) und jede Benutzereingabe muss auf Plausibilität geprüft werden, bevor sie verarbeitet wird.
 
+## 5. Versionskontrolle & Source Control (Git)
+- **Git-Nutzung**: Die Verwendung von lokalem Git ist für dieses Projekt ZWINGEND. Alle Agenten MÜSSEN Git aktiv für die Versionsverwaltung nutzen.
+- **Atomic Commits**: Jede logische Änderung (Bugfix, neues Feature, Refactoring) muss in einem eigenen Commit erfolgen.
+- **Commit Messages**: Nutze aussagekräftige, präzise Commit-Messages (z.B. "feat: add ROI validation logic" oder "fix: resolve memory leak in MultiTracker").
+- **Staging & Committing**: Agenten sind ausdrücklich dazu aufgefordert, ihre Änderungen zu stagen (`git add`) und nach erfolgreicher Validierung zu committen (`git commit`). 
+- **Verbotene Commits**: Committe niemals Build-Artefakte, Logs oder temporäre Dateien (siehe `.gitignore`).
+
 ---
 *Hinweis: Project Horus wird wie ein Missions-kritisches System behandelt. Nachlässigkeit in der Implementierung ist ein Verstoß gegen das Projektmandat.*
