@@ -35,7 +35,8 @@ static float GetAppSeconds(std::chrono::steady_clock::time_point start) {
 Application::Application()
     : m_window(nullptr), m_width(1280), m_height(720),
       m_title("Project Horus - Target Viewer"),
-      m_lockRequested(false), m_running(false), m_newDataAvailable(false) {
+      m_lockRequested(false), m_requestedLockId(-1), m_releaseLockRequested(false),
+      m_running(false), m_newDataAvailable(false) {
 
     m_appStart = std::chrono::steady_clock::now();
     m_lastRenderTime = m_appStart;
@@ -319,7 +320,7 @@ void Application::renderDataPanel() {
 
     if (ImGui::BeginTable("Tracks", 5,
             ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-            ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp)) {
+            ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable)) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("ID",       ImGuiTableColumnFlags_WidthFixed, 35.0f);
         ImGui::TableSetupColumn("Class",    ImGuiTableColumnFlags_WidthStretch);
@@ -330,8 +331,20 @@ void Application::renderDataPanel() {
 
         for (const auto& obj : m_trackedObjects) {
             ImGui::TableNextRow();
+            
+            bool isSelected = (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == obj.track_id);
+            
             ImGui::TableSetColumnIndex(0);
-            ImGui::Text("%d", obj.track_id);
+            char idLabel[32];
+            snprintf(idLabel, sizeof(idLabel), "%03d", obj.track_id);
+            if (ImGui::Selectable(idLabel, isSelected, ImGuiSelectableFlags_SpanAllColumns)) {
+                if (isSelected) {
+                    m_releaseLockRequested.store(true);
+                } else {
+                    m_requestedLockId.store(obj.track_id);
+                    m_lockRequested.store(true);
+                }
+            }
 
             ImGui::TableSetColumnIndex(1);
             ImGui::Text("%s", obj.className.c_str());
@@ -349,7 +362,9 @@ void Application::renderDataPanel() {
             ImGui::TextColored(confColor, "%.2f", obj.confidence);
 
             ImGui::TableSetColumnIndex(4);
-            if (obj.is_confirmed)
+            if (isSelected)
+                ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "LOCKED");
+            else if (obj.is_confirmed)
                 ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.5f, 1.0f), "LOCK");
             else if (obj.lost_frames > 0)
                 ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "LOST");
@@ -358,6 +373,14 @@ void Application::renderDataPanel() {
         }
         ImGui::EndTable();
     }
+    
+    if (m_lockedTarget.state != TrackingState::SEARCHING) {
+        ImGui::Separator();
+        if (ImGui::Button("Release Lock", ImVec2(-FLT_MIN, 0))) {
+            m_releaseLockRequested.store(true);
+        }
+    }
+    
     ImGui::End();
 }
 
@@ -529,19 +552,27 @@ void Application::renderDevConsole() {
             if (m_cameraChangeRequested.load())
                 ImGui::TextColored(ImVec4(1.0f,0.8f,0.1f,1.0f), "  Switching...");
 
-
             ImGui::Separator();
-            if (ImGui::Button("Reset All Settings", ImVec2(-1, 0))) {
-                m_settings = SystemSettings{};
-                m_settings.hudColor    = Float4ToImU32(m_hudColorF);
-                m_settings.targetColor = Float4ToImU32(m_targetColorF);
-                settingsChanged = true;
-                log(LogLevel::WARN, "All settings reset to defaults");
+            static bool confirmQuit = false;
+            ImGui::Checkbox("Enable Admin Actions", &confirmQuit);
+            if (confirmQuit) {
+                if (ImGui::Button("Reset All Settings", ImVec2(-1, 0))) {
+                    m_settings = SystemSettings{};
+                    m_settings.hudColor    = Float4ToImU32(m_hudColorF);
+                    m_settings.targetColor = Float4ToImU32(m_targetColorF);
+                    settingsChanged = true;
+                    log(LogLevel::WARN, "All settings reset to defaults");
+                }
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.1f, 0.1f, 1.0f));
+                if (ImGui::Button("Quit Application", ImVec2(-1, 0)))
+                    glfwSetWindowShouldClose(m_window, true);
+                ImGui::PopStyleColor();
+            } else {
+                ImGui::TextDisabled("(Admin actions locked)");
             }
-            if (ImGui::Button("Quit Application", ImVec2(-1, 0)))
-                glfwSetWindowShouldClose(m_window, true);
 
             ImGui::EndTabItem();
+
         }
 
         // ── TAB: Detector ──────────────────────────────────────────────
@@ -945,7 +976,7 @@ void Application::run() {
 
             handleTargetLocking(view);
             m_hud->render(drawList, static_cast<int>(avail.x), static_cast<int>(avail.y),
-                          m_cameraFps, m_trackedObjects, view, m_settings);
+                          m_cameraFps, m_trackedObjects, m_lockedTarget, view, m_settings);
         }
         ImGui::End();
 

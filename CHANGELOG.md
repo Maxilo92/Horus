@@ -2,6 +2,21 @@
 
 ## [1.7.1] - 2026-06-05
 ### Added
+- **UI Safety Hardening:** Implemented a mandatory "Enable Admin Actions" checkbox for destructive operations (Reset/Quit) to prevent accidental closure from phantom input or glitches.
+### Fixed
+- **HUD Synchronization:** Restored the `lockedTarget` reference to the `HUD::render` loop and updated the status window to display real-time lock status (LOCKED/LOST/ONLINE).
+- **Type Stability:** Corrected `ImVec` type mismatches in the Dev Console.
+
+## [1.7.0] - 2026-06-05
+
+### Fixed
+- **UI Interaction Reconstruction:** Fully restored the interactive locking mechanism in the Data Panel. Clicking a row now correctly toggles the target lock.
+- **Worker Synchronization:** Fixed a race condition where UI-thread lock requests were being overwritten or ignored by the tracking worker thread.
+- **HUD Telemetry Restoration:** Restored the "TARGET" status block in the HUD, providing real-time data for the currently locked track.
+- **Visual Highlighting:** Re-implemented distinctive red highlighting for locked targets in both the Camera View and Data Panel.
+
+## [1.7.1] - 2026-06-05
+### Added
 - **Live Camera Selection UI:** System tab now contains a full camera-source panel with:
   - Status badge showing current active source (green = active, red = failed)
   - Quick-select combo dropdown (Camera 0–5, RTSP, HTTP presets)

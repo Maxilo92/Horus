@@ -34,6 +34,7 @@ HUD::~HUD() {}
 
 void HUD::render(ImDrawList* drawList, int width, int height, float fps,
                  const std::vector<TrackedObject>& trackedObjects,
+                 const TrackedTarget& lockedTarget,
                  const ViewportInfo& view, const SystemSettings& settings) {
 
     // Resolve live colors from settings (overrides internal defaults if set)
@@ -54,10 +55,11 @@ void HUD::render(ImDrawList* drawList, int width, int height, float fps,
     if (settings.showTacticalOverlay) drawTacticalOverlay(drawList, view, currentTime, hudColor);
     if (settings.showCrosshair)       drawCrosshair(drawList, center, hudColor, settings.crosshairScale);
     if (settings.showCornerBrackets)  drawCornerBrackets(drawList, view, hudColor);
-    if (settings.showStatusWindows)   drawStatusWindows(drawList, view, fps, trackedObjects.size(), hudColor);
+    if (settings.showStatusWindows)   drawStatusWindows(drawList, view, fps, trackedObjects.size(), lockedTarget, hudColor);
 
     for (const auto& obj : trackedObjects) {
-        drawTrackedObject(drawList, obj, view, settings, targetColor, hudColor);
+        bool isLocked = (lockedTarget.state != TrackingState::SEARCHING && lockedTarget.track_id == obj.track_id);
+        drawTrackedObject(drawList, obj, view, settings, targetColor, hudColor, isLocked);
     }
 
     drawList->PopClipRect();
@@ -110,15 +112,22 @@ void HUD::drawCrosshair(ImDrawList* drawList, ImVec2 center, ImU32 color, float 
 }
 
 void HUD::drawStatusWindows(ImDrawList* drawList, const ViewportInfo& view,
-                             float fps, size_t trackedCount, ImU32 textColor) {
+                             float fps, size_t trackedCount, const TrackedTarget& lockedTarget, ImU32 textColor) {
     ImU32 bgColor = IM_COL32(0, 0, 0, 150);
     float padding = 8.0f;
     float margin  = 20.0f;
 
     // Data Block (Top Left)
     {
-        char dataText[128];
-        snprintf(dataText, sizeof(dataText), "FPS: %.1f\nTRK: %zu", fps, trackedCount);
+        char dataText[256];
+        if (lockedTarget.state != TrackingState::SEARCHING) {
+            const char* stateStr = (lockedTarget.state == TrackingState::LOCKED) ? "LOCKED" : "LOST";
+            snprintf(dataText, sizeof(dataText), "FPS: %.1f\nTRK: %zu\n\nTARGET: %03d\nSTATE: %s\nCLS: %s", 
+                     fps, trackedCount, lockedTarget.track_id, stateStr, lockedTarget.className.c_str());
+        } else {
+            snprintf(dataText, sizeof(dataText), "FPS: %.1f\nTRK: %zu\n\nTARGET: NONE", fps, trackedCount);
+        }
+
         ImVec2 textSize = ImGui::CalcTextSize(dataText);
         ImVec2 bgStart(view.pos_x + margin, view.pos_y + margin);
         ImVec2 bgEnd(bgStart.x + textSize.x + padding * 2, bgStart.y + textSize.y + padding * 2);
@@ -129,7 +138,7 @@ void HUD::drawStatusWindows(ImDrawList* drawList, const ViewportInfo& view,
 
     // SysLog Block (Bottom Left)
     {
-        const char* sysLogText = "SYS: ONLINE\nACTIVE THRT";
+        const char* sysLogText = "SYS: ONLINE\nMISSION: ACTIVE";
         ImVec2 textSize = ImGui::CalcTextSize(sysLogText);
         ImVec2 bgStart(view.pos_x + margin,
                        view.pos_y + view.target_h - textSize.y - padding * 2 - margin);
@@ -141,7 +150,8 @@ void HUD::drawStatusWindows(ImDrawList* drawList, const ViewportInfo& view,
 }
 
 void HUD::drawCornerBrackets(ImDrawList* drawList, const ViewportInfo& view, ImU32 color) {
-    float m = 30.0f, l = 40.0f;
+    float m  = 30.0f;
+    float l  = 40.0f;
     float x1 = view.pos_x, y1 = view.pos_y;
     float x2 = view.pos_x + view.target_w;
     float y2 = view.pos_y + view.target_h;
@@ -154,13 +164,18 @@ void HUD::drawCornerBrackets(ImDrawList* drawList, const ViewportInfo& view, ImU
 
 void HUD::drawTrackedObject(ImDrawList* drawList, const TrackedObject& obj,
                              const ViewportInfo& view, const SystemSettings& settings,
-                             ImU32 targetColor, ImU32 hudColor) {
+                             ImU32 targetColor, ImU32 hudColor, bool isLocked) {
     float x1 = view.pos_x + obj.box.x * view.scale;
     float y1 = view.pos_y + obj.box.y * view.scale;
     float x2 = x1 + obj.box.width  * view.scale;
     float y2 = y1 + obj.box.height * view.scale;
 
     ImU32 boxColor = obj.is_confirmed ? targetColor : IM_COL32(150, 150, 150, 150);
+    if (isLocked) {
+        boxColor = IM_COL32(255, 50, 50, 255); // Solid red for locked target
+    }
+
+    float lw = isLocked ? settings.boxLineWidth * 1.8f : settings.boxLineWidth;
 
     // Draw fading trail
     if (settings.showTrails && obj.trail.size() > 1) {
@@ -181,16 +196,18 @@ void HUD::drawTrackedObject(ImDrawList* drawList, const TrackedObject& obj,
                       view.pos_y + obj.trail[i].y   * view.scale);
             ImVec2 p2(view.pos_x + obj.trail[i+1].x * view.scale,
                       view.pos_y + obj.trail[i+1].y * view.scale);
-            drawList->AddLine(p1, p2, trailColor, 1.5f);
+            drawList->AddLine(p1, p2, trailColor, lw);
         }
     }
 
     // Bounding box
-    drawList->AddRect(ImVec2(x1, y1), ImVec2(x2, y2), boxColor, 0.0f, 0, settings.boxLineWidth);
+    drawList->AddRect(ImVec2(x1, y1), ImVec2(x2, y2), boxColor, 0.0f, 0, lw);
 
     // Label: build according to visibility toggles
     char tag[160] = {0};
-    if (settings.showTrackIDs && settings.showConfidence) {
+    if (isLocked) {
+        snprintf(tag, sizeof(tag), ">>> ID:%03d <<<", obj.track_id);
+    } else if (settings.showTrackIDs && settings.showConfidence) {
         snprintf(tag, sizeof(tag), "ID:%d [%s]  CONF:%.2f",
                  obj.track_id, obj.className.c_str(), obj.confidence);
     } else if (settings.showTrackIDs) {
@@ -200,20 +217,16 @@ void HUD::drawTrackedObject(ImDrawList* drawList, const TrackedObject& obj,
         snprintf(tag, sizeof(tag), "[%s]  %.2f",
                  obj.className.c_str(), obj.confidence);
     } else {
-        tag[0] = '\0';
+        snprintf(tag, sizeof(tag), "[%s]", obj.className.c_str());
     }
 
     if (tag[0] != '\0') {
-        ImVec2 tagSize = ImGui::CalcTextSize(tag);
-        float  labelH  = tagSize.y + 8.0f;
-        float  labelW  = tagSize.x + 10.0f;
+        ImVec2 tSize = ImGui::CalcTextSize(tag);
+        ImVec2 tPos(x1, y1 - tSize.y - 4.0f);
+        if (tPos.y < view.pos_y) tPos.y = y1 + 4.0f;
 
-        ImVec2 tagPos(x1, y1 - labelH - 2.0f);
-        if (tagPos.y < view.pos_y) tagPos.y = y1 + 5.0f;
-
-        ImVec2 bgEnd(tagPos.x + labelW, tagPos.y + labelH);
-        drawList->AddRectFilled(tagPos, bgEnd, IM_COL32(0, 0, 0, 180), 2.0f);
-        drawList->AddRect(tagPos, bgEnd, boxColor, 2.0f, 0, 0.5f);
-        drawList->AddText(ImVec2(tagPos.x + 5.0f, tagPos.y + 4.0f), boxColor, tag);
+        drawList->AddRectFilled(tPos, ImVec2(tPos.x + tSize.x + 6.0f, tPos.y + tSize.y),
+                                IM_COL32(0, 0, 0, 160));
+        drawList->AddText(ImVec2(tPos.x + 3.0f, tPos.y), boxColor, tag);
     }
 }
