@@ -26,18 +26,18 @@ bool Application::init(int argc, char** argv) {
     }
 
     try {
-        std::string modelPath = "../models/yolov8n.onnx";
-        std::string labelsPath = "../models/coco.txt";
+        std::string modelPath = "../assets/models/yolov8n.onnx";
+        std::string labelsPath = "../assets/models/coco.txt";
         FILE* f = fopen(modelPath.c_str(), "r");
         if (!f) {
-            modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/models/yolov8n.onnx";
-            labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/models/coco.txt";
+            modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/yolov8n.onnx";
+            labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/coco.txt";
             f = fopen(modelPath.c_str(), "r");
         }
         if (f) fclose(f);
         else {
-            modelPath = "models/yolov8n.onnx";
-            labelsPath = "models/coco.txt";
+            modelPath = "assets/models/yolov8n.onnx";
+            labelsPath = "assets/models/coco.txt";
         }
         m_detector = std::make_unique<ObjectDetector>(modelPath, labelsPath);
     } catch (const std::exception& e) {
@@ -77,8 +77,14 @@ bool Application::initImGui() {
 
 void Application::workerLoop() {
     cv::Mat frame;
+    auto lastTime = std::chrono::steady_clock::now();
     while (m_running) {
         if (m_camera->read(frame)) {
+            auto currentTime = std::chrono::steady_clock::now();
+            float dt = std::chrono::duration<float>(currentTime - lastTime).count();
+            lastTime = currentTime;
+            float currentFps = (dt > 0) ? 1.0f / dt : 0.0f;
+
             SystemSettings currentSettings;
             {
                 std::lock_guard<std::mutex> lock(m_dataMutex);
@@ -93,6 +99,7 @@ void Application::workerLoop() {
             m_sharedFrame = frame.clone();
             m_sharedDetections = detections;
             m_sharedTrackedObjects = tracked;
+            m_sharedCameraFps = currentFps;
             m_newDataAvailable = true;
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -127,6 +134,7 @@ void Application::run() {
                 m_detections = m_sharedDetections;
                 m_trackedObjects = m_sharedTrackedObjects;
                 m_lockedTarget = m_sharedLockedTarget;
+                m_cameraFps = m_sharedCameraFps;
                 m_renderer->updateTexture(currentFrame);
                 m_newDataAvailable = false;
             }
@@ -152,7 +160,7 @@ void Application::run() {
             handleTargetLocking(view);
             m_renderer->drawBackground(display_w, display_h, currentFrame);
         }
-        m_hud->render(ImGui::GetBackgroundDrawList(), display_w, display_h, ImGui::GetIO().Framerate, m_trackedObjects, view, m_settings);
+        m_hud->render(ImGui::GetBackgroundDrawList(), display_w, display_h, m_cameraFps, m_trackedObjects, view, m_settings);
         
         ImGui::Begin("Dev Console");
         bool changed = false;

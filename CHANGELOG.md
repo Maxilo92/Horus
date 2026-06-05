@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.6.0] - 2026-06-05
+### Added
+- **Architectural Refactoring:** Organized source files into logical subdirectories (`core`, `vision`, `tracking`, `ui`) for improved maintainability and "Military-Grade" clarity.
+- **Resource Management:** Moved AI models and labels to a dedicated `assets/models` directory.
+### Changed
+- **CMake Modernization:** Updated `CMakeLists.txt` to support the new directory structure and modular include paths.
+- **Path Resolution:** Refactored `Application.cpp` to use the new relative and absolute paths for model loading.
+
+## [1.5.2] - 2026-06-05
+
+### Changed
+- **Viewport-Isolated HUD:** Implemented strict clipping for the tactical HUD using `PushClipRect`, ensuring all overlays (crosshairs, brackets, trails) are confined to the video area, even when letterboxed.
+- **Refactored Status Windows:** Replaced ImGui-based status windows with direct `ImDrawList` primitives. This eliminates global window management overhead and ensures UI elements respect the HUD's coordinate system and clipping.
+- **Enhanced Telemetry Layout:** Repositioned "Data" (FPS, TRK) to the top-left and "SysLog" (Status, Active Threat) to the bottom-left of the viewport with a high-contrast, semi-transparent HUD aesthetic.
+
+## [1.5.4] - 2026-06-05
+### Added
+- **Independent Camera Telemetry:** Implemented high-precision camera FPS calculation in the worker loop, decoupled from the main UI framerate.
+- **Improved HUD Telemetry Accuracy:** The tactical HUD now displays actual camera processing performance instead of ImGui render speed.
+- **Thread-Safe Telemetry Sync:** Established a new synchronization pattern for worker-to-UI telemetry data using the existing mutex architecture.
+
 ## [1.5.3] - 2026-06-05
 ### Fixed
 - **Unit Test Build Errors:** Resolved build failures in `unit_tests.cpp` caused by the removal of `SingleTracker` from the core project.

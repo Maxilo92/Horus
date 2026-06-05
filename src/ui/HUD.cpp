@@ -33,14 +33,18 @@ void HUD::render(ImDrawList* drawList, int width, int height, float fps, const s
     ImVec2 center = ImVec2(view.pos_x + view.target_w / 2.0f, view.pos_y + view.target_h / 2.0f);
     float currentTime = GetTimeSeconds() - m_startTime;
 
+    drawList->PushClipRect(ImVec2(view.pos_x, view.pos_y), ImVec2(view.pos_x + view.target_w, view.pos_y + view.target_h), true);
+
     if (settings.showTacticalOverlay) drawTacticalOverlay(drawList, view, currentTime);
     if (settings.showCrosshair) drawCrosshair(drawList, center, m_hudColor);
     if (settings.showCornerBrackets) drawCornerBrackets(drawList, view, m_hudColor);
-    if (settings.showStatusWindows) drawStatusWindows(view, fps, trackedObjects.size());
+    if (settings.showStatusWindows) drawStatusWindows(drawList, view, fps, trackedObjects.size());
 
     for (const auto& obj : trackedObjects) {
         drawTrackedObject(drawList, obj, view, settings);
     }
+
+    drawList->PopClipRect();
 }
 
 void HUD::drawTacticalOverlay(ImDrawList* drawList, const ViewportInfo& view, float time) {
@@ -70,21 +74,32 @@ void HUD::drawCrosshair(ImDrawList* drawList, ImVec2 center, ImU32 color) {
     drawList->AddCircle(center, 4.0f, color, 12, 1.0f);
 }
 
-void HUD::drawStatusWindows(const ViewportInfo& view, float fps, size_t trackedCount) {
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 10));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.4f, 1.0f));
-    ImGui::SetNextWindowPos(ImVec2(view.pos_x + 20, view.pos_y + view.target_h - 100));
-    ImGui::Begin("SysLog", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoInputs);
-    ImGui::Text("SYS: ONLINE");
-    ImGui::Text("MTK: ACTIVE");
-    ImGui::End();
-    ImGui::SetNextWindowPos(ImVec2(view.pos_x + 20, view.pos_y + 20));
-    ImGui::Begin("Data", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoInputs);
-    ImGui::Text("FPS: %.1f", fps);
-    ImGui::Text("TRK: %zu OBJECTS", trackedCount);
-    ImGui::End();
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar();
+void HUD::drawStatusWindows(ImDrawList* drawList, const ViewportInfo& view, float fps, size_t trackedCount) {
+    ImU32 textColor = IM_COL32(0, 255, 100, 255);
+    ImU32 bgColor = IM_COL32(0, 0, 0, 150);
+    float padding = 8.0f;
+    float margin = 20.0f;
+
+    // Data Block (Top Left)
+    {
+        char dataText[128];
+        snprintf(dataText, sizeof(dataText), "FPS: %.1f\nTRK: %zu", fps, trackedCount);
+        ImVec2 textSize = ImGui::CalcTextSize(dataText);
+        ImVec2 bgStart(view.pos_x + margin, view.pos_y + margin);
+        ImVec2 bgEnd(bgStart.x + textSize.x + padding * 2, bgStart.y + textSize.y + padding * 2);
+        drawList->AddRectFilled(bgStart, bgEnd, bgColor);
+        drawList->AddText(ImVec2(bgStart.x + padding, bgStart.y + padding), textColor, dataText);
+    }
+
+    // SysLog Block (Bottom Left)
+    {
+        const char* sysLogText = "SYS: ONLINE\nACTIVE THRT";
+        ImVec2 textSize = ImGui::CalcTextSize(sysLogText);
+        ImVec2 bgStart(view.pos_x + margin, view.pos_y + view.target_h - textSize.y - padding * 2 - margin);
+        ImVec2 bgEnd(bgStart.x + textSize.x + padding * 2, bgStart.y + textSize.y + padding * 2);
+        drawList->AddRectFilled(bgStart, bgEnd, bgColor);
+        drawList->AddText(ImVec2(bgStart.x + padding, bgStart.y + padding), textColor, sysLogText);
+    }
 }
 
 void HUD::drawCornerBrackets(ImDrawList* drawList, const ViewportInfo& view, ImU32 color) {

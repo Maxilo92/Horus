@@ -35,17 +35,20 @@ set(IMGUI_SRCS
 
 # Project Source Files (excluding main.cpp for tests)
 set(CORE_SRCS
-    src/Application.cpp
-    src/CameraModule.cpp
-    src/VideoRenderer.cpp
-    src/HUD.cpp
-    src/MultiTracker.cpp
+    src/core/Application.cpp
+    src/vision/CameraModule.cpp
+    src/vision/VideoRenderer.cpp
+    src/ui/HUD.cpp
+    src/tracking/MultiTracker.cpp
 )
 
-add_executable(Tactileviewer src/main.cpp ${CORE_SRCS} ${IMGUI_SRCS})
+add_executable(Tactileviewer src/core/main.cpp ${CORE_SRCS} ${IMGUI_SRCS})
 
 target_include_directories(Tactileviewer PRIVATE 
-    src
+    src/core
+    src/vision
+    src/tracking
+    src/ui
     ${OpenCV_INCLUDE_DIRS}
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
@@ -89,7 +92,10 @@ target_include_directories(unit_tests BEFORE PRIVATE
 )
 
 target_include_directories(unit_tests PRIVATE 
-    src
+    src/core
+    src/vision
+    src/tracking
+    src/ui
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
     ${GLFW_INCLUDE_DIRS}

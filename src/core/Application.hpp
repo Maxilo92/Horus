@@ -58,9 +58,11 @@ private:
     std::vector<TrackedObject> m_sharedTrackedObjects;
     TrackedTarget            m_sharedLockedTarget;
     SystemSettings           m_sharedSettings;
+    float                    m_sharedCameraFps = 0.0f;
     std::atomic<bool>        m_lockRequested;
     Detection                m_requestedLockTarget;
     bool                     m_newDataAvailable;
+    float                    m_cameraFps = 0.0f;
 };
 
 #endif // APPLICATION_HPP
