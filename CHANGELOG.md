@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.1] - 2026-06-05
+### Added
+- **Native macOS App Bundle Support:** Configured CMake to generate a `.app` bundle using `MACOSX_BUNDLE`.
+- **Bundle Configuration:** Integrated `Info.plist` for application metadata, including Camera usage description.
+- **Resource Bundling:** Automatisches Kopieren von KI-Modellen und Labels in das `Resources`-Verzeichnis des Bundles.
+### Changed
+- **Adaptive Path Resolution:** Refactored `Application.cpp` to prioritize resource loading from the macOS bundle structure while maintaining development fallbacks.
+
 ## [1.6.0] - 2026-06-05
 ### Added
 - **Architectural Refactoring:** Organized source files into logical subdirectories (`core`, `vision`, `tracking`, `ui`) for improved maintainability and "Military-Grade" clarity.

@@ -18,7 +18,7 @@ Application::~Application() {
 
 bool Application::init(int argc, char** argv) {
     if (argc > 1) m_cameraAddress = argv[1];
-    else m_cameraAddress = "0";
+    else m_cameraAddress = "1";
 
     if (!m_camera->open(m_cameraAddress)) {
         std::cerr << "[ERROR] Camera fail: " << m_cameraAddress << std::endl;
@@ -26,14 +26,24 @@ bool Application::init(int argc, char** argv) {
     }
 
     try {
-        std::string modelPath = "../assets/models/yolov8n.onnx";
-        std::string labelsPath = "../assets/models/coco.txt";
+        // macOS App Bundle path check (relative to Contents/MacOS/)
+        std::string modelPath = "../Resources/yolov8n.onnx";
+        std::string labelsPath = "../Resources/coco.txt";
+        
         FILE* f = fopen(modelPath.c_str(), "r");
+        if (!f) {
+            // Fallback for development/standalone
+            modelPath = "../assets/models/yolov8n.onnx";
+            labelsPath = "../assets/models/coco.txt";
+            f = fopen(modelPath.c_str(), "r");
+        }
+        
         if (!f) {
             modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/yolov8n.onnx";
             labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/coco.txt";
             f = fopen(modelPath.c_str(), "r");
         }
+        
         if (f) fclose(f);
         else {
             modelPath = "assets/models/yolov8n.onnx";
@@ -70,6 +80,10 @@ bool Application::initGLFW() {
 bool Application::initImGui() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;           // Enable Docking
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;         // Enable Multi-Viewport / Platform Windows
+    
     ImGui_ImplGlfw_InitForOpenGL(m_window, true);
     ImGui_ImplOpenGL3_Init("#version 150");
     return true;

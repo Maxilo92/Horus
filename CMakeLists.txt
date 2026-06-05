@@ -42,7 +42,19 @@ set(CORE_SRCS
     src/tracking/MultiTracker.cpp
 )
 
-add_executable(Tactileviewer src/core/main.cpp ${CORE_SRCS} ${IMGUI_SRCS})
+# Resources for macOS Bundle
+set(RESOURCE_FILES
+    assets/models/yolov8n.onnx
+    assets/models/coco.txt
+)
+
+add_executable(Tactileviewer MACOSX_BUNDLE src/core/main.cpp ${CORE_SRCS} ${IMGUI_SRCS} ${RESOURCE_FILES})
+
+# macOS Bundle Properties
+set_target_properties(Tactileviewer PROPERTIES
+    MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in
+    RESOURCE "${RESOURCE_FILES}"
+)
 
 target_include_directories(Tactileviewer PRIVATE 
     src/core
