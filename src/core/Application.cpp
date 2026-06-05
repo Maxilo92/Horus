@@ -2776,6 +2776,7 @@ if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
 
 glfwSwapBuffers(m_window);
 }
+}
 
 void Application::saveFeedback(const std::string& feedback) {
 auto now = std::chrono::system_clock::now();
