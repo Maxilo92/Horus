@@ -52,6 +52,7 @@ struct TrackedTarget {
     cv::Rect box;
     float confidence        = 0.0f;
     int   lost_frames       = 0;
+    std::vector<cv::Point> trail;
 };
 
 struct SystemSettings {

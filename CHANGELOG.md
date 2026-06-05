@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.6.8] - 2026-06-05
+### Changed
+- **Extended Target Telemetry:** Added `trail` support to the `TrackedTarget` structure, ensuring movement history is preserved and rendered correctly when a target is locked.
+### Fixed
+- **Type Mismatch Resolution:** Resolved a build error caused by missing members in the legacy `TrackedTarget` structure during its transition to the `MultiTracker` framework.
+
 ## [1.6.7] - 2026-06-05
 ### Changed
 - **Target Locking Architecture:** Completely refactored the target locking mechanism to align with the `MultiTracker` system. The application now locks on stable Track IDs instead of transient raw detections.
