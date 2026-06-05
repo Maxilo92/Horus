@@ -92,6 +92,8 @@ private:
     TrackedTarget            m_sharedLockedTarget;
     SystemSettings           m_sharedSettings;
     float                    m_sharedCameraFps = 0.0f;
+    std::atomic<int>         m_sharedCameraWidth{0};
+    std::atomic<int>         m_sharedCameraHeight{0};
     std::atomic<bool>        m_lockRequested;
     std::atomic<int>         m_requestedLockId;
     std::atomic<bool>        m_releaseLockRequested;
@@ -101,6 +103,8 @@ private:
     cv::Mat                  m_pixelTemplate;
     bool                     m_newDataAvailable;
     float                    m_cameraFps = 0.0f;
+    int                      m_cameraWidth = 0;
+    int                      m_cameraHeight = 0;
 
     // ---------------------------------------------------------------
     // Dev Console state

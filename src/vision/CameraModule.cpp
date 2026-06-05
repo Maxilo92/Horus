@@ -13,11 +13,29 @@ CameraModule::~CameraModule() {
 bool CameraModule::open(const std::string& address, int requestedWidth, int requestedHeight) {
     bool isNumber = !address.empty() && std::all_of(address.begin(), address.end(), ::isdigit);
     if (isNumber) {
+#ifdef __APPLE__
+        // Try opening with AVFoundation backend explicitly on macOS
+        m_cap.open(std::stoi(address), cv::CAP_AVFOUNDATION);
+        if (!m_cap.isOpened()) {
+            m_cap.open(std::stoi(address));
+        }
+#else
         m_cap.open(std::stoi(address));
-        m_cap.set(cv::CAP_PROP_FRAME_WIDTH, requestedWidth);
-        m_cap.set(cv::CAP_PROP_FRAME_HEIGHT, requestedHeight);
-        m_cap.set(cv::CAP_PROP_FPS, 60);
-        m_cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
+#endif
+        if (m_cap.isOpened()) {
+            // Request MJPEG format to bypass USB bandwidth limitations for 4K streams
+            if (requestedWidth > 1920) {
+                m_cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
+            }
+            m_cap.set(cv::CAP_PROP_FRAME_WIDTH, requestedWidth);
+            m_cap.set(cv::CAP_PROP_FRAME_HEIGHT, requestedHeight);
+            
+            // Adjust framerate for 4K since most webcams only support 4K at 30 FPS.
+            // Requesting 60 FPS in 4K forces the driver to fallback to a lower resolution.
+            int requestedFps = (requestedWidth > 1920) ? 30 : 60;
+            m_cap.set(cv::CAP_PROP_FPS, requestedFps);
+            m_cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
+        }
     } else {
         m_cap.open(address);
         m_cap.set(cv::CAP_PROP_BUFFERSIZE, 1);

@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.10.7] - 2026-06-05
+### Fixed
+- **Optimized 4K Camera Request (FPS & Format compatibility)**: Added MJPEG format request (`CAP_PROP_FOURCC`) to bypass USB bandwidth limitations for high-resolution streams on macOS/UVC. Reduced requested framerate from 60 FPS to 30 FPS for 4K streams to match hardware support, preventing the UVC camera driver from silently falling back to lower resolutions.
+- **Explicit Backend Preference**: Forced `cv::CAP_AVFOUNDATION` backend explicitly when opening cameras on macOS to guarantee high-resolution settings support.
+- **Live Camera Resolution Monitoring**: Added a "Camera Resolution" metric in the developer console System metrics table, rendering the actual feed width and height retrieved from the active camera source.
+
 ## [1.10.6] - 2026-06-05
 ### Changed
 - **Default Camera Source**: Swapped the default camera UVC device index from `"0"` to `"1"` (representing USB camera #1) and ensured the UI text input displays this default on startup.

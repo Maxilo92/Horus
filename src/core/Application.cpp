@@ -535,6 +535,8 @@ void Application::workerLoop() {
             m_sharedDetections       = detections;
             m_sharedTrackedObjects   = tracked;
             m_sharedCameraFps        = currentFps;
+            m_sharedCameraWidth      = rawFrame.cols;
+            m_sharedCameraHeight     = rawFrame.rows;
             m_newDataAvailable       = true;
         }
     }
@@ -807,7 +809,7 @@ void Application::renderDevConsole() {
     // ── Header bar ──────────────────────────────────────────────────────
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "HORUS DEV CONSOLE");
     ImGui::SameLine();
-    ImGui::TextDisabled("v1.10.6");
+    ImGui::TextDisabled("v1.10.7");
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120.0f);
     if (ImGui::Button("Settings...", ImVec2(110, 0)))
         m_showSettingsWindow = !m_showSettingsWindow;
@@ -847,6 +849,11 @@ void Application::renderDevConsole() {
             ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Camera FPS");
             ImGui::NextColumn();
             ImGui::Text("%.2f", m_cameraFps);
+            ImGui::NextColumn();
+
+            ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Camera Resolution");
+            ImGui::NextColumn();
+            ImGui::Text("%dx%d", m_cameraWidth, m_cameraHeight);
             ImGui::NextColumn();
 
             ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Active Tracks");
@@ -1635,6 +1642,8 @@ void Application::run() {
                 m_trackedObjects   = m_sharedTrackedObjects;
                 m_lockedTarget     = m_sharedLockedTarget;
                 m_cameraFps        = m_sharedCameraFps;
+                m_cameraWidth      = m_sharedCameraWidth.load();
+                m_cameraHeight     = m_sharedCameraHeight.load();
                 m_renderer->updateTexture(currentFrame);
                 m_newDataAvailable = false;
             }
