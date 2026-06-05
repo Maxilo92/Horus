@@ -26,28 +26,18 @@ bool Application::init(int argc, char** argv) {
     }
 
     try {
-        // macOS App Bundle path check (relative to Contents/MacOS/)
-        std::string modelPath = "../Resources/yolov8n.onnx";
-        std::string labelsPath = "../Resources/coco.txt";
-        
+        std::string modelPath = "../models/yolov8n.onnx";
+        std::string labelsPath = "../models/coco.txt";
         FILE* f = fopen(modelPath.c_str(), "r");
         if (!f) {
-            // Fallback for development/standalone
-            modelPath = "../assets/models/yolov8n.onnx";
-            labelsPath = "../assets/models/coco.txt";
+            modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/models/yolov8n.onnx";
+            labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/models/coco.txt";
             f = fopen(modelPath.c_str(), "r");
         }
-        
-        if (!f) {
-            modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/yolov8n.onnx";
-            labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/coco.txt";
-            f = fopen(modelPath.c_str(), "r");
-        }
-        
         if (f) fclose(f);
         else {
-            modelPath = "assets/models/yolov8n.onnx";
-            labelsPath = "assets/models/coco.txt";
+            modelPath = "models/yolov8n.onnx";
+            labelsPath = "models/coco.txt";
         }
         m_detector = std::make_unique<ObjectDetector>(modelPath, labelsPath);
     } catch (const std::exception& e) {
@@ -91,13 +81,14 @@ bool Application::initImGui() {
 
 void Application::workerLoop() {
     cv::Mat frame;
+    float currentFps = 0.0f;
     auto lastTime = std::chrono::steady_clock::now();
+
     while (m_running) {
         if (m_camera->read(frame)) {
-            auto currentTime = std::chrono::steady_clock::now();
-            float dt = std::chrono::duration<float>(currentTime - lastTime).count();
-            lastTime = currentTime;
-            float currentFps = (dt > 0) ? 1.0f / dt : 0.0f;
+            auto now = std::chrono::steady_clock::now();
+            currentFps = 1.0f / std::chrono::duration<float>(now - lastTime).count();
+            lastTime = now;
 
             SystemSettings currentSettings;
             {
@@ -153,46 +144,101 @@ void Application::run() {
                 m_newDataAvailable = false;
             }
         }
+        
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        // Enable Docking
+        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+
         int display_w, display_h;
         glfwGetFramebufferSize(m_window, &display_w, &display_h);
+        
+        // --- 1. Camera View Window ---
+        ImGui::Begin("Camera View", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ViewportInfo view = {0};
         if (!currentFrame.empty()) {
+            ImVec2 avail = ImGui::GetContentRegionAvail();
+            ImVec2 pos = ImGui::GetCursorScreenPos();
+            
             float frame_aspect = (float)currentFrame.cols / (float)currentFrame.rows;
-            float window_aspect = (float)display_w / (float)display_h;
+            float window_aspect = avail.x / avail.y;
+            
             if (window_aspect > frame_aspect) {
-                view.target_h = (float)display_h; view.target_w = view.target_h * frame_aspect;
-                view.pos_x = (display_w - view.target_w) / 2.0f; view.pos_y = 0;
+                view.target_h = avail.y; 
+                view.target_w = view.target_h * frame_aspect;
+                view.pos_x = pos.x + (avail.x - view.target_w) / 2.0f; 
+                view.pos_y = pos.y;
                 view.scale = view.target_h / (float)currentFrame.rows;
             } else {
-                view.target_w = (float)display_w; view.target_h = view.target_w / frame_aspect;
-                view.pos_y = (display_h - view.target_h) / 2.0f; view.pos_x = 0;
+                view.target_w = avail.x; 
+                view.target_h = view.target_w / frame_aspect;
+                view.pos_y = pos.y + (avail.y - view.target_h) / 2.0f; 
+                view.pos_x = pos.x;
                 view.scale = view.target_w / (float)currentFrame.cols;
             }
+
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->AddImage((void*)(intptr_t)m_renderer->getTextureID(), 
+                               ImVec2(view.pos_x, view.pos_y), 
+                               ImVec2(view.pos_x + view.target_w, view.pos_y + view.target_h));
+            
             handleTargetLocking(view);
-            m_renderer->drawBackground(display_w, display_h, currentFrame);
+            m_hud->render(drawList, (int)avail.x, (int)avail.y, m_cameraFps, m_trackedObjects, view, m_settings);
         }
-        m_hud->render(ImGui::GetBackgroundDrawList(), display_w, display_h, m_cameraFps, m_trackedObjects, view, m_settings);
-        
+        ImGui::End();
+
+        // --- 2. Data Panel ---
+        ImGui::Begin("Data Panel");
+        if (ImGui::BeginTable("Tracks", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("ID");
+            ImGui::TableSetupColumn("Class");
+            ImGui::TableSetupColumn("Pos (X,Y)");
+            ImGui::TableSetupColumn("Conf");
+            ImGui::TableHeadersRow();
+
+            for (const auto& obj : m_trackedObjects) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0); ImGui::Text("%d", obj.track_id);
+                ImGui::TableSetColumnIndex(1); ImGui::Text("%s", obj.className.c_str());
+                ImGui::TableSetColumnIndex(2); ImGui::Text("%.1f, %.1f", (float)obj.box.x + obj.box.width/2.0f, (float)obj.box.y + obj.box.height/2.0f);
+                ImGui::TableSetColumnIndex(3); ImGui::Text("%.2f", obj.confidence);
+            }
+            ImGui::EndTable();
+        }
+        ImGui::End();
+
+        // --- 3. Dev Console ---
         ImGui::Begin("Dev Console");
         bool changed = false;
         changed |= ImGui::SliderFloat("Conf", &m_settings.detectorConfThreshold, 0.1f, 1.0f);
         changed |= ImGui::SliderFloat("Score", &m_settings.detectorScoreThreshold, 0.1f, 1.0f);
         changed |= ImGui::SliderFloat("NMS", &m_settings.detectorNmsThreshold, 0.1f, 1.0f);
         changed |= ImGui::Checkbox("Trails", &m_settings.showTrails);
+        changed |= ImGui::Checkbox("Crosshair", &m_settings.showCrosshair);
+        changed |= ImGui::Checkbox("Overlay", &m_settings.showTacticalOverlay);
 
         if (changed) {
              std::lock_guard<std::mutex> lock(m_dataMutex);
              m_sharedSettings = m_settings;
         }
-        if (ImGui::Button("Quit")) glfwSetWindowShouldClose(m_window, true);
+        ImGui::Separator();
+        if (ImGui::Button("Quit", ImVec2(120, 0))) glfwSetWindowShouldClose(m_window, true);
         ImGui::End();
+
         ImGui::Render();
         glViewport(0, 0, display_w, display_h);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        
+        if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+            GLFWwindow* backup_current_context = glfwGetCurrentContext();
+            ImGui::UpdatePlatformWindows();
+            ImGui::RenderPlatformWindowsDefault();
+            glfwMakeContextCurrent(backup_current_context);
+        }
+
         glfwSwapBuffers(m_window);
     }
 }
