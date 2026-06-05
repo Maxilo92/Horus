@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.7] - 2026-06-05
+### Changed
+- **Target Locking Architecture:** Completely refactored the target locking mechanism to align with the `MultiTracker` system. The application now locks on stable Track IDs instead of transient raw detections.
+- **Worker-Thread State Management:** Integrated atomic lock/release request handling into the worker loop for synchronized tracking state updates.
+### Fixed
+- **Build Compatibility:** Resolved undeclared identifier and type mismatch errors in `Application.cpp`.
+
 ## [1.6.6] - 2026-06-05
 ### Fixed
 - **Linker Error Resolution:** Re-implemented the `Application::log` function to ensure correct symbol resolution and cross-thread diagnostic stability.

@@ -196,6 +196,33 @@ void Application::workerLoop() {
         }
         m_totalFramesProcessed.fetch_add(1);
 
+        // --- Handle Target Locking Logic ---
+        if (m_lockRequested.exchange(false)) {
+            m_sharedLockedTarget.track_id = m_requestedLockId.load();
+            m_sharedLockedTarget.state = TrackingState::LOCKED;
+        }
+
+        if (m_releaseLockRequested.exchange(false)) {
+            m_sharedLockedTarget.state = TrackingState::SEARCHING;
+            m_sharedLockedTarget.track_id = -1;
+        }
+
+        if (m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+            bool found = false;
+            for (const auto& t : tracked) {
+                if (t.track_id == m_sharedLockedTarget.track_id) {
+                    m_sharedLockedTarget.box = t.box;
+                    m_sharedLockedTarget.className = t.className;
+                    m_sharedLockedTarget.confidence = t.confidence;
+                    m_sharedLockedTarget.trail = t.trail;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) m_sharedLockedTarget.state = TrackingState::LOST;
+            else        m_sharedLockedTarget.state = TrackingState::LOCKED;
+        }
+
         {
             std::lock_guard<std::mutex> lock(m_dataMutex);
             m_sharedFrame            = frame.clone();
