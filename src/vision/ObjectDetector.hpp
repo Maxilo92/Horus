@@ -210,11 +210,14 @@ public:
         std::vector<float> confidences;
         std::vector<cv::Rect> boxes;
 
-        const int numClasses = static_cast<int>(classes.size());
-        const float* data = reinterpret_cast<const float*>(output.data);
-        const int stride = 4 + numClasses;
+        const int numModelClasses = std::max(0, output.cols - 4);
+        const int numClasses = std::min(static_cast<int>(classes.size()), numModelClasses);
+        if (numClasses <= 0) return {};
 
-        for (int i = 0; i < 8400; ++i) {
+        const float* data = reinterpret_cast<const float*>(output.data);
+        const int stride = output.cols;
+
+        for (int i = 0; i < output.rows; ++i) {
             const float* row = data + i * stride;
             const float* class_scores = row + 4;
 

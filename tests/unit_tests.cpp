@@ -107,6 +107,61 @@ TEST(MultiTrackerTest, TrackRemovalAfterTimeout) {
     EXPECT_EQ(tracker.getTrackedObjects(10).size(), 0);
 }
 
+TEST(MultiTrackerTest, Kalman6DStateAndLagCompensation) {
+    MultiTracker tracker;
+    SystemSettings settings;
+
+    // First detection to initialize target
+    Detection d1;
+    d1.class_id = 1;
+    d1.box = cv::Rect(100, 100, 50, 50);
+    d1.className = "test";
+    d1.confidence = 0.9f;
+    tracker.update({d1}, settings);
+
+    // Get the object and check its size
+    auto objects = tracker.getTrackedObjects(10);
+    ASSERT_EQ(objects.size(), 1);
+    EXPECT_EQ(objects[0].box.width, 50);
+    EXPECT_EQ(objects[0].box.height, 50);
+
+    // Frame N+1: detection at x = 110
+    Detection d2;
+    d2.class_id = 1;
+    d2.box = cv::Rect(110, 100, 50, 50);
+    d2.className = "test";
+    d2.confidence = 0.9f;
+    tracker.update({d2}, settings);
+
+    // Frame N+2: detection at x = 120
+    Detection d3;
+    d3.class_id = 1;
+    d3.box = cv::Rect(120, 100, 50, 50);
+    d3.className = "test";
+    d3.confidence = 0.9f;
+    tracker.update({d3}, settings);
+
+    // Now, at Frame N+5, we receive a delayed detection from Frame N+2 (lag = 3)
+    // The delayed detection is at x = 120.
+    // The tracker should extrapolate it by 3 * vx (~3 * 10 = 30)
+    // So the final box.x should be close to 120 + 30 = 150.
+    Detection d_lag;
+    d_lag.class_id = 1;
+    d_lag.box = cv::Rect(120, 100, 50, 50);
+    d_lag.className = "test";
+    d_lag.confidence = 0.9f;
+
+    tracker.update({d_lag}, settings, 3);
+
+    objects = tracker.getTrackedObjects(10);
+    ASSERT_EQ(objects.size(), 1);
+    EXPECT_NEAR(objects[0].box.x, 150, 15.0); // Allow some range for Kalman convergence
+    
+    // Also check that the box dimensions did NOT change/shrink
+    EXPECT_NEAR(objects[0].box.width, 50, 5.0);
+    EXPECT_NEAR(objects[0].box.height, 50, 5.0);
+}
+
 // --- ObjectDetector Tests ---
 
 TEST(ObjectDetectorTest, HandleInvalidModelPath) {
@@ -116,7 +171,7 @@ TEST(ObjectDetectorTest, HandleInvalidModelPath) {
 }
 
 TEST(ObjectDetectorTest, DetectionOnEmptyFrame) {
-    std::string modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/yolov8n.onnx";
+    std::string modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/yolov8s.onnx";
     std::string labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/coco.txt";
     
     if (!fs::exists(modelPath)) {
@@ -133,7 +188,7 @@ TEST(ObjectDetectorTest, DetectionOnEmptyFrame) {
 }
 
 TEST(ObjectDetectorTest, DetectionOnSolidColorFrame) {
-    std::string modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/yolov8n.onnx";
+    std::string modelPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/yolov8s.onnx";
     std::string labelsPath = "/Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/assets/models/coco.txt";
 
     if (!fs::exists(modelPath)) {
@@ -506,6 +561,28 @@ TEST(SubZoomsTest, MotionTargetOverlapLogic) {
     cv::Rect interNoOverlap = motionBoxNoOverlap & targetBox;
     double ratioNoOverlap = (interNoOverlap.area() > 0) ? (double)interNoOverlap.area() / motionBoxNoOverlap.area() : 0.0;
     EXPECT_LE(ratioNoOverlap, 0.2);
+}
+
+// --- AudioEngine Tests ---
+#include "AudioEngine.hpp"
+
+TEST(AudioEngineTest, ConfigInitAndSynthesis) {
+    AudioEngine engine;
+    AudioEngine::Config cfg;
+    cfg.masterEnabled = true;
+    cfg.masterVolume = 0.5f;
+
+    // Should not throw or crash on initialization/synthesis
+    ASSERT_NO_THROW({
+        engine.init(cfg);
+    });
+
+    // Test applyConfig
+    ASSERT_NO_THROW({
+        engine.applyConfig(cfg);
+    });
+
+    engine.shutdown();
 }
 
 

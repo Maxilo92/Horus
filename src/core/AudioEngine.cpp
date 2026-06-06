@@ -117,9 +117,9 @@ void AudioEngine::SoundBuffer::dispose() {
 }
 
 // ---------------------------------------------------------------------------
-// AudioEngine::buildSound — synthesises one sine-burst and registers it
+// AudioEngine::buildSound — synthesises a custom waveform based on the event type
 // ---------------------------------------------------------------------------
-AudioEngine::SoundBuffer AudioEngine::buildSound(float freqHz, float durationMs, float volume) {
+AudioEngine::SoundBuffer AudioEngine::buildSound(Event type, float freqHz, float durationMs, float volume) {
     SoundBuffer sb;
 
     // Clamp to sane ranges
@@ -132,20 +132,154 @@ AudioEngine::SoundBuffer AudioEngine::buildSound(float freqHz, float durationMs,
 
     sb.samples.resize(numSamples);
 
-    // Linear attack/decay envelope to eliminate click artefacts
-    const uint32_t fadeLen = std::min(numSamples / 8u,
-                                      static_cast<uint32_t>(kSampleRate * 0.008f));
+    const float durationSec = durationMs / 1000.0f;
 
     for (uint32_t i = 0; i < numSamples; ++i) {
+        float t = static_cast<float>(i) / static_cast<float>(kSampleRate);
+        float val = 0.0f;
         float env = 1.0f;
-        if (i < fadeLen)
-            env = static_cast<float>(i) / static_cast<float>(fadeLen);
-        else if (i >= numSamples - fadeLen)
-            env = static_cast<float>(numSamples - 1 - i) / static_cast<float>(fadeLen);
 
-        float t   = static_cast<float>(i) / static_cast<float>(kSampleRate);
-        float val = env * volume * std::sin(2.0f * kPi * freqHz * t);
-        sb.samples[i] = static_cast<int16_t>(val * 32767.0f);
+        switch (type) {
+            case Event::MOTION_ALERT: {
+                // Sonar Radar Ping: Downward frequency sweep from 1.5 * freqHz to 0.8 * freqHz
+                const float f_start = freqHz * 1.5f;
+                const float f_end   = freqHz * 0.8f;
+                const float phi = 2.0f * kPi * (f_start * t + (f_end - f_start) * t * t / (2.0f * durationSec));
+                
+                // Add second harmonic (30% amplitude)
+                val = std::sin(phi) + 0.3f * std::sin(2.0f * phi);
+                val /= 1.3f; // Normalize
+
+                // Exponential decay envelope
+                constexpr float attackTime = 0.002f; // 2ms click avoidance
+                if (t < attackTime) {
+                    env = t / attackTime;
+                } else {
+                    env = std::exp(-5.0f * (t - attackTime) / durationSec);
+                }
+                break;
+            }
+            case Event::ALARM_ENTRY: {
+                // Threat Warning: Base frequency + tritone harmonic (1.414 * freqHz) modulated with 20 Hz tremolo
+                const float f1 = freqHz;
+                const float f2 = freqHz * 1.414f;
+                val = std::sin(2.0f * kPi * f1 * t) + 0.5f * std::sin(2.0f * kPi * f2 * t);
+                val /= 1.5f; // Normalize
+
+                // 20 Hz tremolo (amplitude oscillation between 0.4 and 1.0)
+                const float tremolo = 0.7f + 0.3f * std::sin(2.0f * kPi * 20.0f * t);
+                val *= tremolo;
+
+                // Linear attack/decay envelope (8ms)
+                const float fadeLenSec = std::min(durationSec / 4.0f, 0.008f);
+                if (t < fadeLenSec) {
+                    env = t / fadeLenSec;
+                } else if (t >= durationSec - fadeLenSec) {
+                    env = (durationSec - t) / fadeLenSec;
+                }
+                break;
+            }
+            case Event::ALARM_EXIT: {
+                // Descending clearance chime: frequency sweep from 1.2 * freqHz to 0.8 * freqHz with odd harmonics
+                const float f_start = freqHz * 1.2f;
+                const float f_end   = freqHz * 0.8f;
+                const float phi = 2.0f * kPi * (f_start * t + (f_end - f_start) * t * t / (2.0f * durationSec));
+
+                // Add odd harmonics (square-like mix for woodwind-like richness)
+                val = std::sin(phi) + 0.3f * std::sin(3.0f * phi) + 0.1f * std::sin(5.0f * phi);
+                val /= 1.4f; // Normalize
+
+                // Linear decay envelope: fully open for first 20%, then linear decay to 0
+                const float attackTime = 0.005f; // 5ms attack
+                if (t < attackTime) {
+                    env = t / attackTime;
+                } else {
+                    const float holdTime = 0.2f * durationSec;
+                    if (t < holdTime) {
+                        env = 1.0f;
+                    } else {
+                        env = (durationSec - t) / (durationSec - holdTime);
+                    }
+                }
+                break;
+            }
+            case Event::LOCK_ACQUIRED: {
+                // Double pip: bip-BIP
+                // Pip 1: 0% to 35% of duration, frequency 0.9 * freqHz
+                // Silent gap: 35% to 45% of duration
+                // Pip 2: 45% to 100% of duration, frequency sweeps 1.3 * freqHz to 1.5 * freqHz
+                const float t1_end = 0.35f * durationSec;
+                const float t2_start = 0.45f * durationSec;
+                
+                constexpr float clickFade = 0.005f; // 5ms fades for pips
+
+                if (t < t1_end) {
+                    const float f1 = freqHz * 0.9f;
+                    const float phi = 2.0f * kPi * f1 * t;
+                    val = std::sin(phi) + 0.25f * std::sin(2.0f * phi);
+                    val /= 1.25f;
+
+                    // Envelope for pip 1
+                    if (t < clickFade) {
+                        env = t / clickFade;
+                    } else if (t > t1_end - clickFade) {
+                        env = (t1_end - t) / clickFade;
+                    } else {
+                        env = 1.0f;
+                    }
+                } else if (t < t2_start) {
+                    val = 0.0f;
+                    env = 0.0f;
+                } else {
+                    const float t_rel = t - t2_start;
+                    const float dur2 = durationSec - t2_start;
+                    const float f_start = freqHz * 1.3f;
+                    const float f_end = freqHz * 1.5f;
+                    const float phi = 2.0f * kPi * (f_start * t_rel + (f_end - f_start) * t_rel * t_rel / (2.0f * dur2));
+                    
+                    val = std::sin(phi) + 0.25f * std::sin(2.0f * phi);
+                    val /= 1.25f;
+
+                    // Envelope for pip 2
+                    if (t_rel < clickFade) {
+                        env = t_rel / clickFade;
+                    } else if (t > durationSec - clickFade) {
+                        env = (durationSec - t) / clickFade;
+                    } else {
+                        env = 1.0f;
+                    }
+                }
+                break;
+            }
+            case Event::LOCK_LOST: {
+                // Downward buzzing error chime: frequency sweep 1.0 * freqHz to 0.5 * freqHz with buzzing harmonics
+                const float f_start = freqHz;
+                const float f_end   = freqHz * 0.5f;
+                const float phi = 2.0f * kPi * (f_start * t + (f_end - f_start) * t * t / (2.0f * durationSec));
+
+                // Rich odd harmonics (simulating square-like warning buzz)
+                val = std::sin(phi) + 0.5f * std::sin(3.0f * phi) + 0.25f * std::sin(5.0f * phi) + 0.125f * std::sin(7.0f * phi);
+                val /= 1.875f; // Normalize
+
+                // Linear decay envelope: starts decaying after 30% of the duration
+                const float attackTime = 0.005f; // 5ms attack
+                if (t < attackTime) {
+                    env = t / attackTime;
+                } else {
+                    const float decayStart = 0.3f * durationSec;
+                    if (t < decayStart) {
+                        env = 1.0f;
+                    } else {
+                        env = (durationSec - t) / (durationSec - decayStart);
+                    }
+                }
+                break;
+            }
+        }
+
+        float sampleVal = val * env * volume;
+        sampleVal = std::max(-1.0f, std::min(sampleVal, 1.0f));
+        sb.samples[i] = static_cast<int16_t>(sampleVal * 32767.0f);
     }
 
     // Build AIFF blob — heap-allocated, kept alive until dispose()
@@ -230,11 +364,11 @@ void AudioEngine::applyConfig(const Config& cfg) {
     m_lockAcquiredSound.dispose();
     m_lockLostSound.dispose();
 
-    m_motionSound       = buildSound(cfg.motionFreqHz,       cfg.motionDurationMs,    vol);
-    m_alarmEntrySound   = buildSound(cfg.alarmEntryFreqHz,   cfg.alarmEntryDurMs,     vol);
-    m_alarmExitSound    = buildSound(cfg.alarmExitFreqHz,    cfg.alarmExitDurMs,      vol);
-    m_lockAcquiredSound = buildSound(cfg.lockAcquiredFreqHz, cfg.lockAcquiredDurMs,   vol);
-    m_lockLostSound     = buildSound(cfg.lockLostFreqHz,     cfg.lockLostDurMs,       vol);
+    m_motionSound       = buildSound(Event::MOTION_ALERT,   cfg.motionFreqHz,       cfg.motionDurationMs,    vol);
+    m_alarmEntrySound   = buildSound(Event::ALARM_ENTRY,    cfg.alarmEntryFreqHz,   cfg.alarmEntryDurMs,     vol);
+    m_alarmExitSound    = buildSound(Event::ALARM_EXIT,     cfg.alarmExitFreqHz,    cfg.alarmExitDurMs,      vol);
+    m_lockAcquiredSound = buildSound(Event::LOCK_ACQUIRED,  cfg.lockAcquiredFreqHz, cfg.lockAcquiredDurMs,   vol);
+    m_lockLostSound     = buildSound(Event::LOCK_LOST,      cfg.lockLostFreqHz,     cfg.lockLostDurMs,       vol);
 }
 
 void AudioEngine::playEvent(Event e) {

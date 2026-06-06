@@ -107,8 +107,8 @@ private:
         void dispose();
     };
 
-    // Synthesises a sine burst and registers it as a SystemSoundID.
-    static SoundBuffer buildSound(float freqHz, float durationMs, float volume);
+    // Synthesises a custom waveform based on the event type and registers it as a SystemSoundID.
+    static SoundBuffer buildSound(Event type, float freqHz, float durationMs, float volume);
 
     Config      m_cfg;
     SoundBuffer m_motionSound;

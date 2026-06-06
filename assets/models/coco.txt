@@ -78,3 +78,15 @@ scissors
 teddy bear
 hair drier
 toothbrush
+helmet
+traffic cone
+license plate
+stroller
+wheelchair
+scooter
+electric scooter
+trash can
+traffic sign
+unattended bag
+suspicious bag
+face

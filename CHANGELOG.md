@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.11.12] - 2026-06-06
+
+### Added
+
+- **Revamped Acoustic Feedback System**: Overhauled all five feedback channels with procedurally generated waves instead of flat pure sines:
+  - **Motion Alert**: Chirping sonar radar ping (downward frequency sweep with high second-harmonic content and exponential decay).
+  - **Alarm Zone Entry**: Urgent pulsing siren using base + tritone frequencies ($1.414 \times f_0$) with 20 Hz amplitude tremolo.
+  - **Alarm Zone Exit**: clearance downward sweep with odd harmonics and linear decay.
+  - **Target Lock Acquired**: futuristic lock-acquired confirm double-pip ("bip-BIP").
+  - **Target Lock Lost**: descending buzzing odd-harmonic square-like telemetry loss sound.
+- **Trigger Optimization**: Decoupled motion alert trigger from sub-zooms enabling. Pings are now played only when a *new* moving entity (track) is registered by the background motion detector, avoiding continuous beep loops.
+- **Stability Fixes & Verification**: Fixed potential out-of-bounds array access in sub-zoom initialization when adding motion objects, and added test coverage for `AudioEngine` in the automated test suite.
+
 ## [1.11.11] - 2026-06-06
 
 ### Added

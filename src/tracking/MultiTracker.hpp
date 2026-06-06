@@ -23,6 +23,8 @@ struct TrackState {
 
     // Gibt die aktuelle Bounding Box aus dem Kalman-Zustand zurück
     cv::Rect getBoundingBox() const;
+    // Gibt die vorhergesagte Bounding Box (statePre) zurück
+    cv::Rect getPredictedBoundingBox() const;
 
     TrackState() = default;
     TrackState(int id, const Detection& det);
@@ -54,7 +56,8 @@ public:
     // Aktualisiert alle Tracks mit neuen Detektionen. Thread-safe nicht
     // (muss im Worker-Thread ausgeführt werden).
     void update(const std::vector<Detection>& detections,
-                const SystemSettings& settings);
+                const SystemSettings& settings,
+                int lagFrames = 0);
 
     // Gibt alle aktiven Tracks als TrackedObject für das HUD zurück
     std::vector<TrackedObject> getTrackedObjects(int maxTrailLength) const;
@@ -74,11 +77,13 @@ private:
     // Berechnet für jedes Track-Detection-Paar einen Match-Score.
     // Gibt Matrix[nTracks][nDets] zurück.
     std::vector<std::vector<MatchCost>> computeCostMatrix(
+        const std::vector<int>&      trackIds,
         const std::vector<cv::Rect>& predictedBoxes,
         const std::vector<cv::Rect>& detBoxes,
         const std::vector<int>&      trackClassIds,
         const std::vector<int>&      detClassIds,
-        float                        maxCenterDistPx) const;
+        float                        maxCenterDistPx,
+        int                          lagFrames) const;
 
     float calculateIoU(const cv::Rect& a, const cv::Rect& b) const;
 

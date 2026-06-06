@@ -51,6 +51,7 @@ set(CORE_SRCS
 
 # Resources for macOS Bundle
 set(RESOURCE_FILES
+    assets/models/yolov8s.onnx
     assets/models/yolov8n.onnx
     assets/models/coco.txt
 )

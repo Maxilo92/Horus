@@ -20,42 +20,39 @@ TrackState::TrackState(int id, const Detection& det)
 }
 
 void TrackState::initKalmanFilter(const cv::Rect& box) {
-    // State  [8]: cx, cy, w, h, vx, vy, vw, vh
+    // State  [6]: cx, cy, w, h, vx, vy
     // Measure[4]: cx, cy, w, h
-    kf.init(8, 4, 0, CV_64F);
+    kf.init(6, 4, 0, CV_64F);
 
     // Transitions-Matrix: konstante Geschwindigkeit (pos += vel pro Frame)
     cv::setIdentity(kf.transitionMatrix);
-    kf.transitionMatrix.at<double>(0, 4) = 1.0;
-    kf.transitionMatrix.at<double>(1, 5) = 1.0;
-    kf.transitionMatrix.at<double>(2, 6) = 1.0;
-    kf.transitionMatrix.at<double>(3, 7) = 1.0;
+    kf.transitionMatrix.at<double>(0, 4) = 1.0; // cx = cx + vx
+    kf.transitionMatrix.at<double>(1, 5) = 1.0; // cy = cy + vy
 
     // Messung: nur Position/Größe (keine Geschwindigkeit direkt messbar)
-    kf.measurementMatrix = cv::Mat::zeros(4, 8, CV_64F);
+    kf.measurementMatrix = cv::Mat::zeros(4, 6, CV_64F);
     kf.measurementMatrix.at<double>(0, 0) = 1.0;
     kf.measurementMatrix.at<double>(1, 1) = 1.0;
     kf.measurementMatrix.at<double>(2, 2) = 1.0;
     kf.measurementMatrix.at<double>(3, 3) = 1.0;
 
     // Prozess-Rauschen: höherer Wert = Kalman folgt Messung schneller
-    // Für bewegte Objekte (Personen, Autos): Geschwindigkeit kann sich stark ändern
-    cv::setIdentity(kf.processNoiseCov, cv::Scalar(1e-2));
+    // Für w and h: kleine Varianz (0.01) – modelliert langsame Größenänderung
+    cv::setIdentity(kf.processNoiseCov, cv::Scalar(1e-3));
+    kf.processNoiseCov.at<double>(0, 0) = 0.01;
+    kf.processNoiseCov.at<double>(1, 1) = 0.01;
+    kf.processNoiseCov.at<double>(2, 2) = 0.01;
+    kf.processNoiseCov.at<double>(3, 3) = 0.01;
     kf.processNoiseCov.at<double>(4, 4) = 5.0;  // vx – hohe Unsicherheit
     kf.processNoiseCov.at<double>(5, 5) = 5.0;  // vy
-    kf.processNoiseCov.at<double>(6, 6) = 0.5;  // vw
-    kf.processNoiseCov.at<double>(7, 7) = 0.5;  // vh
 
     // Mess-Rauschen: Wie viel Ungenauigkeit hat der Detektor?
-    // Niedrig = Kalman vertraut Messung stark. Für YOLO: moderat.
     cv::setIdentity(kf.measurementNoiseCov, cv::Scalar(4.0));
 
     // Initiale Fehler-Kovarianz: hohe Unsicherheit für Geschwindigkeit
     cv::setIdentity(kf.errorCovPost, cv::Scalar(1.0));
     kf.errorCovPost.at<double>(4, 4) = 100.0;
     kf.errorCovPost.at<double>(5, 5) = 100.0;
-    kf.errorCovPost.at<double>(6, 6) = 10.0;
-    kf.errorCovPost.at<double>(7, 7) = 10.0;
 
     // Initialzustand
     const double cx = box.x + box.width  / 2.0;
@@ -66,12 +63,27 @@ void TrackState::initKalmanFilter(const cv::Rect& box) {
     kf.statePost.at<double>(3) = static_cast<double>(box.height);
     kf.statePost.at<double>(4) = 0.0;
     kf.statePost.at<double>(5) = 0.0;
-    kf.statePost.at<double>(6) = 0.0;
-    kf.statePost.at<double>(7) = 0.0;
 }
 
 cv::Rect TrackState::getBoundingBox() const {
     const cv::Mat& s = kf.statePost;
+    if (s.empty()) return cv::Rect();
+
+    const double cx = s.at<double>(0);
+    const double cy = s.at<double>(1);
+    const double w  = std::max(1.0, s.at<double>(2));
+    const double h  = std::max(1.0, s.at<double>(3));
+
+    return cv::Rect(
+        static_cast<int>(std::round(cx - w / 2.0)),
+        static_cast<int>(std::round(cy - h / 2.0)),
+        static_cast<int>(std::round(w)),
+        static_cast<int>(std::round(h))
+    );
+}
+
+cv::Rect TrackState::getPredictedBoundingBox() const {
+    const cv::Mat& s = kf.statePre;
     if (s.empty()) return cv::Rect();
 
     const double cx = s.at<double>(0);
@@ -94,9 +106,11 @@ cv::Rect TrackState::getBoundingBox() const {
 MultiTracker::MultiTracker() : m_nextId(0) {}
 
 void MultiTracker::update(const std::vector<Detection>& detections,
-                          const SystemSettings& settings)
+                          const SystemSettings& settings,
+                          int lagFrames)
 {
     const int nDets = static_cast<int>(detections.size());
+    const int safeLag = std::clamp(lagFrames, 0, 30);
 
     // --- Phase 1: Kalman-Predict für alle aktiven Tracks ---
     std::vector<int>     trackIds;
@@ -109,7 +123,7 @@ void MultiTracker::update(const std::vector<Detection>& detections,
     for (auto& [id, track] : m_tracks) {
         track.kf.predict();
         trackIds.push_back(id);
-        predictedBoxes.push_back(track.getBoundingBox());
+        predictedBoxes.push_back(track.getPredictedBoundingBox());
         trackClassIds.push_back(track.class_id);
     }
 
@@ -135,9 +149,9 @@ void MultiTracker::update(const std::vector<Detection>& detections,
     std::vector<bool> matchedDets(nDets, false);
 
     if (nTracks > 0 && nDets > 0) {
-        auto costMatrix = computeCostMatrix(predictedBoxes, detBoxes,
+        auto costMatrix = computeCostMatrix(trackIds, predictedBoxes, detBoxes,
                                             trackClassIds, detClassIds,
-                                            maxCenterDist);
+                                            maxCenterDist, safeLag);
         // Mindest-Score für ein gültiges Match:
         // IoU-only wäre 0.25, aber durch hybrides Scoring auch bei IoU=0 möglich
         const float minScore = settings.trackerMinMatchScore;
@@ -152,11 +166,21 @@ void MultiTracker::update(const std::vector<Detection>& detections,
         if (did >= 0) {
             // Kalman correct()
             const Detection& det = detections[did];
+            
+            // Extrapolate the detection coordinates using the track's estimated velocity
+            cv::Rect extBox = det.box;
+            if (safeLag > 0) {
+                double vx = track.kf.statePost.at<double>(4);
+                double vy = track.kf.statePost.at<double>(5);
+                extBox.x += static_cast<int>(std::round(safeLag * vx));
+                extBox.y += static_cast<int>(std::round(safeLag * vy));
+            }
+
             cv::Mat measurement(4, 1, CV_64F);
-            measurement.at<double>(0) = det.box.x + det.box.width  / 2.0;
-            measurement.at<double>(1) = det.box.y + det.box.height / 2.0;
-            measurement.at<double>(2) = static_cast<double>(det.box.width);
-            measurement.at<double>(3) = static_cast<double>(det.box.height);
+            measurement.at<double>(0) = extBox.x + extBox.width  / 2.0;
+            measurement.at<double>(1) = extBox.y + extBox.height / 2.0;
+            measurement.at<double>(2) = static_cast<double>(extBox.width);
+            measurement.at<double>(3) = static_cast<double>(extBox.height);
             track.kf.correct(measurement);
 
             track.confidence    = det.confidence;
@@ -165,9 +189,9 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             // Bestätigt nach 1 erfolgreichem Match (sofortige Anzeige)
             track.is_confirmed  = true;
 
-            // Trail-Punkt (gemessene Position, nicht vorhergesagt)
-            track.trail.emplace_back(det.box.x + det.box.width  / 2,
-                                     det.box.y + det.box.height / 2);
+            // Trail-Punkt (gemessene, extrapolierte Position)
+            track.trail.emplace_back(extBox.x + extBox.width  / 2,
+                                     extBox.y + extBox.height / 2);
         } else {
             // Kein Match → Dead Reckoning via Kalman-Prediction
             track.lost_frames++;
@@ -288,11 +312,13 @@ int MultiTracker::getActiveTrackCount() const {
 //          gibt dist_score noch einen ausreichend hohen Score für ein Match.
 //
 std::vector<std::vector<MatchCost>> MultiTracker::computeCostMatrix(
+    const std::vector<int>&      trackIds,
     const std::vector<cv::Rect>& predictedBoxes,
     const std::vector<cv::Rect>& detBoxes,
     const std::vector<int>&      trackClassIds,
     const std::vector<int>&      detClassIds,
-    float                        maxCenterDistPx) const
+    float                        maxCenterDistPx,
+    int                          lagFrames) const
 {
     const int nT = static_cast<int>(predictedBoxes.size());
     const int nD = static_cast<int>(detBoxes.size());
@@ -317,7 +343,14 @@ std::vector<std::vector<MatchCost>> MultiTracker::computeCostMatrix(
                 continue;
             }
 
-            const cv::Rect& db = detBoxes[di];
+            cv::Rect db = detBoxes[di];
+            if (lagFrames > 0) {
+                const auto& track = m_tracks.at(trackIds[ti]);
+                double vx = track.kf.statePost.at<double>(4);
+                double vy = track.kf.statePost.at<double>(5);
+                db.x += static_cast<int>(std::round(lagFrames * vx));
+                db.y += static_cast<int>(std::round(lagFrames * vy));
+            }
             const float dcx = static_cast<float>(db.x + db.width  / 2);
             const float dcy = static_cast<float>(db.y + db.height / 2);
 

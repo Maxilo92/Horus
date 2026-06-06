@@ -110,6 +110,7 @@ private:
     std::condition_variable  m_detectorCv;
     std::atomic<bool>        m_detectorBusy{false};
     std::atomic<bool>        m_detectorNewResults{false};
+    std::atomic<int>         m_detectorTriggerFrame{0};
     cv::Mat                  m_detectorFrameCopy;
     SystemSettings           m_detectorSettingsCopy;
     std::vector<Detection>   m_detectorResults;

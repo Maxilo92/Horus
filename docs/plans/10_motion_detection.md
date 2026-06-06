@@ -67,12 +67,14 @@ HUD::render(trackedObjects)                ← unverändert
 | `motionDetectionEnabled` | false | Master-Toggle |
 | `motionShowOverlay` | true | Overlay An/Aus |
 | `motionSensitivity` | 30.0 | MOG2 varThreshold [5–100] |
-| `motionMinArea` | 50 px | Mindestfläche Kontur [1–5000] |
+| `motionMinArea` | 50 px | Mindestfläche Kontur [1–5000, logarithmisch fein justierbar] |
 | `motionBlurKernel` | 5 | Gauss-Blur Kernel [1–21, odd] |
 | `motionOverlayAlpha` | 0.35 | Fill-Transparenz [0–1] |
 | `motionOverlayColor` | orange-red | RGBA Farbe |
 | `motionDetectShadows` | false | MOG2 Schatten-Erkennung |
 | `motionLearningRate` | -1 (auto) | Lernrate [-1, 0–100] |
+
+**Sub Zooms** verwenden zusätzlich `subZoomMagnification` (Standard 1.0x) für eine einstellbare Vergrößerung der automatisch erzeugten Bewegungs-Crops.
 
 ## Visualisierung
 
