@@ -4327,11 +4327,11 @@ void Application::run() {
                             targetMin.x + m_subZooms[i].box.width * view.scale,
                             targetMin.y + m_subZooms[i].box.height * view.scale
                         );
-                        drawList->AddRect(targetMin, targetMax, borderCol, 0.0f, 0, 1.5f);
+                        drawList->AddRect(targetMin, targetMax, borderCol, 0.0f, 0, 2.5f);
 
                         float markerRadius = std::min(40.0f * scaleFactor, std::min(targetMax.x - targetMin.x, targetMax.y - targetMin.y) * 0.4f);
                         if (markerRadius < 4.0f) markerRadius = 4.0f;
-                        drawList->AddCircle(mCenter, markerRadius, borderCol, 16, 1.5f);
+                        drawList->AddCircle(mCenter, markerRadius, borderCol, 16, 2.5f);
                         
                         if (m_subZoomRenderers[i]->getTextureID() != 0) {
                             drawList->AddImage(
@@ -4340,7 +4340,7 @@ void Application::run() {
                             );
                         }
                         
-                        drawList->AddRect(pos, ImVec2(pos.x + insert_w, pos.y + insert_h), borderCol, 0.0f, 0, 1.5f);
+                        drawList->AddRect(pos, ImVec2(pos.x + insert_w, pos.y + insert_h), borderCol, 0.0f, 0, 2.5f);
                         
                         char slotName[32];
                         snprintf(slotName, sizeof(slotName), "M-%02d", m_subZooms[i].motion_id);
@@ -4357,15 +4357,19 @@ void Application::run() {
                         );
                         
                         if (m_subZooms[i].isLost) {
-                            drawList->AddRectFilled(
-                                pos,
-                                ImVec2(pos.x + insert_w, pos.y + insert_h),
-                                IM_COL32(0, 0, 0, 80)
-                            );
+                            // Plan 11 UI improvement: Move HOLD to corner, remove darkening
                             const char* holdText = "HOLD";
                             ImVec2 textSize = ImGui::CalcTextSize(holdText);
+                            float holdX = pos.x + insert_w - textSize.x - 4.0f;
+                            float holdY = pos.y + 2.0f;
+
+                            drawList->AddRectFilled(
+                                ImVec2(holdX - 2.0f, holdY),
+                                ImVec2(pos.x + insert_w - 2.0f, holdY + 16 * scaleFactor),
+                                IM_COL32(0, 0, 0, 180)
+                            );
                             drawList->AddText(
-                                ImVec2(pos.x + (insert_w - textSize.x) / 2.0f, pos.y + (insert_h - textSize.y) / 2.0f),
+                                ImVec2(holdX, holdY),
                                 outlineColorHolding,
                                 holdText
                             );
@@ -4402,7 +4406,7 @@ void Application::run() {
                             borderCol = m_subZooms[i].isLost ? IM_COL32(255, 120, 0, 220) : ApplyBrightnessLocal(m_settings.hudColor, m_settings.hudBrightness);
                         }
                         
-                        wDrawList->AddRect(pos, ImVec2(pos.x + size, pos.y + size), borderCol, 0.0f, 0, 1.5f);
+                        wDrawList->AddRect(pos, ImVec2(pos.x + size, pos.y + size), borderCol, 0.0f, 0, 2.5f);
                         
                         ImGui::Dummy(ImVec2(size, size));
                         
