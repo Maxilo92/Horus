@@ -1,6 +1,34 @@
 # Changelog
 
+## [1.11.3] - 2026-06-06
+
+### Added
+
+- **Audio Feedback System**: Neues `AudioEngine`-Modul (`src/core/AudioEngine.hpp/.cpp`) implementiert akkustisches Echtzeit-Feedback für taktische Ereignisse via macOS `AudioToolbox` (`AudioServicesPlaySystemSound`). Töne werden als synthetisierte Sinus-PCM-Bursts (AIFF-Format, 44100 Hz, 16-Bit mono) im Speicher erzeugt — keine externen Audiodateien erforderlich.
+- **Fünf konfigurierbare Alarm-Kanäle**:
+  - **Motion Alert** (880 Hz / 80 ms): Beep bei erkannter Bewegung (Plan 10 Motion Detection), gedrosselt durch einstellbaren Cooldown (~1 s Standard).
+  - **Alarm Zone Entry** (1200 Hz / 120 ms): Scharfer Ton beim Eintreten eines Tracks in eine Alarm-Zone.
+  - **Alarm Zone Exit** (440 Hz / 80 ms): Tiefer Ton beim Verlassen einer Alarm-Zone.
+  - **Target Lock Acquired** (1000 Hz / 150 ms): Bestätigungston beim Einrasten des Target Locks (SEARCHING/LOST → LOCKED Transition).
+  - **Target Lock Lost** (300 Hz / 200 ms): Warn-Ton beim Verlust des Target Locks (LOCKED → LOST Transition).
+- **Zero-Heap Hot Path**: PCM-Synthese und AIFF-Registrierung erfolgt ausschließlich bei `init()`/`applyConfig()`, nie im Worker-Loop. `AudioServicesPlaySystemSound()` ist non-blocking und verursacht keine Heap-Allokation.
+- **Settings-Panel „Audio Feedback"**: Neuer `CollapsingHeader` im Settings-Fenster mit:
+  - Master-Enable-Toggle und Volume-Slider
+  - Pro Kanal: Enable-Checkbox, Frequenz-Slider (100–4000 Hz), Dauer-Slider (20–500 ms)
+  - Motion-Cooldown-Slider (0.1–10 s)
+  - `TEST`-Button pro Kanal für sofortiges Vorhören
+  - `TEST ALL`-Button spielt den Motion-Ton zur Systemverifikation
+- **Persistenz**: Alle 18 Audio-Parameter werden in `~/.tactileviewer/settings.ini` gespeichert und beim nächsten Start automatisch geladen.
+- **Live-Reload**: Parameteränderungen im Settings-Panel lösen sofort `applyConfig()` aus und re-synthetisieren die Sounds — kein Neustart erforderlich.
+
+### Changed
+
+- `Common.hpp`: `SystemSettings` um 18 neue Audio-Felder erweitert.
+- `Application.hpp`: `AudioEngine m_audioEngine` Member, `m_prevLockState` für Lock-Transitionen.
+- `CMakeLists.txt`: `AudioEngine.cpp` zu `CORE_SRCS` hinzugefügt; `-framework AudioToolbox` und `-framework CoreFoundation` für beide Targets gelinkt.
+
 ## [1.11.2] - 2026-06-06
+
 
 ### Added
 
