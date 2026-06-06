@@ -1,11 +1,52 @@
 # Changelog
 
+## [1.11.11] - 2026-06-06
+
+### Added
+
+- **Dynamic Subzoom Placement**: Subzoom PiP overlays now dynamically slide along the borders of the viewport to avoid overlapping with tracked objects, the locked target, and HUD elements.
+- **Closest-Border Leader Lines**: Leader lines now attach to the closest border point of the subzoom inset instead of its center, making tracking visualization much cleaner.
+- **Outline Target Markers**: Target markers for subzooms now consist of an outline box and circle (no filled regions) at the target location.
+- **Outline Locked Target Reticle**: Added a matching outline circle to the locked target bounding box, providing a clean, military-grade target locking reticle.
+
+## [1.11.10] - 2026-06-06
+
+### Added
+
+- **Military-Grade Tactical Audio revamps**: revamping procedural wave synthesis for all five feedback channels inside `AudioEngine`:
+  - **Sonar Radar Ping (Motion Alert)**: Downward frequency sweep (chirp) with high-pitched second harmonics and an exponential decay envelope.
+  - **Threat warning (Alarm Zone Entry)**: Pulsing dual-frequency warning using tritone harmonics ($1.414 \times f_0$) and 20 Hz amplitude tremolo.
+  - **Clearance chime (Alarm Zone Exit)**: Descending sweep with odd harmonics and linear decay.
+  - **Lock confirmation (Target Lock Acquired)**: Futuristic double-pip ("bip-BIP") with an upward pitch sweep.
+  - **Telemetry drop (Target Lock Lost)**: descending rough odd-harmonic square-like buzzer.
+- **Improved Motion Alert trigger logic**: The motion regions tracker `m_workerMotionTracks` now runs whenever motion detection is enabled (even if sub-zooms are disabled). Pings are only triggered when a *new* moving track is spawned rather than continuously beeping on active movement.
+- **Sub-zooms bug fix**: Fixed a potential out-of-bounds array access in `Application::workerLoop` by keeping the `trackMatched` vector sized in sync with `m_workerMotionTracks` when new motion regions are appended.
+
+## [1.11.9] - 2026-06-06
+
+### Added
+
+- **Präziseres lokales Vision-Modell**: `assets/models/yolov8s.onnx` ergänzt das bisherige `yolov8n`-Modell und wird beim Start bevorzugt geladen.
+- **Umfangreiche Unit-Tests für Latenzkompensation**: Neuer Testfall `Kalman6DStateAndLagCompensation` in `unit_tests.cpp` prüft die Positions-Extrapolation unter simulierter Detektor-Latenz und die Dimensionsstabilität der Boxen.
+
+### Changed
+
+- **Kalman-Filter auf 6D umgestellt**: Das Zustandsmodell des MultiTrackers wurde von 8D auf 6D (`[cx, cy, w, h, vx, vy]`) reduziert. Die Modellierung der Größen-Änderungsgeschwindigkeit (`vw`, `vh`) wurde entfernt. Die Breite und Höhe des Track-Objekts werden nun als stabilere Random Walks ohne Trägheitsmoment geschätzt, was das erratische Schrumpfen (extrem dünne Boxen) oder Überwuchern der Boxen bei Signalverlust/Rauschen vollständig behebt.
+- **Asynchrone Latenz-Kompensation (Lag Compensation)**: Die Verzögerung des asynchronen Detektor-Threads wird nun in Frames gemessen. Bei Ankunft neuer YOLO-Ergebnisse interpoliert der Tracker die Detektionsboxen anhand der geschätzten Track-Geschwindigkeit vorwärts, wodurch die Bounding Boxen in Echtzeit dem aktuellen Bild folgen und das Hinterherhinken ("Lag") sowie Rückwärts-Ruckeln eliminiert wird.
+- **Fehlende Zustands-Kopierung im Dead-Reckoning korrigiert**: Falls ein Track in einem Frame nicht zugeordnet wird, wird das System-Dead-Reckoning durch explizite Synchronisation von `statePre` in `statePost` fortgesetzt.
+- **Unvollständige target-analyser Header-Änderungen aufgeräumt**: Die unvollständig implementierten TextureInfo/Milestone-Änderungen in den Headern (Common/Application) wurden zurückgesetzt, um ein fehlerfreies Kompilieren der Target-Details zu gewährleisten.
+- **Detektions-Defaults verschärft**: Confidence-, Score- und NMS-Schwellenwerte wurden angehoben bzw. gestrafft, um Fehlalarme zu reduzieren.
+- **Bundle-Ressourcen aktualisiert**: Das macOS-Bundle enthält jetzt sowohl `yolov8s.onnx` als auch das bisherige Fallback-Modell.
+- **YOLOv8-Parser korrigiert**: Der Detector richtet sich jetzt an der echten Modell-Outputbreite aus statt an der längeren Label-Liste, damit Konfidenzen und Boxen korrekt interpretiert werden.
+
 ## [1.11.8] - 2026-06-06
 
 ### Added
 
 - **Manual Crop Capture**: Added an **Update Visual Crop (Manual)** button to the Target Analyzer panel (active when selected targets are in-view) that captures the current frame's crop as the target representation.
 - **Dynamic Crop Updates**: Enabled automatic crop updates when a target is observed with a larger bounding box (higher resolution) and decent confidence (`>= 0.4`), ensuring close-up shots are preferred.
+
+- **Surveillance Classes**: Added several surveillance-oriented class labels to the model labels file (`assets/models/coco.txt`) to improve detection coverage for monitoring scenarios (examples: `helmet`, `traffic cone`, `license plate`, `stroller`, `wheelchair`, `scooter`, `electric scooter`, `trash can`, `traffic sign`, `unattended bag`, `suspicious bag`, `face`).
 
 ### Changed
 
@@ -14,6 +55,8 @@
 - `Application.cpp`:
   - Updated `updateTargetHistory` to process manual capture requests and larger bounding box area checks, incrementing crop versions on changes.
   - Updated OpenGL texture binding checks to verify crop versions, ensuring immediate texture updates on the render thread.
+  - Changed the Motion Detection `Min. Area` control to a logarithmic slider so very small regions can be tuned more precisely.
+  - Added a configurable `Sub Zoom Magnification` control and applied it to sub-zoom crops.
 
 ## [1.11.7] - 2026-06-06
 

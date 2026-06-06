@@ -204,6 +204,13 @@ void HUD::drawTrackedObject(ImDrawList* drawList, const TrackedObject& obj,
     // Bounding box
     drawList->AddRect(ImVec2(x1, y1), ImVec2(x2, y2), boxColor, 0.0f, 0, lw);
 
+    if (isLocked) {
+        ImVec2 center(x1 + (x2 - x1) / 2.0f, y1 + (y2 - y1) / 2.0f);
+        float radius = std::min(x2 - x1, y2 - y1) * 0.4f;
+        if (radius < 4.0f) radius = 4.0f;
+        drawList->AddCircle(center, radius, boxColor, 16, lw);
+    }
+
     // Label: build according to visibility toggles
     char tag[160] = {0};
     if (isLocked) {

@@ -695,16 +695,11 @@ void Application::workerLoop() {
         if (currentSettings.motionDetectionEnabled && !trackingFrame.empty()) {
             m_motionDetector.process(trackingFrame, currentSettings);
             motionRegions = m_motionDetector.getMotionRegions();
-
-            // ── Audio: motion alert (rate-limited by cooldown) ─────────
-            if (!motionRegions.empty() && m_audioEngine.motionCooldownElapsed()) {
-                m_audioEngine.playMotionAlert();
-                m_audioEngine.recordMotionBeep();
-            }
         }
 
-        // Update sub zooms in worker thread if enabled
-        if (currentSettings.motionDetectionEnabled && currentSettings.subZoomsEnabled) {
+        // Update motion tracks and sub zooms in worker thread
+        bool newMotionSpawned = false;
+        if (currentSettings.motionDetectionEnabled) {
             auto now = std::chrono::steady_clock::now();
             
             // Clean up old inactive tracks
@@ -767,6 +762,8 @@ void Application::workerLoop() {
                     t.lastSeen = now;
                     t.active = true;
                     m_workerMotionTracks.push_back(t);
+                    trackMatched.push_back(false); // Fix out-of-bounds bug by keeping trackMatched size synchronized
+                    newMotionSpawned = true;
                 }
             }
             
@@ -777,89 +774,99 @@ void Application::workerLoop() {
                 }
             }
             
-            // Assign tracks to the 4 slots of localSubZooms
-            std::vector<bool> slotUpdated(4, false);
-            
-            // Keep tracks that are already assigned
-            for (int i = 0; i < 4; ++i) {
-                if (m_sharedSubZooms[i].active) {
-                    int assignedId = m_sharedSubZooms[i].motion_id;
-                    auto trackIt = std::find_if(m_workerMotionTracks.begin(), m_workerMotionTracks.end(),
-                        [assignedId](const WorkerMotionTrack& t) { return t.id == assignedId; });
+            if (currentSettings.subZoomsEnabled) {
+                // Assign tracks to the 4 slots of localSubZooms
+                std::vector<bool> slotUpdated(4, false);
+                
+                // Keep tracks that are already assigned
+                for (int i = 0; i < 4; ++i) {
+                    if (m_sharedSubZooms[i].active) {
+                        int assignedId = m_sharedSubZooms[i].motion_id;
+                        auto trackIt = std::find_if(m_workerMotionTracks.begin(), m_workerMotionTracks.end(),
+                            [assignedId](const WorkerMotionTrack& t) { return t.id == assignedId; });
                         
-                    if (trackIt != m_workerMotionTracks.end()) {
-                        localSubZooms[i].active = true;
-                        localSubZooms[i].motion_id = trackIt->id;
-                        localSubZooms[i].box = trackIt->box;
-                        localSubZooms[i].isLost = !trackIt->active;
+                        if (trackIt != m_workerMotionTracks.end()) {
+                            localSubZooms[i].active = true;
+                            localSubZooms[i].motion_id = trackIt->id;
+                            localSubZooms[i].box = trackIt->box;
+                            localSubZooms[i].isLost = !trackIt->active;
+                            
+                            // Crop the frame
+                            cv::Rect roi = trackIt->box;
+                            roi.x = std::max(0, roi.x);
+                            roi.y = std::max(0, roi.y);
+                            if (roi.x + roi.width > trackingFrame.cols) roi.width = trackingFrame.cols - roi.x;
+                            if (roi.y + roi.height > trackingFrame.rows) roi.height = trackingFrame.rows - roi.y;
+                            if (roi.width > 0 && roi.height > 0) {
+                                trackingFrame(roi).copyTo(localSubZooms[i].frame);
+                            }
+                            
+                            slotUpdated[i] = true;
+                        }
+                    }
+                }
+                
+                // Fill empty slots with unassigned tracks
+                for (const auto& track : m_workerMotionTracks) {
+                    bool alreadyAssigned = false;
+                    for (int i = 0; i < 4; ++i) {
+                        if (slotUpdated[i] && localSubZooms[i].motion_id == track.id) {
+                            alreadyAssigned = true;
+                            break;
+                        }
+                    }
+                    
+                    if (alreadyAssigned) continue;
+                    
+                    // Find first free slot
+                    int freeSlotIdx = -1;
+                    for (int i = 0; i < 4; ++i) {
+                        if (!slotUpdated[i] && !localSubZooms[i].active) {
+                            freeSlotIdx = i;
+                            break;
+                        }
+                    }
+                    
+                    if (freeSlotIdx != -1) {
+                        localSubZooms[freeSlotIdx].active = true;
+                        localSubZooms[freeSlotIdx].motion_id = track.id;
+                        localSubZooms[freeSlotIdx].box = track.box;
+                        localSubZooms[freeSlotIdx].isLost = !track.active;
                         
-                        // Crop the frame
-                        cv::Rect roi = trackIt->box;
+                        // Crop
+                        cv::Rect roi = track.box;
                         roi.x = std::max(0, roi.x);
                         roi.y = std::max(0, roi.y);
                         if (roi.x + roi.width > trackingFrame.cols) roi.width = trackingFrame.cols - roi.x;
                         if (roi.y + roi.height > trackingFrame.rows) roi.height = trackingFrame.rows - roi.y;
                         if (roi.width > 0 && roi.height > 0) {
-                            trackingFrame(roi).copyTo(localSubZooms[i].frame);
+                            trackingFrame(roi).copyTo(localSubZooms[freeSlotIdx].frame);
                         }
                         
-                        slotUpdated[i] = true;
+                        slotUpdated[freeSlotIdx] = true;
                     }
-                }
-            }
-            
-            // Fill empty slots with unassigned tracks
-            for (const auto& track : m_workerMotionTracks) {
-                bool alreadyAssigned = false;
-                for (int i = 0; i < 4; ++i) {
-                    if (slotUpdated[i] && localSubZooms[i].motion_id == track.id) {
-                        alreadyAssigned = true;
-                        break;
-                    }
-                }
-                
-                if (alreadyAssigned) continue;
-                
-                // Find first free slot
-                int freeSlotIdx = -1;
-                for (int i = 0; i < 4; ++i) {
-                    if (!slotUpdated[i] && !localSubZooms[i].active) {
-                        freeSlotIdx = i;
-                        break;
-                    }
-                }
-                
-                if (freeSlotIdx != -1) {
-                    localSubZooms[freeSlotIdx].active = true;
-                    localSubZooms[freeSlotIdx].motion_id = track.id;
-                    localSubZooms[freeSlotIdx].box = track.box;
-                    localSubZooms[freeSlotIdx].isLost = !track.active;
-                    
-                    // Crop
-                    cv::Rect roi = track.box;
-                    roi.x = std::max(0, roi.x);
-                    roi.y = std::max(0, roi.y);
-                    if (roi.x + roi.width > trackingFrame.cols) roi.width = trackingFrame.cols - roi.x;
-                    if (roi.y + roi.height > trackingFrame.rows) roi.height = trackingFrame.rows - roi.y;
-                    if (roi.width > 0 && roi.height > 0) {
-                        trackingFrame(roi).copyTo(localSubZooms[freeSlotIdx].frame);
-                    }
-                    
-                    slotUpdated[freeSlotIdx] = true;
                 }
             }
         } else {
             m_workerMotionTracks.clear();
         }
+        
+        // ── Audio: motion alert (rate-limited by cooldown, triggered by new moving entities) ──
+        if (currentSettings.motionDetectionEnabled && newMotionSpawned && m_audioEngine.motionCooldownElapsed()) {
+            m_audioEngine.playMotionAlert();
+            m_audioEngine.recordMotionBeep();
+        }
 
         std::vector<Detection> detections;
         bool hasNewDetections = false;
+        int detectorLag = 0;
         
         if (m_detectorNewResults.load()) {
             std::lock_guard<std::mutex> lock(m_detectorMutex);
             m_detections = m_detectorResults;
             m_detectorNewResults = false;
             hasNewDetections = true;
+            detectorLag = m_totalFramesProcessed.load() - m_detectorTriggerFrame.load();
         }
         detections = m_detections; // Use latest available detections for HUD rendering
 
@@ -870,13 +877,13 @@ void Application::workerLoop() {
                 // when they actually arrive. On other frames, we pass an empty vector 
                 // to let the tracker predict (dead reckoning).
                 if (hasNewDetections) {
-                    m_tracker->update(detections, currentSettings);
+                    m_tracker->update(detections, currentSettings, detectorLag);
                 } else {
-                    m_tracker->update({}, currentSettings);
+                    m_tracker->update({}, currentSettings, 0);
                 }
             } else {
                 // Detection disabled completely, update tracker with empty detections
-                m_tracker->update({}, currentSettings);
+                m_tracker->update({}, currentSettings, 0);
             }
             
             tracked = m_tracker->getTrackedObjects(currentSettings.trackerMaxTrailLength);
@@ -1159,6 +1166,7 @@ void Application::workerLoop() {
                 std::lock_guard<std::mutex> lock(m_detectorMutex);
                 trackingFrame.copyTo(m_detectorFrameCopy);
                 m_detectorSettingsCopy = currentSettings;
+                m_detectorTriggerFrame = m_totalFramesProcessed.load();
                 m_detectorBusy = true;
                 m_detectorCv.notify_one();
             }
@@ -3745,17 +3753,137 @@ void Application::run() {
                     lineColorActive = ApplyBrightnessLocal(m_settings.hudColor, m_settings.hudBrightness * 0.7f);
                 }
                 
+                // Setup obstacle list for collision avoidance
+                struct CollisionBox {
+                    float x1, y1, x2, y2;
+                };
+                std::vector<CollisionBox> obstacles;
+                
+                // 1. Tracked objects
+                for (const auto& obj : m_trackedObjects) {
+                    float ox1 = view.pos_x + obj.box.x * view.scale;
+                    float oy1 = view.pos_y + obj.box.y * view.scale;
+                    float ox2 = ox1 + obj.box.width * view.scale;
+                    float oy2 = oy1 + obj.box.height * view.scale;
+                    float pad = 12.0f;
+                    obstacles.push_back({ox1 - pad, oy1 - pad, ox2 + pad, oy2 + pad});
+                }
+                // 2. Locked target (if not in m_trackedObjects)
+                if (m_lockedTarget.state != TrackingState::SEARCHING) {
+                    float ox1 = view.pos_x + m_lockedTarget.box.x * view.scale;
+                    float oy1 = view.pos_y + m_lockedTarget.box.y * view.scale;
+                    float ox2 = ox1 + m_lockedTarget.box.width * view.scale;
+                    float oy2 = oy1 + m_lockedTarget.box.height * view.scale;
+                    float pad = 12.0f;
+                    obstacles.push_back({ox1 - pad, oy1 - pad, ox2 + pad, oy2 + pad});
+                }
+                // 3. HUD elements
+                obstacles.push_back({
+                    view.pos_x + margin - 5.0f,
+                    view.pos_y + margin - 5.0f,
+                    view.pos_x + margin + 180.0f * scaleFactor + 5.0f,
+                    view.pos_y + margin + 100.0f * scaleFactor + 5.0f
+                });
+                obstacles.push_back({
+                    view.pos_x + margin - 5.0f,
+                    view.pos_y + view.target_h - 60.0f * scaleFactor - margin - 5.0f,
+                    view.pos_x + margin + 180.0f * scaleFactor + 5.0f,
+                    view.pos_y + view.target_h - margin + 5.0f
+                });
+
+                std::vector<CollisionBox> placedSubzooms;
+
+                float min_x = view.pos_x + margin;
+                float max_x = view.pos_x + view.target_w - insert_w - margin;
+                float min_y = view.pos_y + margin;
+                float max_y = view.pos_y + view.target_h - insert_h - margin;
+
+                auto getClosestPointOnRect = [](ImVec2 rMin, ImVec2 rMax, ImVec2 p) -> ImVec2 {
+                    return ImVec2(
+                        std::clamp(p.x, rMin.x, rMax.x),
+                        std::clamp(p.y, rMin.y, rMax.y)
+                    );
+                };
+
                 for (int i = 0; i < 4; ++i) {
                     if (m_subZooms[i].active) {
                         ImVec2 pos;
-                        if (i == 0) { // Top-Left
-                            pos = ImVec2(view.pos_x + margin, view.pos_y + margin + 110.0f * scaleFactor);
-                        } else if (i == 1) { // Top-Right
-                            pos = ImVec2(view.pos_x + view.target_w - insert_w - margin, view.pos_y + margin);
-                        } else if (i == 2) { // Bottom-Left
-                            pos = ImVec2(view.pos_x + margin, view.pos_y + view.target_h - insert_h - margin - 70.0f * scaleFactor);
-                        } else { // Bottom-Right
-                            pos = ImVec2(view.pos_x + view.target_w - insert_w - margin, view.pos_y + view.target_h - insert_h - margin);
+                        if (max_x < min_x || max_y < min_y) {
+                            // Small viewport fallback
+                            if (i == 0) pos = ImVec2(view.pos_x + margin, view.pos_y + margin + 110.0f * scaleFactor);
+                            else if (i == 1) pos = ImVec2(view.pos_x + view.target_w - insert_w - margin, view.pos_y + margin);
+                            else if (i == 2) pos = ImVec2(view.pos_x + margin, view.pos_y + view.target_h - insert_h - margin - 70.0f * scaleFactor);
+                            else pos = ImVec2(view.pos_x + view.target_w - insert_w - margin, view.pos_y + view.target_h - insert_h - margin);
+                        } else {
+                            // Find best position using sliding candidates from default corners
+                            ImVec2 defaultPos;
+                            if (i == 0) defaultPos = ImVec2(min_x, min_y);
+                            else if (i == 1) defaultPos = ImVec2(max_x, min_y);
+                            else if (i == 2) defaultPos = ImVec2(min_x, max_y);
+                            else defaultPos = ImVec2(max_x, max_y);
+
+                            std::vector<ImVec2> candidates;
+                            candidates.push_back(defaultPos);
+
+                            float step = 25.0f;
+                            if (i == 0) {
+                                for (float y = min_y + step; y <= max_y; y += step) candidates.push_back(ImVec2(min_x, y));
+                                for (float x = min_x + step; x <= max_x; x += step) candidates.push_back(ImVec2(x, min_y));
+                            } else if (i == 1) {
+                                for (float y = min_y + step; y <= max_y; y += step) candidates.push_back(ImVec2(max_x, y));
+                                for (float x = max_x - step; x >= min_x; x -= step) candidates.push_back(ImVec2(x, min_y));
+                            } else if (i == 2) {
+                                for (float y = max_y - step; y >= min_y; y -= step) candidates.push_back(ImVec2(min_x, y));
+                                for (float x = min_x + step; x <= max_x; x += step) candidates.push_back(ImVec2(x, max_y));
+                            } else if (i == 3) {
+                                for (float y = max_y - step; y >= min_y; y -= step) candidates.push_back(ImVec2(max_x, y));
+                                for (float x = max_x - step; x >= min_x; x -= step) candidates.push_back(ImVec2(x, max_y));
+                            }
+
+                            ImVec2 bestPos = defaultPos;
+                            float minOverlap = -1.0f;
+
+                            for (const auto& cand : candidates) {
+                                float cx1 = cand.x;
+                                float cy1 = cand.y;
+                                float cx2 = cx1 + insert_w;
+                                float cy2 = cy1 + insert_h;
+                                
+                                float totalOverlap = 0.0f;
+                                for (const auto& obs : obstacles) {
+                                    float ox1 = std::max(cx1, obs.x1);
+                                    float oy1 = std::max(cy1, obs.y1);
+                                    float ox2 = std::min(cx2, obs.x2);
+                                    float oy2 = std::min(cy2, obs.y2);
+                                    if (ox2 > ox1 && oy2 > oy1) {
+                                        totalOverlap += (ox2 - ox1) * (oy2 - oy1);
+                                    }
+                                }
+                                
+                                for (const auto& pz : placedSubzooms) {
+                                    float ox1 = std::max(cx1, pz.x1);
+                                    float oy1 = std::max(cy1, pz.y1);
+                                    float ox2 = std::min(cx2, pz.x2);
+                                    float oy2 = std::min(cy2, pz.y2);
+                                    if (ox2 > ox1 && oy2 > oy1) {
+                                        totalOverlap += (ox2 - ox1) * (oy2 - oy1);
+                                    }
+                                }
+                                
+                                if (totalOverlap == 0.0f) {
+                                    bestPos = cand;
+                                    minOverlap = 0.0f;
+                                    break;
+                                }
+                                
+                                if (minOverlap < 0.0f || totalOverlap < minOverlap) {
+                                    minOverlap = totalOverlap;
+                                    bestPos = cand;
+                                }
+                            }
+
+                            pos = bestPos;
+                            placedSubzooms.push_back({pos.x, pos.y, pos.x + insert_w, pos.y + insert_h});
                         }
                         
                         ImVec2 mCenter(
@@ -3763,14 +3891,14 @@ void Application::run() {
                             view.pos_y + (m_subZooms[i].box.y + m_subZooms[i].box.height / 2.0f) * view.scale
                         );
                         
-                        ImVec2 insertCenter(pos.x + insert_w / 2.0f, pos.y + insert_h / 2.0f);
+                        ImVec2 startPt = getClosestPointOnRect(pos, ImVec2(pos.x + insert_w, pos.y + insert_h), mCenter);
                         ImU32 lineCol = m_subZooms[i].isLost ? lineColorHolding : lineColorActive;
                         ImU32 borderCol = m_subZooms[i].isLost ? outlineColorHolding : outlineColorActive;
                         
                         // Draw leader line first
                         if (m_subZooms[i].isLost) {
-                            float dx = mCenter.x - insertCenter.x;
-                            float dy = mCenter.y - insertCenter.y;
+                            float dx = mCenter.x - startPt.x;
+                            float dy = mCenter.y - startPt.y;
                             float len = std::hypot(dx, dy);
                             if (len > 1.0f) {
                                 dx /= len; dy /= len;
@@ -3780,18 +3908,31 @@ void Application::run() {
                                 while (dist < len) {
                                     float nextDist = std::min(len, dist + dashLen);
                                     drawList->AddLine(
-                                        ImVec2(insertCenter.x + dx * dist, insertCenter.y + dy * dist),
-                                        ImVec2(insertCenter.x + dx * nextDist, insertCenter.y + dy * nextDist),
+                                        ImVec2(startPt.x + dx * dist, startPt.y + dy * dist),
+                                        ImVec2(startPt.x + dx * nextDist, startPt.y + dy * nextDist),
                                         lineCol, 1.0f
                                     );
                                     dist += dashLen + gapLen;
                                 }
                             }
                         } else {
-                            drawList->AddLine(insertCenter, mCenter, lineCol, 1.0f);
+                            drawList->AddLine(startPt, mCenter, lineCol, 1.0f);
                         }
                         
-                        drawList->AddCircleFilled(mCenter, 3.0f, borderCol);
+                        // Draw target marker consisting of outline box and outline circle
+                        ImVec2 targetMin(
+                            view.pos_x + m_subZooms[i].box.x * view.scale,
+                            view.pos_y + m_subZooms[i].box.y * view.scale
+                        );
+                        ImVec2 targetMax(
+                            targetMin.x + m_subZooms[i].box.width * view.scale,
+                            targetMin.y + m_subZooms[i].box.height * view.scale
+                        );
+                        drawList->AddRect(targetMin, targetMax, borderCol, 0.0f, 0, 1.5f);
+
+                        float markerRadius = std::min(40.0f * scaleFactor, std::min(targetMax.x - targetMin.x, targetMax.y - targetMin.y) * 0.4f);
+                        if (markerRadius < 4.0f) markerRadius = 4.0f;
+                        drawList->AddCircle(mCenter, markerRadius, borderCol, 16, 1.5f);
                         
                         if (m_subZoomRenderers[i]->getTextureID() != 0) {
                             drawList->AddImage(
