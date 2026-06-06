@@ -193,10 +193,13 @@ public:
         cv::Mat blob;
         // YOLOv8 benötigt 640x640, Normalisierung 1/255
         cv::dnn::blobFromImage(canvas, blob, 1.0/255.0, cv::Size(640, 640), cv::Scalar(), true, false);
-        net.setInput(blob);
 
         std::vector<cv::Mat> outputs;
-        net.forward(outputs, net.getUnconnectedOutLayersNames());
+        {
+            std::lock_guard<std::mutex> lock(m_netMutex);
+            net.setInput(blob);
+            net.forward(outputs, net.getUnconnectedOutLayersNames());
+        }
 
         // YOLOv8 Output Shape: [1, 84, 8400]
         // 84 = 4 (box: cx,cy,w,h) + 80 (Klassen-Scores)
@@ -282,4 +285,5 @@ public:
 private:
     cv::dnn::Net net;
     std::vector<std::string> classes;
+    std::mutex m_netMutex;
 };

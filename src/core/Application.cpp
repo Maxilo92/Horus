@@ -1151,7 +1151,6 @@ void Application::workerLoop() {
 
         {
             std::lock_guard<std::mutex> lock(m_dataMutex);
-            trackingFrame.copyTo(m_sharedFrame);
             zoomCrop.copyTo(m_sharedZoomFrame);
             m_sharedDetections       = detections;
             // m_sharedTrackedObjects is now updated by trackingWorkerLoop
@@ -1499,8 +1498,19 @@ void Application::trackingWorkerLoop() {
                                 double new_center_y = searchRect.y + maxLoc.y + dy + m_pixelTemplate.rows / 2.0;
 
                                 float alpha = settings.trackerVelocitySmoothing;
-                                m_pixelVx = alpha * static_cast<float>(new_center_x - (lastBox.x + lastBox.width / 2.0)) + (1.0f - alpha) * m_pixelVx;
-                                m_pixelVy = alpha * static_cast<float>(new_center_y - (lastBox.y + lastBox.height / 2.0)) + (1.0f - alpha) * m_pixelVy;
+                                float pixelDx = static_cast<float>(new_center_x - (lastBox.x + lastBox.width / 2.0));
+                                float pixelDy = static_cast<float>(new_center_y - (lastBox.y + lastBox.height / 2.0));
+                                
+                                // Anti-Drift: Wenn Bewegung minimal ist (< 1.0 Pixel), Geschwindigkeit aggressiv dämpfen
+                                if (pixelDx*pixelDx + pixelDy*pixelDy < 1.0f) {
+                                    m_pixelVx *= 0.5f;
+                                    m_pixelVy *= 0.5f;
+                                    if (std::abs(m_pixelVx) < 0.05f) m_pixelVx = 0.0f;
+                                    if (std::abs(m_pixelVy) < 0.05f) m_pixelVy = 0.0f;
+                                } else {
+                                    m_pixelVx = alpha * pixelDx + (1.0f - alpha) * m_pixelVx;
+                                    m_pixelVy = alpha * pixelDy + (1.0f - alpha) * m_pixelVy;
+                                }
 
                                 m_pixelCenterX = static_cast<float>(new_center_x);
                                 m_pixelCenterY = static_cast<float>(new_center_y);

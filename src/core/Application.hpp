@@ -326,6 +326,8 @@ private:
         cv::Rect box;
         cv::Mat frame;
         bool isLost = false;
+        std::string precisionLabel = "";
+        float precisionConfidence = 0.0f;
     };
     SharedSubZoom m_sharedSubZooms[4];
     SharedSubZoom m_subZooms[4]; // render-thread local copy
@@ -338,6 +340,10 @@ private:
     // track_id -> {face_id, face_name}
     std::unordered_map<int, std::pair<int, std::string>> m_trackIdToFace;
     std::mutex m_faceMutex;
+
+    // Precision Search for SubZooms cache (motion_id -> {className, confidence})
+    std::unordered_map<int, std::pair<std::string, float>> m_motionPrecisionCache;
+    std::mutex m_motionPrecisionMutex;
 };
 
 #endif // APPLICATION_HPP
