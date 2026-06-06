@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.11.8] - 2026-06-06
+
+### Added
+
+- **Manual Crop Capture**: Added an **Update Visual Crop (Manual)** button to the Target Analyzer panel (active when selected targets are in-view) that captures the current frame's crop as the target representation.
+- **Dynamic Crop Updates**: Enabled automatic crop updates when a target is observed with a larger bounding box (higher resolution) and decent confidence (`>= 0.4`), ensuring close-up shots are preferred.
+
+### Changed
+
+- `Common.hpp`: Added version tracking to target records.
+- `Application.hpp`: Added version tracking to target textures, and an atomic manual capture request field.
+- `Application.cpp`:
+  - Updated `updateTargetHistory` to process manual capture requests and larger bounding box area checks, incrementing crop versions on changes.
+  - Updated OpenGL texture binding checks to verify crop versions, ensuring immediate texture updates on the render thread.
+
 ## [1.11.7] - 2026-06-06
 
 ### Added

@@ -132,6 +132,7 @@ private:
     std::atomic<bool>        m_lockRequested;
     std::atomic<int>         m_requestedLockId;
     std::atomic<bool>        m_releaseLockRequested;
+    std::atomic<int>         m_manualCaptureTargetId{-1};
     std::atomic<bool>        m_pixelLockRequested{false};
     cv::Point                m_pixelLockPoint;
     bool                     m_pixelLockActive = false;
@@ -253,6 +254,7 @@ private:
     struct TextureInfo {
         uint32_t texture_id = 0;
         float max_confidence = 0.0f;
+        int texture_version = -1;
     };
     std::unordered_map<int, TextureInfo> m_targetTextures;
 

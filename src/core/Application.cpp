@@ -3152,7 +3152,7 @@ void Application::run() {
         for (const auto& record : m_targetHistory) {
             if (!record.cropped_image.empty()) {
                 auto& texInfo = m_targetTextures[record.track_id];
-                if (texInfo.texture_id == 0 || record.max_confidence > texInfo.max_confidence) {
+                if (texInfo.texture_id == 0 || record.cropped_image_version > texInfo.texture_version) {
                     if (texInfo.texture_id == 0) {
                         glGenTextures(1, &texInfo.texture_id);
                     }
@@ -3171,6 +3171,7 @@ void Application::run() {
                     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
                     texInfo.max_confidence = record.max_confidence;
+                    texInfo.texture_version = record.cropped_image_version;
                 }
             }
         }
@@ -3957,6 +3958,8 @@ bool Application::saveFeedback(const std::string& feedback) {
 void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTracks, const cv::Mat& currentFrame) {
     if (currentFrame.empty()) return;
 
+    int manualCaptureId = m_manualCaptureTargetId.exchange(-1);
+
     auto getTimestamp = []() {
         auto now = std::chrono::system_clock::now();
         auto in_time_t = std::chrono::system_clock::to_time_t(now);
@@ -3996,6 +3999,7 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             record.last_box = obj.box;
             record.trail = obj.trail;
             record.is_currently_active = true;
+            record.cropped_image_version = 0;
 
             // Crop image
             cv::Rect roi = obj.box;
@@ -4013,9 +4017,28 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             it->last_box = obj.box;
             it->trail = obj.trail;
             it->is_currently_active = true;
+
+            bool shouldUpdateCrop = false;
             if (obj.confidence > it->max_confidence) {
                 it->max_confidence = obj.confidence;
-                // Update crop image with better confidence one
+                shouldUpdateCrop = true;
+            }
+
+            // Also update if the new box has a larger area (resolution) than the current saved crop
+            // and we have a decent confidence score (>= 0.4) to avoid low-confidence noise/blobs
+            int newArea = obj.box.width * obj.box.height;
+            int currentArea = it->cropped_image.cols * it->cropped_image.rows;
+            if (obj.confidence >= 0.4f && newArea > currentArea) {
+                shouldUpdateCrop = true;
+            }
+
+            // Or if manual capture was explicitly requested for this target ID
+            if (manualCaptureId == obj.track_id) {
+                shouldUpdateCrop = true;
+            }
+
+            if (shouldUpdateCrop) {
+                // Update crop image
                 cv::Rect roi = obj.box;
                 roi.x = std::max(0, roi.x);
                 roi.y = std::max(0, roi.y);
@@ -4023,6 +4046,7 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                 if (roi.y + roi.height > currentFrame.rows) roi.height = currentFrame.rows - roi.y;
                 if (roi.width > 0 && roi.height > 0) {
                     it->cropped_image = currentFrame(roi).clone();
+                    it->cropped_image_version++;
                 }
             }
         }
@@ -4188,6 +4212,13 @@ void Application::renderTargetAnalyzer() {
     ImGui::Columns(1);
 
     ImGui::Separator();
+
+    if (selectedRecord.is_currently_active) {
+        if (ImGui::Button("Update Visual Crop (Manual)", ImVec2(-FLT_MIN, 0))) {
+            m_manualCaptureTargetId = selectedRecord.track_id;
+        }
+        ImGui::Spacing();
+    }
 
     if (ImGui::Button("Export Target Details", ImVec2(-FLT_MIN, 0))) {
         exportTarget(selectedRecord);

@@ -67,6 +67,7 @@ struct UniqueTargetRecord {
     cv::Rect last_box;
     std::vector<cv::Point> trail;
     cv::Mat cropped_image;
+    int cropped_image_version = 0;
     bool is_currently_active = false;
 };
 
