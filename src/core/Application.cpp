@@ -324,6 +324,11 @@ void Application::savePersistedSettings() const {
 
     out << "# Tactileviewer persistent settings\n";
     out << "cameraAddress=" << cameraAddress << '\n';
+    out << "showSettingsWindow=" << (m_showSettingsWindow ? 1 : 0) << '\n';
+    out << "showDevConsole=" << (m_showDevConsole ? 1 : 0) << '\n';
+    out << "showDataPanel=" << (m_showDataPanel ? 1 : 0) << '\n';
+    out << "showZoomWindow=" << (m_showZoomWindow ? 1 : 0) << '\n';
+    out << "showTargetAnalyzer=" << (m_showTargetAnalyzer ? 1 : 0) << '\n';
     out << "remoteInferenceEnabled=" << (m_settings.remoteInferenceEnabled ? 1 : 0) << '\n';
     out << "remoteInferenceIp=" << m_settings.remoteInferenceIp << '\n';
     out << "remoteInferencePort=" << m_settings.remoteInferencePort << '\n';
@@ -441,6 +446,11 @@ void Application::loadPersistedSettings() {
 
         try {
             if (key == "cameraAddress") m_cameraAddress = value;
+            else if (key == "showSettingsWindow") m_showSettingsWindow = ParseBoolSetting(value);
+            else if (key == "showDevConsole") m_showDevConsole = ParseBoolSetting(value);
+            else if (key == "showDataPanel") m_showDataPanel = ParseBoolSetting(value);
+            else if (key == "showZoomWindow") m_showZoomWindow = ParseBoolSetting(value);
+            else if (key == "showTargetAnalyzer") m_showTargetAnalyzer = ParseBoolSetting(value);
             else if (key == "remoteInferenceEnabled") m_settings.remoteInferenceEnabled = ParseBoolSetting(value);
             else if (key == "remoteInferenceIp") m_settings.remoteInferenceIp = value;
             else if (key == "remoteInferencePort") m_settings.remoteInferencePort = std::stoi(value);
@@ -805,17 +815,48 @@ void Application::workerLoop() {
             }
             
             if (currentSettings.subZoomsEnabled) {
+                // Plan 11 Extension: Filter motion tracks for uniqueness (Non-Maximum Suppression)
+                // We want to avoid multiple slots showing the same or very close objects.
+                std::vector<int> uniqueTrackIndices;
+                for (size_t i = 0; i < m_workerMotionTracks.size(); ++i) {
+                    bool tooClose = false;
+                    for (int uniqueIdx : uniqueTrackIndices) {
+                        cv::Rect intersect = m_workerMotionTracks[i].box & m_workerMotionTracks[uniqueIdx].box;
+                        if (intersect.area() > 0) {
+                            float iou = static_cast<float>(intersect.area()) / 
+                                        (m_workerMotionTracks[i].box.area() + m_workerMotionTracks[uniqueIdx].box.area() - intersect.area());
+                            // If IoU > 0.3, they are likely the same object
+                            if (iou > 0.3f) {
+                                tooClose = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!tooClose) {
+                        uniqueTrackIndices.push_back(static_cast<int>(i));
+                    }
+                }
+
                 // Assign tracks to the 4 slots of localSubZooms
                 std::vector<bool> slotUpdated(4, false);
                 
-                // Keep tracks that are already assigned
+                // Keep tracks that are already assigned AND still considered unique
                 for (int i = 0; i < 4; ++i) {
                     if (m_sharedSubZooms[i].active) {
                         int assignedId = m_sharedSubZooms[i].motion_id;
                         auto trackIt = std::find_if(m_workerMotionTracks.begin(), m_workerMotionTracks.end(),
                             [assignedId](const WorkerMotionTrack& t) { return t.id == assignedId; });
                         
+                        // Check if this track is still in our unique list
+                        bool isStillUnique = false;
                         if (trackIt != m_workerMotionTracks.end()) {
+                            int trackIdx = static_cast<int>(std::distance(m_workerMotionTracks.begin(), trackIt));
+                            if (std::find(uniqueTrackIndices.begin(), uniqueTrackIndices.end(), trackIdx) != uniqueTrackIndices.end()) {
+                                isStillUnique = true;
+                            }
+                        }
+
+                        if (trackIt != m_workerMotionTracks.end() && isStillUnique) {
                             localSubZooms[i].active = true;
                             localSubZooms[i].motion_id = trackIt->id;
                             localSubZooms[i].box = trackIt->box;
@@ -852,8 +893,9 @@ void Application::workerLoop() {
                     }
                 }
                 
-                // Fill empty slots with unassigned tracks
-                for (const auto& track : m_workerMotionTracks) {
+                // Fill empty slots with unassigned unique tracks
+                for (int trackIdx : uniqueTrackIndices) {
+                    const auto& track = m_workerMotionTracks[trackIdx];
                     bool alreadyAssigned = false;
                     for (int i = 0; i < 4; ++i) {
                         if (slotUpdated[i] && localSubZooms[i].motion_id == track.id) {
@@ -1523,42 +1565,6 @@ void Application::detectorWorkerLoop() {
 }
 
 // -----------------------------------------------------------------------
-// Target Locking
-// -----------------------------------------------------------------------
-
-void Application::handleTargetLocking(const ViewportInfo& view) {
-    if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {
-        ImVec2 mousePos = ImGui::GetMousePos();
-        // Check if mouse click is inside the actual video viewport bounds
-        if (mousePos.x >= view.pos_x && mousePos.x <= view.pos_x + view.target_w &&
-            mousePos.y >= view.pos_y && mousePos.y <= view.pos_y + view.target_h) {
-            float videoX = (mousePos.x - view.pos_x) / view.scale;
-            float videoY = (mousePos.y - view.pos_y) / view.scale;
-            cv::Point clickPoint(static_cast<int>(videoX), static_cast<int>(videoY));
-            bool lockedOnObj = false;
-            for (const auto& obj : m_trackedObjects) {
-                if (obj.box.contains(clickPoint)) {
-                    m_requestedLockId.store(obj.track_id);
-                    m_lockRequested.store(true);
-                    log(LogLevel::INFO, "Target lock requested: " + obj.className +
-                        " TrackID=" + std::to_string(obj.track_id));
-                    lockedOnObj = true;
-                    break;
-                }
-            }
-            if (!lockedOnObj) {
-                // Trigger pixel tracking on empty space click
-                std::lock_guard<std::mutex> lock(m_dataMutex);
-                m_pixelLockPoint = clickPoint;
-                m_pixelLockRequested.store(true);
-                log(LogLevel::INFO, "Pixel target lock requested at position: (" +
-                    std::to_string(clickPoint.x) + ", " + std::to_string(clickPoint.y) + ")");
-            }
-        }
-    }
-}
-
-// -----------------------------------------------------------------------
 // UI: Camera View
 // -----------------------------------------------------------------------
 
@@ -1863,6 +1869,11 @@ void Application::renderDataPanel() {
                             m_selectedAnalyzerTargetId = -1;
                         } else {
                             m_selectedAnalyzerTargetId = record.track_id;
+                            // Bidirectional sync: if target is active, lock it
+                            if (record.is_currently_active) {
+                                m_requestedLockId.store(record.track_id);
+                                m_lockRequested.store(true);
+                            }
                         }
                     }
 
@@ -2133,8 +2144,10 @@ void Application::renderDevConsole() {
     ImGui::SameLine();
     ImGui::TextDisabled("v1.10.9");
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120.0f);
-    if (ImGui::Button("Settings...", ImVec2(110, 0)))
+    if (ImGui::Button("Settings...", ImVec2(110, 0))) {
         m_showSettingsWindow = !m_showSettingsWindow;
+        savePersistedSettings();
+    }
     ImGui::Separator();
 
     // ── Tab bar ─────────────────────────────────────────────────────────
@@ -2921,10 +2934,13 @@ void Application::renderSettingsWindow() {
     if (!m_showSettingsWindow) return;
 
     ImGui::SetNextWindowSize(ImVec2(480, 560), ImGuiCond_FirstUseEver);
+    bool prevState = m_showSettingsWindow;
     if (!ImGui::Begin("Settings", &m_showSettingsWindow)) {
         ImGui::End();
+        if (prevState != m_showSettingsWindow) savePersistedSettings();
         return;
     }
+    if (prevState != m_showSettingsWindow) savePersistedSettings();
 
     bool changed = false;
     bool audioChanged = false;
@@ -3180,8 +3196,10 @@ void Application::renderSettingsWindow() {
     }
 
     ImGui::Separator();
-    if (ImGui::Button("Close", ImVec2(-1, 0)))
+    if (ImGui::Button("Close", ImVec2(-1, 0))) {
         m_showSettingsWindow = false;
+        savePersistedSettings();
+    }
 
     if (changed || audioChanged) {
         std::lock_guard<std::mutex> lock(m_dataMutex);
@@ -3347,9 +3365,12 @@ void Application::run() {
             }
 
             if (ImGui::BeginMenu("View")) {
-                ImGui::MenuItem("Settings Window", nullptr, &m_showSettingsWindow);
-                ImGui::MenuItem("Dev Console", nullptr, &m_showDevConsole);
-                ImGui::MenuItem("Target Analyzer", nullptr, &m_showTargetAnalyzer);
+                if (ImGui::MenuItem("Settings Window", "C", &m_showSettingsWindow)) savePersistedSettings();
+                if (ImGui::MenuItem("Dev Console", "F12", &m_showDevConsole)) savePersistedSettings();
+                if (ImGui::MenuItem("Target Analyzer", nullptr, &m_showTargetAnalyzer)) savePersistedSettings();
+                ImGui::Separator();
+                if (ImGui::MenuItem("Data Panel", nullptr, &m_showDataPanel)) savePersistedSettings();
+                if (ImGui::MenuItem("Zoom Window", nullptr, &m_showZoomWindow)) savePersistedSettings();
                 ImGui::EndMenu();
             }
 
@@ -3379,6 +3400,7 @@ void Application::run() {
             if (ImGui::BeginMenu("Settings")) {
                 if (ImGui::MenuItem("Open Settings Window", nullptr, m_showSettingsWindow)) {
                     m_showSettingsWindow = !m_showSettingsWindow;
+                    savePersistedSettings();
                 }
                 if (ImGui::MenuItem("Save Current Settings")) {
                     savePersistedSettings();
@@ -3474,11 +3496,11 @@ void Application::run() {
                                    ImVec2(view.pos_x + view.target_w, view.pos_y + view.target_h));
             }
 
-            // ── ROI Edit Mode: drag-to-draw/move/resize ───────────────
+            // ── ROI & Target Interaction: drag-to-draw/move/resize ───────────
             int hoveredZoneId = -1;
             ROIEditState hoveredAction = ROIEditState::NONE;
 
-            if (m_roiEditMode && ImGui::IsWindowHovered(ImGuiHoveredFlags_None)) {
+            if (ImGui::IsWindowHovered(ImGuiHoveredFlags_None)) {
                 ImVec2 mpos = ImGui::GetMousePos();
                 cv::Point mVideo(
                     static_cast<int>((mpos.x - view.pos_x) / view.scale),
@@ -3646,9 +3668,27 @@ void Application::run() {
                                 }
                             }
                         }
-                    } else if (zones.size() < ROIManager::kMaxZones) {
-                        m_editState = ROIEditState::DRAWING;
-                        m_roiManager->beginDrag(mVideo);
+                    } else {
+                        // Check if we clicked an object box to lock it (unified logic)
+                        bool lockedOnObj = false;
+                        for (const auto& obj : m_trackedObjects) {
+                            if (obj.box.contains(mVideo)) {
+                                m_requestedLockId.store(obj.track_id);
+                                m_lockRequested.store(true);
+                                m_selectedAnalyzerTargetId = obj.track_id;
+                                log(LogLevel::INFO, "Target lock requested: " + obj.className +
+                                   " TrackID=" + std::to_string(obj.track_id));
+                                lockedOnObj = true;
+                                break;
+                            }
+                        }
+
+                        if (!lockedOnObj) {
+                            // Start drawing NEW ROI or Pixel Target
+                            m_editState = ROIEditState::DRAWING;
+                            m_editDragStartMouse = mVideo;
+                            m_roiManager->beginDrag(mVideo);
+                        }
                     }
                 }
 
@@ -3734,21 +3774,45 @@ void Application::run() {
                 }
 
                 if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-                    if (m_editState == ROIEditState::DRAWING && m_roiManager->isDragging()) {
-                        int newId = m_roiManager->commitDrag();
-                        if (newId >= 0) {
-                            int bufIdx = newId % ROIManager::kMaxZones;
-                            auto currentZones = m_roiManager->getROIs();
-                            for (const auto& z : currentZones) {
-                                if (z.id == newId) {
-                                    strncpy(m_roiLabelBuf[bufIdx], z.label.c_str(), 63);
-                                    break;
+                    if (m_editState == ROIEditState::DRAWING) {
+                        int dx = std::abs(mVideo.x - m_editDragStartMouse.x);
+                        int dy = std::abs(mVideo.y - m_editDragStartMouse.y);
+
+                        if (dx < 5 && dy < 5) {
+                            // Minimal drag -> Pixel point lock (template match)
+                            m_roiManager->cancelDrag();
+                            std::lock_guard<std::mutex> lock(m_dataMutex);
+                            m_pixelLockPoint = m_editDragStartMouse;
+                            m_pixelLockRequested.store(true);
+                        } else {
+                            // Significant drag -> Create target
+                            if (m_roiEditMode) {
+                                // Create ROI Zone
+                                int newId = m_roiManager->commitDrag();
+                                if (newId >= 0) {
+                                    int bufIdx = newId % ROIManager::kMaxZones;
+                                    auto currentZones = m_roiManager->getROIs();
+                                    for (const auto& z : currentZones) {
+                                        if (z.id == newId) {
+                                            strncpy(m_roiLabelBuf[bufIdx], z.label.c_str(), 63);
+                                            break;
+                                        }
+                                    }
+                                    log(LogLevel::INFO, "ROI zone added: ID " + std::to_string(newId));
+                                }
+                                if (static_cast<int>(m_roiManager->getROIs().size()) >= ROIManager::kMaxZones)
+                                    m_roiEditMode = false;
+                            } else {
+                                // Create Pixel Target
+                                cv::Rect drawnRect = m_roiManager->getDragRect();
+                                m_roiManager->cancelDrag();
+                                if (drawnRect.width > 4 && drawnRect.height > 4) {
+                                    std::lock_guard<std::mutex> lock(m_dataMutex);
+                                    m_pixelLockRect = drawnRect;
+                                    m_pixelLockRequested.store(true);
                                 }
                             }
-                            log(LogLevel::INFO, "ROI zone added: ID " + std::to_string(newId));
                         }
-                        if (static_cast<int>(m_roiManager->getROIs().size()) >= ROIManager::kMaxZones)
-                            m_roiEditMode = false;
                     } else if (m_editZoneId == 999) {
                         m_pixelLockDragging.store(false);
                         {
@@ -3795,8 +3859,8 @@ void Application::run() {
             if (m_settings.showROIOverlay) {
                 auto zones = m_roiManager->getROIs();
                 for (const auto& z : zones) {
-                    bool isHoveredZone = (m_roiEditMode && hoveredZoneId == z.id);
-                    bool isEditingZone = (m_roiEditMode && m_editZoneId == z.id);
+                    bool isHoveredZone = (hoveredZoneId == z.id);
+                    bool isEditingZone = (m_editZoneId == z.id);
 
                     // Check if alarm triggered (object inside active alarm zone)
                     bool hasObjectInside = false;
@@ -3852,8 +3916,8 @@ void Application::run() {
                     drawList->AddRect(rMin, rMax, col, 0.0f, 0, borderThickness);
                     drawList->AddRectFilled(rMin, rMax, fillCol);
 
-                    // Render corner handles (little squares) in edit mode
-                    if (m_roiEditMode) {
+                    // Render corner handles (little squares) when hovered or editing
+                    if (isHoveredZone || isEditingZone) {
                         ImVec2 tl(rMin.x, rMin.y);
                         ImVec2 tr(rMax.x, rMin.y);
                         ImVec2 bl(rMin.x, rMax.y);
@@ -3880,8 +3944,8 @@ void Application::run() {
                 }
             }
 
-            // Draw pixel target handles in edit mode
-            if (m_roiEditMode && m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.className == "Pixel Target") {
+            // Draw pixel target handles
+            if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.className == "Pixel Target") {
                 bool isHovered = (hoveredZoneId == 999);
                 bool isEditing = (m_editZoneId == 999);
                 ImU32 col = (isHovered || isEditing) ? IM_COL32(255, 255, 0, 255) : IM_COL32(255, 50, 50, 255);
@@ -3910,9 +3974,7 @@ void Application::run() {
             }
 
             // ── Regular HUD and target locking ────────────────────────
-            if (!m_roiEditMode) {
-                handleTargetLocking(view);
-            }
+            // HUD and target locking now handled via contextual drag in Camera View block.
 
             // ── Motion Detection Overlay (Plan 10) ─────────────────────
             // Drawn before tracked objects so motion regions appear behind
@@ -4240,6 +4302,11 @@ void Application::run() {
         }
         if (ImGui::IsKeyPressed(ImGuiKey_C)) {
             m_showSettingsWindow = !m_showSettingsWindow; // Calibration/Settings
+            savePersistedSettings();
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_F12)) {
+            m_showDevConsole = !m_showDevConsole;
+            savePersistedSettings();
         }
 
         // Render
@@ -4354,12 +4421,22 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             record.trail = obj.trail;
             record.is_currently_active = true;
 
-            // Crop image
+            // Crop image with expanded padding (50% on each side)
+            float paddingFactor = 0.5f;
             cv::Rect roi = obj.box;
+            int padW = static_cast<int>(roi.width * paddingFactor);
+            int padH = static_cast<int>(roi.height * paddingFactor);
+            roi.x -= padW;
+            roi.y -= padH;
+            roi.width += 2 * padW;
+            roi.height += 2 * padH;
+
+            // Clamp to frame boundaries
             roi.x = std::max(0, roi.x);
             roi.y = std::max(0, roi.y);
             if (roi.x + roi.width > currentFrame.cols) roi.width = currentFrame.cols - roi.x;
             if (roi.y + roi.height > currentFrame.rows) roi.height = currentFrame.rows - roi.y;
+
             if (roi.width > 0 && roi.height > 0) {
                 cv::Mat crop = currentFrame(roi).clone();
                 
@@ -4396,7 +4473,15 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             // Check if 500ms has elapsed since last snapshot (Increased frequency as requested)
             auto now = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::milliseconds>(now - it->last_snapshot_time).count() >= 500) {
+                float paddingFactor = 0.5f;
                 cv::Rect roi = obj.box;
+                int padW = static_cast<int>(roi.width * paddingFactor);
+                int padH = static_cast<int>(roi.height * paddingFactor);
+                roi.x -= padW;
+                roi.y -= padH;
+                roi.width += 2 * padW;
+                roi.height += 2 * padH;
+
                 roi.x = std::max(0, roi.x);
                 roi.y = std::max(0, roi.y);
                 if (roi.x + roi.width > currentFrame.cols) roi.width = currentFrame.cols - roi.x;
@@ -4413,7 +4498,7 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                     it->snapshot_last = snap;
                     it->cropped_image_last_version++;
 
-                    if (it->selected_snapshot_index == -1) {
+                    if (it->snapshot_mid_manual_idx == -1) {
                         int midIdx = it->periodic_snapshots.size() / 2;
                         it->snapshot_mid = it->periodic_snapshots[midIdx];
                         it->cropped_image_mid_version++;
@@ -4423,7 +4508,15 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
 
             // Or if manual capture was explicitly requested for this target ID
             if (manualCaptureId == obj.track_id) {
+                float paddingFactor = 0.5f;
                 cv::Rect roi = obj.box;
+                int padW = static_cast<int>(roi.width * paddingFactor);
+                int padH = static_cast<int>(roi.height * paddingFactor);
+                roi.x -= padW;
+                roi.y -= padH;
+                roi.width += 2 * padW;
+                roi.height += 2 * padH;
+
                 roi.x = std::max(0, roi.x);
                 roi.y = std::max(0, roi.y);
                 if (roi.x + roi.width > currentFrame.cols) roi.width = currentFrame.cols - roi.x;
@@ -4438,7 +4531,7 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                     it->periodic_snapshots.push_back(snap);
                     it->last_snapshot_time = now;
 
-                    if (it->selected_snapshot_index == -1) {
+                    if (it->snapshot_mid_manual_idx == -1) {
                         it->snapshot_mid = snap;
                         it->cropped_image_mid_version++;
                     }
@@ -4456,13 +4549,12 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                 record.snapshot_first = record.periodic_snapshots.front();
                 record.cropped_image_first_version++;
 
-                if (record.selected_snapshot_index != -1 && record.selected_snapshot_index < (int)record.periodic_snapshots.size()) {
-                    record.snapshot_mid = record.periodic_snapshots[record.selected_snapshot_index];
+                if (record.snapshot_mid_manual_idx != -1 && record.snapshot_mid_manual_idx < (int)record.periodic_snapshots.size()) {
+                    record.snapshot_mid = record.periodic_snapshots[record.snapshot_mid_manual_idx];
                 } else {
                     int midIdx = record.periodic_snapshots.size() / 2;
                     record.snapshot_mid = record.periodic_snapshots[midIdx];
                 }
-                record.cropped_image_mid_version++;
                 record.cropped_image_mid_version++;
 
                 record.snapshot_last = record.periodic_snapshots.back();
@@ -4660,6 +4752,7 @@ void Application::renderTargetAnalyzer() {
     }
 
     auto& selectedRecord = m_targetHistory[targetIdx];
+    auto& uiState = m_analyzerUiStates[selectedRecord.track_id];
 
     auto updateSharedRecord = [&](const std::function<void(UniqueTargetRecord&)>& func) {
         std::lock_guard<std::mutex> lock(m_dataMutex);
@@ -4689,15 +4782,13 @@ void Application::renderTargetAnalyzer() {
     ImGui::SameLine();
     
     // Toggle Gallery Button
-    if (ImGui::SmallButton(selectedRecord.show_full_gallery ? "[ VIEW: SINGLE ]" : "[ VIEW: GALLERY ]")) {
-        updateSharedRecord([&](UniqueTargetRecord& r) {
-            r.show_full_gallery = !r.show_full_gallery;
-        });
+    if (ImGui::SmallButton(uiState.show_full_gallery ? "[ VIEW: SINGLE ]" : "[ VIEW: GALLERY ]")) {
+        uiState.show_full_gallery = !uiState.show_full_gallery;
     }
 
     ImGui::Spacing();
 
-    if (selectedRecord.show_full_gallery) {
+    if (uiState.show_full_gallery) {
         // --- GALLERY VIEW (GRID) ---
         ImGui::TextDisabled("Select any image to set it as the 'Best Representative' snapshot.");
         ImGui::Spacing();
@@ -4718,16 +4809,19 @@ void Application::renderTargetAnalyzer() {
             if (texID != 0) {
                 ImGui::PushID(i);
                 
-                bool isSelected = (selectedRecord.selected_snapshot_index == i);
+                bool isSelected = (uiState.selected_snapshot_idx == i);
                 if (isSelected) {
                     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
                 }
 
-                if (ImGui::ImageButton(reinterpret_cast<void*>(static_cast<intptr_t>(texID)), ImVec2(imgWidth, imgWidth * 0.75f))) {
+                if (ImGui::ImageButton("##gallery_item", reinterpret_cast<void*>(static_cast<intptr_t>(texID)), ImVec2(imgWidth, imgWidth * 0.75f))) {
+                    uiState.selected_snapshot_idx = i;
                     updateSharedRecord([&](UniqueTargetRecord& r) {
-                        r.selected_snapshot_index = i;
-                        r.snapshot_mid = r.periodic_snapshots[i];
-                        r.cropped_image_mid_version++;
+                        r.snapshot_mid_manual_idx = i;
+                        if (i >= 0 && i < (int)r.periodic_snapshots.size()) {
+                            r.snapshot_mid = r.periodic_snapshots[i];
+                            r.cropped_image_mid_version++;
+                        }
                     });
                 }
 
@@ -4777,7 +4871,7 @@ void Application::renderTargetAnalyzer() {
         } else if (activeSnapshotIdx == 1) {
             activeSnap = selectedRecord.snapshot_mid;
             activeTexID = texMid;
-            snapLabel = (selectedRecord.selected_snapshot_index != -1) ? "MANUAL SELECTION (BEST)" : "AUTO SELECTION (BEST)";
+            snapLabel = (uiState.selected_snapshot_idx != -1) ? "MANUAL SELECTION (BEST)" : "AUTO SELECTION (BEST)";
             badgeColor = ImVec4(0.0f, 1.0f, 0.5f, 1.0f); // Green
         } else {
             activeSnap = selectedRecord.snapshot_last;
