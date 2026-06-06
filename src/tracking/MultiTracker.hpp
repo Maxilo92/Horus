@@ -67,6 +67,9 @@ public:
 
     int getActiveTrackCount() const;
 
+    // Retrieves the next unique chronological ID and increments the counter
+    int getNextIdAndIncrement() { return m_nextId++; }
+
 private:
     // Berechnet für jedes Track-Detection-Paar einen Match-Score.
     // Gibt Matrix[nTracks][nDets] zurück.

@@ -128,6 +128,9 @@ Application::Application()
     m_camera       = std::make_unique<CameraModule>();
     m_renderer     = std::make_unique<VideoRenderer>();
     m_zoomRenderer = std::make_unique<VideoRenderer>();
+    for (int i = 0; i < 4; ++i) {
+        m_subZoomRenderers[i] = std::make_unique<VideoRenderer>();
+    }
     m_hud          = std::make_unique<HUD>();
     m_tracker      = std::make_unique<MultiTracker>();
     m_dataLogger   = std::make_unique<DataLogger>();
@@ -361,6 +364,8 @@ void Application::savePersistedSettings() const {
     out << "motionOverlayColor=" << m_settings.motionOverlayColor << '\n';
     out << "motionDetectShadows=" << (m_settings.motionDetectShadows ? 1 : 0) << '\n';
     out << "motionLearningRate=" << m_settings.motionLearningRate << '\n';
+    out << "subZoomsEnabled=" << (m_settings.subZoomsEnabled ? 1 : 0) << '\n';
+    out << "subZoomsUseSeparateWindows=" << (m_settings.subZoomsUseSeparateWindows ? 1 : 0) << '\n';
     // Audio Feedback Settings
     out << "audioEnabled=" << (m_settings.audioEnabled ? 1 : 0) << '\n';
     out << "audioMasterVolume=" << m_settings.audioMasterVolume << '\n';
@@ -465,6 +470,8 @@ void Application::loadPersistedSettings() {
             else if (key == "motionOverlayColor") m_settings.motionOverlayColor = static_cast<uint32_t>(std::stoul(value));
             else if (key == "motionDetectShadows") m_settings.motionDetectShadows = ParseBoolSetting(value);
             else if (key == "motionLearningRate") m_settings.motionLearningRate = std::stoi(value);
+            else if (key == "subZoomsEnabled") m_settings.subZoomsEnabled = ParseBoolSetting(value);
+            else if (key == "subZoomsUseSeparateWindows") m_settings.subZoomsUseSeparateWindows = ParseBoolSetting(value);
             // Audio Feedback Settings
             else if (key == "audioEnabled") m_settings.audioEnabled = ParseBoolSetting(value);
             else if (key == "audioMasterVolume") m_settings.audioMasterVolume = std::stof(value);
@@ -593,6 +600,7 @@ void Application::workerLoop() {
             std::lock_guard<std::mutex> lock(m_dataMutex);
             currentSettings = m_sharedSettings;
         }
+        SharedSubZoom localSubZooms[4];
 
         // ── Camera resolution / mode change ────────────────────────────
         static bool lastRequest4K = currentSettings.request4KCamera;
@@ -1010,7 +1018,7 @@ void Application::workerLoop() {
                 m_pixelLockRect = templateRect;
 
                 m_sharedLockedTarget.state = TrackingState::LOCKED;
-                m_sharedLockedTarget.track_id = 999; // Special ID for pixel target
+                m_sharedLockedTarget.track_id = m_tracker->getNextIdAndIncrement();
                 m_sharedLockedTarget.class_id = -1;
                 m_sharedLockedTarget.className = "Pixel Target";
                 m_sharedLockedTarget.box = templateRect;
@@ -1049,7 +1057,11 @@ void Application::workerLoop() {
                 m_pixelLockRect = rect;
 
                 m_sharedLockedTarget.state = TrackingState::LOCKED;
-                m_sharedLockedTarget.track_id = 999;
+                int currentId = m_sharedLockedTarget.track_id;
+                if (currentId < 0 || currentId == 999) {
+                    currentId = m_tracker->getNextIdAndIncrement();
+                }
+                m_sharedLockedTarget.track_id = currentId;
                 m_sharedLockedTarget.class_id = -1;
                 m_sharedLockedTarget.className = "Pixel Target";
                 m_sharedLockedTarget.box = rect;
@@ -3057,7 +3069,7 @@ void Application::run() {
 
                 if (m_editState == ROIEditState::NONE) {
                     // Check corners first
-                    if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == 999) {
+                    if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.className == "Pixel Target") {
                         cv::Rect r = m_lockedTarget.box;
                         cv::Point tl(r.x, r.y);
                         cv::Point tr(r.x + r.width, r.y);
@@ -3100,7 +3112,7 @@ void Application::run() {
 
                     // Check edges if no corner hovered
                     if (hoveredZoneId == -1) {
-                        if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == 999) {
+                        if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.className == "Pixel Target") {
                             cv::Rect r = m_lockedTarget.box;
                             if (std::abs(mVideo.x - r.x) <= tol && mVideo.y >= r.y && mVideo.y <= r.y + r.height) {
                                 hoveredZoneId = 999; hoveredAction = ROIEditState::RESIZING_L;
@@ -3134,7 +3146,7 @@ void Application::run() {
 
                     // Check center (moving) if no edge/corner hovered
                     if (hoveredZoneId == -1) {
-                        if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == 999) {
+                        if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.className == "Pixel Target") {
                             cv::Rect r = m_lockedTarget.box;
                             if (mVideo.x > r.x && mVideo.x < r.x + r.width &&
                                 mVideo.y > r.y && mVideo.y < r.y + r.height) {
@@ -3449,7 +3461,7 @@ void Application::run() {
             }
 
             // Draw pixel target handles in edit mode
-            if (m_roiEditMode && m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == 999) {
+            if (m_roiEditMode && m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.className == "Pixel Target") {
                 bool isHovered = (hoveredZoneId == 999);
                 bool isEditing = (m_editZoneId == 999);
                 ImU32 col = (isHovered || isEditing) ? IM_COL32(255, 255, 0, 255) : IM_COL32(255, 50, 50, 255);
@@ -3473,7 +3485,7 @@ void Application::run() {
                 drawList->AddRectFilled(ImVec2(br.x - 3, br.y - 3), ImVec2(br.x + 3, br.y + 3), col);
 
                 char targetLbl[64];
-                snprintf(targetLbl, sizeof(targetLbl), "[PIXEL TARGET] ID:999");
+                snprintf(targetLbl, sizeof(targetLbl), "[PIXEL TARGET] ID:%d", m_lockedTarget.track_id);
                 drawList->AddText(ImVec2(rMin.x + 4, rMin.y + 3), col, targetLbl);
             }
 
@@ -3827,6 +3839,10 @@ void Application::cleanup() {
     if (m_workerThread.joinable()) m_workerThread.join();
 
     curl_global_cleanup();
+
+    for (int i = 0; i < 4; ++i) {
+        m_subZoomRenderers[i].reset();
+    }
 
     // Delete target history textures
     for (auto& [id, texInfo] : m_targetTextures) {

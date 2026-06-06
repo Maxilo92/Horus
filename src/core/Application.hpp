@@ -255,6 +255,29 @@ private:
         float max_confidence = 0.0f;
     };
     std::unordered_map<int, TextureInfo> m_targetTextures;
+
+    // ---------------------------------------------------------------
+    // Sub Zooms and Motion Tracking State
+    // ---------------------------------------------------------------
+    struct SharedSubZoom {
+        bool active = false;
+        int motion_id = -1;
+        cv::Rect box;
+        cv::Mat frame;
+        bool isLost = false;
+    };
+    SharedSubZoom m_sharedSubZooms[4];
+    SharedSubZoom m_subZooms[4]; // render-thread local copy
+    std::unique_ptr<VideoRenderer> m_subZoomRenderers[4];
+
+    struct WorkerMotionTrack {
+        int id;
+        cv::Rect box;
+        std::chrono::steady_clock::time_point lastSeen;
+        bool active = true;
+    };
+    std::vector<WorkerMotionTrack> m_workerMotionTracks;
+    int m_nextMotionId = 1;
 };
 
 #endif // APPLICATION_HPP

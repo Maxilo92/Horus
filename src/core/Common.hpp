@@ -206,6 +206,12 @@ struct SystemSettings {
     float audioLockLostDurMs       = 200.0f;
 
     // ----------------------------------------------------------------
+    // Sub Zooms Settings
+    // ----------------------------------------------------------------
+    bool  subZoomsEnabled             = true;
+    bool  subZoomsUseSeparateWindows  = false;
+
+    // ----------------------------------------------------------------
     // Remote Inference Settings (network GPU offloading)
     // ----------------------------------------------------------------
     bool        remoteInferenceEnabled = false;

@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.11.6] - 2026-06-06
+
+### Added
+
+- **Chronological Pixel Target IDs**: Changed the pixel target locking mechanism (establishing a lock on empty space) to assign sequential chronological track IDs from the tracker's ID pool instead of a static `999` ID.
+- **Pixel Target Data Logging**: Enabled logging for pixel targets in `DataLogger`. They are now saved in the CSV/JSON records under their assigned chronological IDs.
+
+### Changed
+
+- `MultiTracker`: Added `getNextIdAndIncrement()` helper method to retrieve and increment the tracker's internal ID counter.
+- `Application`:
+  - Updated vision thread lock requests to assign and maintain chronological IDs for pixel targets.
+  - Refactored ROI Editor hit-testing and HUD drawing to identify pixel targets by checking `className == "Pixel Target"` instead of hardcoded `track_id == 999`, avoiding conflicts with standard ROI zones.
+  - Formatted the HUD pixel target label to display the actual chronological ID.
+
 ## [1.11.5] - 2026-06-06
 
 ### Added
