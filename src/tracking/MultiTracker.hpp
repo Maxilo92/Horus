@@ -83,7 +83,8 @@ private:
         const std::vector<int>&      trackClassIds,
         const std::vector<int>&      detClassIds,
         float                        maxCenterDistPx,
-        int                          lagFrames) const;
+        int                          lagFrames,
+        float                        reacquisitionMaxDist) const;
 
     float calculateIoU(const cv::Rect& a, const cv::Rect& b) const;
 

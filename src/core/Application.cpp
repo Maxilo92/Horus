@@ -338,6 +338,10 @@ void Application::savePersistedSettings() const {
     out << "showTrails=" << (m_settings.showTrails ? 1 : 0) << '\n';
     out << "trackerMinMatchScore=" << m_settings.trackerMinMatchScore << '\n';
     out << "trackerMaxCenterDistPx=" << m_settings.trackerMaxCenterDistPx << '\n';
+    out << "trackerReacquisitionEnabled=" << (m_settings.trackerReacquisitionEnabled ? 1 : 0) << '\n';
+    out << "trackerReacquisitionZoom=" << m_settings.trackerReacquisitionZoom << '\n';
+    out << "trackerUseMotionFallback=" << (m_settings.trackerUseMotionFallback ? 1 : 0) << '\n';
+    out << "trackerReacquisitionMaxDist=" << m_settings.trackerReacquisitionMaxDist << '\n';
     out << "trackerConfirmFrames=" << m_settings.trackerConfirmFrames << '\n';
     out << "trackerVelocitySmoothing=" << m_settings.trackerVelocitySmoothing << '\n';
     out << "trackerDeadReckoningDamping=" << m_settings.trackerDeadReckoningDamping << '\n';
@@ -451,6 +455,10 @@ void Application::loadPersistedSettings() {
             else if (key == "showTrails") m_settings.showTrails = ParseBoolSetting(value);
             else if (key == "trackerMinMatchScore") m_settings.trackerMinMatchScore = std::stof(value);
             else if (key == "trackerMaxCenterDistPx") m_settings.trackerMaxCenterDistPx = std::stof(value);
+            else if (key == "trackerReacquisitionEnabled") m_settings.trackerReacquisitionEnabled = ParseBoolSetting(value);
+            else if (key == "trackerReacquisitionZoom") m_settings.trackerReacquisitionZoom = std::stof(value);
+            else if (key == "trackerUseMotionFallback") m_settings.trackerUseMotionFallback = ParseBoolSetting(value);
+            else if (key == "trackerReacquisitionMaxDist") m_settings.trackerReacquisitionMaxDist = std::stof(value);
             else if (key == "trackerConfirmFrames") m_settings.trackerConfirmFrames = std::stoi(value);
             else if (key == "trackerVelocitySmoothing") m_settings.trackerVelocitySmoothing = std::stof(value);
             else if (key == "trackerDeadReckoningDamping") m_settings.trackerDeadReckoningDamping = std::stof(value);
@@ -1149,6 +1157,74 @@ void Application::trackingWorkerLoop() {
             }
 
             if (settings.enableTracking) {
+                // --- Plan 11: High-Sensitivity Re-acquisition ---
+                if (settings.trackerReacquisitionEnabled || settings.trackerUseMotionFallback) {
+                    std::vector<TrackedObject> currentTracks = m_tracker->getTrackedObjects(1);
+                    for (const auto& track : currentTracks) {
+                        if (track.lost_frames > 0 && track.lost_frames < settings.trackerMaxLostFrames) {
+                            bool foundInROI = false;
+
+                            // 1. ROI-based Re-Detection
+                            if (settings.trackerReacquisitionEnabled) {
+                                float zoom = std::max(1.1f, settings.trackerReacquisitionZoom);
+                                int roiW = static_cast<int>(track.box.width * zoom);
+                                int roiH = static_cast<int>(track.box.height * zoom);
+                                int roiX = track.box.x + track.box.width / 2 - roiW / 2;
+                                int roiY = track.box.y + track.box.height / 2 - roiH / 2;
+
+                                // Clamp to frame bounds
+                                int x1 = std::max(0, roiX);
+                                int y1 = std::max(0, roiY);
+                                int x2 = std::min(trackingFrame.cols, roiX + roiW);
+                                int y2 = std::min(trackingFrame.rows, roiY + roiH);
+
+                                if (x2 - x1 > 10 && y2 - y1 > 10) {
+                                    cv::Rect roi(x1, y1, x2 - x1, y2 - y1);
+                                    cv::Mat roiFrame = trackingFrame(roi).clone();
+                                    
+                                    // Run detector on ROI
+                                    std::vector<Detection> roiDets = m_detector->detect(roiFrame, settings);
+                                    
+                                    for (auto& d : roiDets) {
+                                        // Map back to global
+                                        d.box.x += x1;
+                                        d.box.y += y1;
+                                        
+                                        // Filter for same class to avoid ID swaps
+                                        if (d.class_id == track.class_id) {
+                                            detections.push_back(d);
+                                            foundInROI = true;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2. Motion-Guided Fallback (only if YOLO failed in ROI or is disabled)
+                            if (!foundInROI && settings.trackerUseMotionFallback) {
+                                for (const auto& mt : motionTracks) {
+                                    // Check overlap with predicted box
+                                    cv::Rect intersect = track.box & mt.box;
+                                    if (intersect.area() > 0) {
+                                        float iou = static_cast<float>(intersect.area()) / 
+                                                    (track.box.area() + mt.box.area() - intersect.area());
+                                        
+                                        if (iou > 0.15f || intersect.area() > track.box.area() * 0.5f) {
+                                            // Pseudo-detection from motion
+                                            Detection d;
+                                            d.class_id = track.class_id;
+                                            d.className = track.className + " (Motion)";
+                                            d.confidence = 0.5f; // Lower confidence for motion fallback
+                                            d.box = mt.box;
+                                            detections.push_back(d);
+                                            break; 
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Update tracker
                 m_tracker->update(detections, settings, detectorLag);
                 
@@ -2931,6 +3007,15 @@ void Application::renderSettingsWindow() {
             changed |= ImGui::SliderFloat("Max Center Dist##ts", &m_settings.trackerMaxCenterDistPx, 10.0f, 800.0f, "%.0f");
             changed |= ImGui::SliderInt("Max Lost Frames##ts",   &m_settings.trackerMaxLostFrames,  1, 120);
             changed |= ImGui::SliderInt("Trail Length##ts",      &m_settings.trackerMaxTrailLength, 5, 200);
+
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Re-acquisition & Recovery (Plan 11)");
+            changed |= ImGui::Checkbox("High-Sensitivity ROI Scans##ra", &m_settings.trackerReacquisitionEnabled);
+            if (m_settings.trackerReacquisitionEnabled) {
+                changed |= ImGui::SliderFloat("Scan ROI Zoom##ra", &m_settings.trackerReacquisitionZoom, 1.1f, 4.0f, "%.1fx");
+            }
+            changed |= ImGui::Checkbox("Motion-Guided Fallback##ra", &m_settings.trackerUseMotionFallback);
+            changed |= ImGui::SliderFloat("Lost Match Radius Mult##ra", &m_settings.trackerReacquisitionMaxDist, 1.0f, 3.0f, "%.1fx");
 
             ImGui::EndTabItem();
         }

@@ -119,6 +119,14 @@ struct SystemSettings {
     float trackerMaxCenterDistPx  = 200.0f;  // Max center distance for matching
     int   trackerConfirmFrames    = 2;        // Frames until a track is confirmed
 
+    // ----------------------------------------------------------------
+    // Tracking Re-acquisition Settings (Plan 11)
+    // ----------------------------------------------------------------
+    bool  trackerReacquisitionEnabled = true;   // Enable ROI-based re-scanning for lost targets
+    float trackerReacquisitionZoom    = 2.0f;   // ROI size multiplier relative to predicted box
+    bool  trackerUseMotionFallback    = true;   // Use motion detections as fallback for lost tracks
+    float trackerReacquisitionMaxDist = 1.5f;   // Distance multiplier for lost tracks during matching
+
     // Single-Tracker Settings (Target-Lock Feature)
     float trackerVelocitySmoothing    = 0.6f;
     float trackerDeadReckoningDamping = 0.9f;
@@ -193,6 +201,8 @@ struct SystemSettings {
     bool     motionShowOverlay       = true;   // Draw motion regions in HUD
     bool     motionHeatmapOverlay    = false;  // Enable dense optical flow heatmap
     float    motionHeatmapDecay      = 0.90f;  // Decay rate for heatmap intensity [0.0–1.0]
+    float    motionHeatmapSensitivity = 10.0f; // Max velocity for intensity normalization [1.0–50.0]
+    float    motionHeatmapAlpha       = 0.60f; // Global transparency multiplier for heatmap [0.0–1.0]
     float    motionSensitivity       = 30.0f;  // MOG2 varThreshold: lower = more sensitive [5–100]
     int      motionMinArea           = 50;     // Minimum contour area in pixels to report [1–5000]
     int      motionBlurKernel        = 5;      // Gaussian pre-blur kernel size (1 = disabled, must be odd) [1–21]

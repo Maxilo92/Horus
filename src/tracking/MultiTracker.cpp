@@ -151,7 +151,8 @@ void MultiTracker::update(const std::vector<Detection>& detections,
     if (nTracks > 0 && nDets > 0) {
         auto costMatrix = computeCostMatrix(trackIds, predictedBoxes, detBoxes,
                                             trackClassIds, detClassIds,
-                                            maxCenterDist, safeLag);
+                                            maxCenterDist, safeLag,
+                                            settings.trackerReacquisitionMaxDist);
         // Mindest-Score für ein gültiges Match:
         // IoU-only wäre 0.25, aber durch hybrides Scoring auch bei IoU=0 möglich
         const float minScore = settings.trackerMinMatchScore;
@@ -318,7 +319,8 @@ std::vector<std::vector<MatchCost>> MultiTracker::computeCostMatrix(
     const std::vector<int>&      trackClassIds,
     const std::vector<int>&      detClassIds,
     float                        maxCenterDistPx,
-    int                          lagFrames) const
+    int                          lagFrames,
+    float                        reacquisitionMaxDist) const
 {
     const int nT = static_cast<int>(predictedBoxes.size());
     const int nD = static_cast<int>(detBoxes.size());
@@ -333,8 +335,14 @@ std::vector<std::vector<MatchCost>> MultiTracker::computeCostMatrix(
         const float objDiag = std::hypot(static_cast<float>(pb.width),
                                          static_cast<float>(pb.height));
         // Adaptiver maxDist: mindestens 80px, maximal maxCenterDistPx
-        const float adaptiveDist = std::min(maxCenterDistPx,
-                                            std::max(80.0f, objDiag * 1.5f));
+        float adaptiveDist = std::min(maxCenterDistPx,
+                                      std::max(80.0f, objDiag * 1.5f));
+
+        // Plan 11: Erhöhe Suchradius für verlorene Tracks
+        const auto& trackRef = m_tracks.at(trackIds[ti]);
+        if (trackRef.lost_frames > 0) {
+            adaptiveDist *= reacquisitionMaxDist;
+        }
 
         for (int di = 0; di < nD; ++di) {
             // Klassen-Konsistenz: andere Klasse = kein Match

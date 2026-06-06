@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.13.0] - 2026-06-06
+
+### Added
+- **High-Sensitivity Tracking Re-acquisition (Plan 11)**: Massive Verbesserung der Zielverfolgung bei schnellen Bewegungen oder kurzzeitigem Signalverlust.
+- **ROI-Search-Mode**: Wenn ein Ziel verloren geht, wird automatisch ein lokaler Hochauflösungs-Scan (Zoom) um die vorhergesagte Position durchgeführt, um die Detektions-Sensitivity drastisch zu erhöhen.
+- **Motion-Guided Fallback**: Nutze Roh-Bewegungsdaten als temporäre Stütze, falls die Objekterkennung (YOLO) ein Ziel kurzzeitig nicht identifizieren kann.
+- **Adaptive Matching Distances**: Dynamische Erhöhung des Suchradius für "Lost"-Tracks, um Re-acquisition über größere Distanzen zu ermöglichen.
+- **HUD Integration**: Neuer Bereich "Tracking Recovery" im Settings-Fenster zur Steuerung von Scan-Zoom und Fallback-Strategien.
+
 ## [1.12.7] - 2026-06-06
 
 ### Fixed
