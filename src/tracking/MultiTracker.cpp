@@ -214,6 +214,9 @@ void MultiTracker::update(const std::vector<Detection>& detections,
     // --- Phase 4: Neue Tracks für ungematchte Detections ---
     for (int di = 0; di < nDets; ++di) {
         if (!matchedDets[di]) {
+            // Plan 11 Safeguard: Recovery-Detektionen (Zoom/Motion) dürfen KEINE neuen Tracks erzeugen
+            if (detections[di].is_recovery) continue;
+
             m_tracks.emplace(m_nextId, TrackState(m_nextId, detections[di]));
             ++m_nextId;
         }

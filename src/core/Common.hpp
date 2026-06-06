@@ -27,6 +27,7 @@ struct Detection {
     float confidence;
     cv::Rect box;
     std::string className;
+    bool is_recovery = false; // Plan 11: Recovery detections don't spawn new tracks
 };
 
 // Multi-Object-Tracking: Persistente Objektrepräsentation mit stabiler ID
@@ -93,6 +94,10 @@ struct UniqueTargetRecord {
     // Buffer for periodic captures during active tracking
     std::vector<TargetSnapshot> periodic_snapshots;
     std::chrono::steady_clock::time_point last_snapshot_time;
+
+    // Selection index for the gallery (-1 = auto/best confidence)
+    int selected_snapshot_index = -1;
+    bool show_full_gallery = false;
 };
 
 struct SystemSettings {

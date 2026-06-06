@@ -1185,16 +1185,27 @@ void Application::trackingWorkerLoop() {
                                     // Run detector on ROI
                                     std::vector<Detection> roiDets = m_detector->detect(roiFrame, settings);
                                     
+                                    // Safeguard: Only take the best matching detection in ROI
+                                    float bestRoiConf = 0.0f;
+                                    Detection bestRoiDet;
+                                    bool bestRoiFound = false;
+
                                     for (auto& d : roiDets) {
-                                        // Map back to global
-                                        d.box.x += x1;
-                                        d.box.y += y1;
-                                        
-                                        // Filter for same class to avoid ID swaps
-                                        if (d.class_id == track.class_id) {
-                                            detections.push_back(d);
-                                            foundInROI = true;
+                                        if (d.class_id == track.class_id && d.confidence > bestRoiConf) {
+                                            bestRoiConf = d.confidence;
+                                            bestRoiDet = d;
+                                            bestRoiFound = true;
                                         }
+                                    }
+
+                                    if (bestRoiFound) {
+                                        // Map back to global
+                                        bestRoiDet.box.x += x1;
+                                        bestRoiDet.box.y += y1;
+                                        bestRoiDet.is_recovery = true; // Mark as recovery to prevent spawning new tracks
+                                        
+                                        detections.push_back(bestRoiDet);
+                                        foundInROI = true;
                                     }
                                 }
                             }
@@ -1215,6 +1226,7 @@ void Application::trackingWorkerLoop() {
                                             d.className = track.className + " (Motion)";
                                             d.confidence = 0.5f; // Lower confidence for motion fallback
                                             d.box = mt.box;
+                                            d.is_recovery = true; // Mark as recovery
                                             detections.push_back(d);
                                             break; 
                                         }
@@ -1800,12 +1812,16 @@ void Application::renderDataPanel() {
                         return less(lhs.max_confidence, rhs.max_confidence);
                     case 4:
                         return less(lhs.is_currently_active ? 1 : 0, rhs.is_currently_active ? 1 : 0);
+                    case 5:
+                        return less(lhs.first_seen_timestamp, rhs.first_seen_timestamp);
+                    case 6:
+                        return less(lhs.last_seen_timestamp, rhs.last_seen_timestamp);
                     default:
                         return less(lhs.track_id, rhs.track_id);
                 }
             };
 
-            if (ImGui::BeginTable("HistoryTable", 5,
+            if (ImGui::BeginTable("HistoryTable", 7,
                     ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                     ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable |
                     ImGuiTableFlags_Sortable)) {
@@ -1815,6 +1831,8 @@ void Application::renderDataPanel() {
                 ImGui::TableSetupColumn("Pos (X,Y)",ImGuiTableColumnFlags_WidthStretch);
                 ImGui::TableSetupColumn("Max Conf", ImGuiTableColumnFlags_WidthFixed, 60.0f);
                 ImGui::TableSetupColumn("State",    ImGuiTableColumnFlags_WidthFixed, 55.0f);
+                ImGui::TableSetupColumn("Found",    ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Lost",     ImGuiTableColumnFlags_WidthStretch);
                 ImGui::TableHeadersRow();
 
                 std::vector<UniqueTargetRecord> sortedHistory = visibleHistory;
@@ -1834,9 +1852,9 @@ void Application::renderDataPanel() {
 
                 for (const auto& record : sortedHistory) {
                     ImGui::TableNextRow();
-                    
+
                     bool isSelected = (m_selectedAnalyzerTargetId == record.track_id);
-                    
+
                     ImGui::TableSetColumnIndex(0);
                     char idLabel[32];
                     snprintf(idLabel, sizeof(idLabel), "%03d", record.track_id);
@@ -1869,7 +1887,7 @@ void Application::renderDataPanel() {
                     ImVec4 confColor = (record.max_confidence > 0.6f)
                         ? ImVec4(0.0f, 1.0f, 0.4f, 1.0f)
                         : (record.max_confidence > 0.4f ? ImVec4(1.0f, 0.8f, 0.0f, 1.0f)
-                                                         : ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
+                                                       : ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
                     ImGui::TextColored(confColor, "%.2f", record.max_confidence);
 
                     ImGui::TableSetColumnIndex(4);
@@ -1877,6 +1895,12 @@ void Application::renderDataPanel() {
                         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.5f, 1.0f), "ACTIVE");
                     else
                         ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "LOST");
+
+                    ImGui::TableSetColumnIndex(5);
+                    ImGui::Text("%s", record.first_seen_timestamp.c_str());
+
+                    ImGui::TableSetColumnIndex(6);
+                    ImGui::Text("%s", record.is_currently_active ? "-" : record.last_seen_timestamp.c_str());
                 }
                 ImGui::EndTable();
             }
@@ -3292,6 +3316,16 @@ void Application::run() {
             updateGLTexture(record.snapshot_first.image, texInfo.texture_id_first, texInfo.texture_version_first, record.cropped_image_first_version);
             updateGLTexture(record.snapshot_mid.image, texInfo.texture_id_mid, texInfo.texture_version_mid, record.cropped_image_mid_version);
             updateGLTexture(record.snapshot_last.image, texInfo.texture_id_last, texInfo.texture_version_last, record.cropped_image_last_version);
+            
+            // Sync periodic snapshot textures
+            if (texInfo.texture_ids_periodic.size() < record.periodic_snapshots.size()) {
+                texInfo.texture_ids_periodic.resize(record.periodic_snapshots.size(), 0);
+                texInfo.texture_versions_periodic.resize(record.periodic_snapshots.size(), -1);
+            }
+            for (size_t i = 0; i < record.periodic_snapshots.size(); ++i) {
+                updateGLTexture(record.periodic_snapshots[i].image, texInfo.texture_ids_periodic[i], texInfo.texture_versions_periodic[i], 1);
+            }
+
             texInfo.max_confidence = record.max_confidence;
         }
 
@@ -4359,9 +4393,9 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                 it->max_confidence = obj.confidence;
             }
 
-            // Check if 1 second has elapsed since last snapshot
+            // Check if 500ms has elapsed since last snapshot (Increased frequency as requested)
             auto now = std::chrono::steady_clock::now();
-            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - it->last_snapshot_time).count() >= 1000) {
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - it->last_snapshot_time).count() >= 500) {
                 cv::Rect roi = obj.box;
                 roi.x = std::max(0, roi.x);
                 roi.y = std::max(0, roi.y);
@@ -4379,9 +4413,11 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                     it->snapshot_last = snap;
                     it->cropped_image_last_version++;
 
-                    int midIdx = it->periodic_snapshots.size() / 2;
-                    it->snapshot_mid = it->periodic_snapshots[midIdx];
-                    it->cropped_image_mid_version++;
+                    if (it->selected_snapshot_index == -1) {
+                        int midIdx = it->periodic_snapshots.size() / 2;
+                        it->snapshot_mid = it->periodic_snapshots[midIdx];
+                        it->cropped_image_mid_version++;
+                    }
                 }
             }
 
@@ -4399,9 +4435,14 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                     snap.box = obj.box;
                     snap.confidence = obj.confidence;
                     
-                    it->snapshot_mid = snap;
-                    it->cropped_image_mid_version++;
-                    log(LogLevel::INFO, "Manual snapshot updated for Target ID " + std::to_string(obj.track_id));
+                    it->periodic_snapshots.push_back(snap);
+                    it->last_snapshot_time = now;
+
+                    if (it->selected_snapshot_index == -1) {
+                        it->snapshot_mid = snap;
+                        it->cropped_image_mid_version++;
+                    }
+                    log(LogLevel::INFO, "Manual snapshot captured and added to gallery for Target ID " + std::to_string(obj.track_id));
                 }
             }
         }
@@ -4415,18 +4456,19 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                 record.snapshot_first = record.periodic_snapshots.front();
                 record.cropped_image_first_version++;
 
-                int midIdx = record.periodic_snapshots.size() / 2;
-                record.snapshot_mid = record.periodic_snapshots[midIdx];
+                if (record.selected_snapshot_index != -1 && record.selected_snapshot_index < (int)record.periodic_snapshots.size()) {
+                    record.snapshot_mid = record.periodic_snapshots[record.selected_snapshot_index];
+                } else {
+                    int midIdx = record.periodic_snapshots.size() / 2;
+                    record.snapshot_mid = record.periodic_snapshots[midIdx];
+                }
+                record.cropped_image_mid_version++;
                 record.cropped_image_mid_version++;
 
                 record.snapshot_last = record.periodic_snapshots.back();
                 record.cropped_image_last_version++;
 
-                // Discard all periodic snapshots to free memory (keeping only the 3 final keyframe crops)
-                record.periodic_snapshots.clear();
-                record.periodic_snapshots.shrink_to_fit();
-
-                log(LogLevel::INFO, "Finalized visual chronology for Target ID " + std::to_string(record.track_id) + ". Kept 3 keyframes.");
+                log(LogLevel::INFO, "Finalized visual chronology for Target ID " + std::to_string(record.track_id) + ". Gallery preserved (" + std::to_string(record.periodic_snapshots.size()) + " images).");
             }
         }
     }
@@ -4600,17 +4642,15 @@ void Application::renderTargetAnalyzer() {
     }
 
     // Find target in history
-    UniqueTargetRecord selectedRecord;
-    bool found = false;
-    for (const auto& record : m_targetHistory) {
-        if (record.track_id == m_selectedAnalyzerTargetId) {
-            selectedRecord = record;
-            found = true;
+    int targetIdx = -1;
+    for (int i = 0; i < (int)m_targetHistory.size(); ++i) {
+        if (m_targetHistory[i].track_id == m_selectedAnalyzerTargetId) {
+            targetIdx = i;
             break;
         }
     }
 
-    if (!found) {
+    if (targetIdx == -1) {
         ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.3f, 1.0f), "Target ID %d not found in system history.", m_selectedAnalyzerTargetId);
         if (ImGui::Button("Clear Selection")) {
             m_selectedAnalyzerTargetId = -1;
@@ -4618,6 +4658,17 @@ void Application::renderTargetAnalyzer() {
         ImGui::End();
         return;
     }
+
+    auto& selectedRecord = m_targetHistory[targetIdx];
+
+    auto updateSharedRecord = [&](const std::function<void(UniqueTargetRecord&)>& func) {
+        std::lock_guard<std::mutex> lock(m_dataMutex);
+        auto it = std::find_if(m_sharedTargetHistory.begin(), m_sharedTargetHistory.end(),
+                               [&](const UniqueTargetRecord& r) { return r.track_id == selectedRecord.track_id; });
+        if (it != m_sharedTargetHistory.end()) {
+            func(*it);
+        }
+    };
 
     // Manage active gallery snapshot selection
     static int lastSelectedTargetId = -1;
@@ -4634,125 +4685,193 @@ void Application::renderTargetAnalyzer() {
     ImGui::Separator();
 
     // Visual Chronology Gallery
-    ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.9f, 1.0f), "VISUAL GALLERY (KEYFRAMES)");
-    ImGui::Spacing();
-
-    // Resolve active snapshot textures and label
-    TargetSnapshot activeSnap;
-    uint32_t activeTexID = 0;
-    const char* snapLabel = "";
-    ImVec4 badgeColor;
-
-    uint32_t texFirst = 0, texMid = 0, texLast = 0;
-    auto texIt = m_targetTextures.find(selectedRecord.track_id);
-    if (texIt != m_targetTextures.end()) {
-        texFirst = texIt->second.texture_id_first;
-        texMid = texIt->second.texture_id_mid;
-        texLast = texIt->second.texture_id_last;
-    }
-
-    if (activeSnapshotIdx == 0) {
-        activeSnap = selectedRecord.snapshot_first;
-        activeTexID = texFirst;
-        snapLabel = "DISCOVERY (FIRST DETECTED)";
-        badgeColor = ImVec4(0.0f, 0.7f, 1.0f, 1.0f); // Cyan
-    } else if (activeSnapshotIdx == 1) {
-        activeSnap = selectedRecord.snapshot_mid;
-        activeTexID = texMid;
-        snapLabel = "MID-TRACK (BEST REPRESENTATIVE)";
-        badgeColor = ImVec4(0.0f, 1.0f, 0.5f, 1.0f); // Green
-    } else {
-        activeSnap = selectedRecord.snapshot_last;
-        activeTexID = texLast;
-        snapLabel = "LAST SEEN (SIGNAL END)";
-        badgeColor = ImVec4(1.0f, 0.4f, 0.4f, 1.0f); // Red
-    }
-
-    // Gallery navigation controls
-    if (ImGui::Button("< Prev")) {
-        activeSnapshotIdx = (activeSnapshotIdx - 1 + 3) % 3;
-    }
+    ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.9f, 1.0f), "VISUAL ANALYZER");
     ImGui::SameLine();
-
-    // Quick select buttons (tabs)
-    auto drawTabButton = [&](const char* name, int idx) {
-        bool selected = (activeSnapshotIdx == idx);
-        if (selected) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
-        }
-        if (ImGui::Button(name)) {
-            activeSnapshotIdx = idx;
-        }
-        if (selected) {
-            ImGui::PopStyleColor();
-        }
-        ImGui::SameLine();
-    };
-
-    drawTabButton("Discovery", 0);
-    drawTabButton("Mid-Track (Best)", 1);
-    drawTabButton("Last Seen", 2);
-
-    if (ImGui::Button("Next >")) {
-        activeSnapshotIdx = (activeSnapshotIdx + 1) % 3;
+    
+    // Toggle Gallery Button
+    if (ImGui::SmallButton(selectedRecord.show_full_gallery ? "[ VIEW: SINGLE ]" : "[ VIEW: GALLERY ]")) {
+        updateSharedRecord([&](UniqueTargetRecord& r) {
+            r.show_full_gallery = !r.show_full_gallery;
+        });
     }
 
     ImGui::Spacing();
 
-    // Render active keyframe image
-    if (activeTexID != 0 && !activeSnap.image.empty()) {
-        float imgAspect = static_cast<float>(activeSnap.image.cols) / activeSnap.image.rows;
-        float displayW = 220.0f;
-        float displayH = displayW / imgAspect;
+    if (selectedRecord.show_full_gallery) {
+        // --- GALLERY VIEW (GRID) ---
+        ImGui::TextDisabled("Select any image to set it as the 'Best Representative' snapshot.");
+        ImGui::Spacing();
 
-        // Display image centered in window
-        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - displayW) * 0.5f);
-        ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(activeTexID)), ImVec2(displayW, displayH));
+        float windowVisibleX2 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+        auto& texInfo = m_targetTextures[selectedRecord.track_id];
+        
+        int cols = 3;
+        float spacing = ImGui::GetStyle().ItemSpacing.x;
+        float imgWidth = (ImGui::GetContentRegionAvail().x - (cols - 1) * spacing) / cols;
+
+        for (int i = 0; i < (int)selectedRecord.periodic_snapshots.size(); ++i) {
+            uint32_t texID = 0;
+            if (i < (int)texInfo.texture_ids_periodic.size()) {
+                texID = texInfo.texture_ids_periodic[i];
+            }
+
+            if (texID != 0) {
+                ImGui::PushID(i);
+                
+                bool isSelected = (selectedRecord.selected_snapshot_index == i);
+                if (isSelected) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
+                }
+
+                if (ImGui::ImageButton(reinterpret_cast<void*>(static_cast<intptr_t>(texID)), ImVec2(imgWidth, imgWidth * 0.75f))) {
+                    updateSharedRecord([&](UniqueTargetRecord& r) {
+                        r.selected_snapshot_index = i;
+                        r.snapshot_mid = r.periodic_snapshots[i];
+                        r.cropped_image_mid_version++;
+                    });
+                }
+
+                if (isSelected) {
+                    ImGui::PopStyleColor();
+                    // Draw selection border
+                    ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), IM_COL32(0, 255, 100, 255), 0.0f, 0, 2.0f);
+                }
+
+                if (ImGui::IsItemHovered()) {
+                    ImGui::BeginTooltip();
+                    ImGui::Text("Snapshot %d", i + 1);
+                    ImGui::Text("Time: %s", selectedRecord.periodic_snapshots[i].timestamp.c_str());
+                    ImGui::Text("Confidence: %.2f", selectedRecord.periodic_snapshots[i].confidence);
+                    if (isSelected) ImGui::TextColored(ImVec4(0, 1, 0, 1), "CURRENT BEST");
+                    ImGui::EndTooltip();
+                }
+
+                ImGui::PopID();
+
+                if ((i + 1) % cols != 0) ImGui::SameLine();
+            }
+        }
+        ImGui::NewLine();
         ImGui::Spacing();
     } else {
-        ImGui::TextDisabled("No visual crop available for this milestone.");
-    }
+        // --- SINGLE VIEW (DETAILED) ---
+        // Resolve active snapshot textures and label
+        TargetSnapshot activeSnap;
+        uint32_t activeTexID = 0;
+        const char* snapLabel = "";
+        ImVec4 badgeColor;
 
-    ImGui::Separator();
+        uint32_t texFirst = 0, texMid = 0, texLast = 0;
+        auto texIt = m_targetTextures.find(selectedRecord.track_id);
+        if (texIt != m_targetTextures.end()) {
+            texFirst = texIt->second.texture_id_first;
+            texMid = texIt->second.texture_id_mid;
+            texLast = texIt->second.texture_id_last;
+        }
 
-    // Snapshot Milestone Metadata
-    ImGui::TextColored(badgeColor, "[MILESTONE: %s]", snapLabel);
-    ImGui::Spacing();
+        if (activeSnapshotIdx == 0) {
+            activeSnap = selectedRecord.snapshot_first;
+            activeTexID = texFirst;
+            snapLabel = "DISCOVERY (FIRST DETECTED)";
+            badgeColor = ImVec4(0.0f, 0.7f, 1.0f, 1.0f); // Cyan
+        } else if (activeSnapshotIdx == 1) {
+            activeSnap = selectedRecord.snapshot_mid;
+            activeTexID = texMid;
+            snapLabel = (selectedRecord.selected_snapshot_index != -1) ? "MANUAL SELECTION (BEST)" : "AUTO SELECTION (BEST)";
+            badgeColor = ImVec4(0.0f, 1.0f, 0.5f, 1.0f); // Green
+        } else {
+            activeSnap = selectedRecord.snapshot_last;
+            activeTexID = texLast;
+            snapLabel = "LAST SEEN (SIGNAL END)";
+            badgeColor = ImVec4(1.0f, 0.4f, 0.4f, 1.0f); // Red
+        }
 
-    ImGui::Columns(2, "snapshot_metadata", false);
-    ImGui::SetColumnWidth(0, 110.0f);
-
-    ImGui::Text("Capture Time:");
-    ImGui::NextColumn();
-    if (!activeSnap.timestamp.empty()) {
-        ImGui::Text("%s", activeSnap.timestamp.c_str());
-    } else {
-        ImGui::TextDisabled("[N/A]");
-    }
-    ImGui::NextColumn();
-
-    ImGui::Text("Location Box:");
-    ImGui::NextColumn();
-    if (activeSnap.box.width > 0 && activeSnap.box.height > 0) {
-        ImGui::Text("[%d, %d, %d, %d]", activeSnap.box.x, activeSnap.box.y, activeSnap.box.width, activeSnap.box.height);
-        ImGui::TextDisabled("Area: %d px", activeSnap.box.width * activeSnap.box.height);
-    } else {
-        ImGui::TextDisabled("[N/A]");
-    }
-    ImGui::NextColumn();
-
-    ImGui::Text("Confidence:");
-    ImGui::NextColumn();
-    if (activeSnap.confidence > 0.0f) {
-        ImGui::Text("%.2f", activeSnap.confidence);
+        // Gallery navigation controls
+        if (ImGui::Button("< Prev")) {
+            activeSnapshotIdx = (activeSnapshotIdx - 1 + 3) % 3;
+        }
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, badgeColor);
-        ImGui::ProgressBar(activeSnap.confidence, ImVec2(100, 12), "");
-        ImGui::PopStyleColor();
-    } else {
-        ImGui::TextDisabled("[N/A]");
+
+        // Quick select buttons (tabs)
+        auto drawTabButton = [&](const char* name, int idx) {
+            bool selected = (activeSnapshotIdx == idx);
+            if (selected) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+            }
+            if (ImGui::Button(name)) {
+                activeSnapshotIdx = idx;
+            }
+            if (selected) {
+                ImGui::PopStyleColor();
+            }
+            ImGui::SameLine();
+        };
+
+        drawTabButton("Discovery", 0);
+        drawTabButton("Best", 1);
+        drawTabButton("Last", 2);
+
+        if (ImGui::Button("Next >")) {
+            activeSnapshotIdx = (activeSnapshotIdx + 1) % 3;
+        }
+
+        ImGui::Spacing();
+
+        // Render active keyframe image
+        if (activeTexID != 0 && !activeSnap.image.empty()) {
+            float imgAspect = static_cast<float>(activeSnap.image.cols) / activeSnap.image.rows;
+            float displayW = ImGui::GetContentRegionAvail().x * 0.9f;
+            float displayH = displayW / imgAspect;
+
+            // Display image centered in window
+            ImGui::SetCursorPosX((ImGui::GetWindowWidth() - displayW) * 0.5f);
+            ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(activeTexID)), ImVec2(displayW, displayH));
+            ImGui::Spacing();
+        } else {
+            ImGui::TextDisabled("No visual crop available for this milestone.");
+        }
+
+        ImGui::Separator();
+
+        // Snapshot Milestone Metadata
+        ImGui::TextColored(badgeColor, "[MILESTONE: %s]", snapLabel);
+        ImGui::Spacing();
+
+        ImGui::Columns(2, "snapshot_metadata", false);
+        ImGui::SetColumnWidth(0, 110.0f);
+
+        ImGui::Text("Capture Time:");
+        ImGui::NextColumn();
+        if (!activeSnap.timestamp.empty()) {
+            ImGui::Text("%s", activeSnap.timestamp.c_str());
+        } else {
+            ImGui::TextDisabled("[N/A]");
+        }
+        ImGui::NextColumn();
+
+        ImGui::Text("Location Box:");
+        ImGui::NextColumn();
+        if (activeSnap.box.width > 0 && activeSnap.box.height > 0) {
+            ImGui::Text("[%d, %d, %d, %d]", activeSnap.box.x, activeSnap.box.y, activeSnap.box.width, activeSnap.box.height);
+            ImGui::TextDisabled("Area: %d px", activeSnap.box.width * activeSnap.box.height);
+        } else {
+            ImGui::TextDisabled("[N/A]");
+        }
+        ImGui::NextColumn();
+
+        ImGui::Text("Confidence:");
+        ImGui::NextColumn();
+        if (activeSnap.confidence > 0.0f) {
+            ImGui::Text("%.2f", activeSnap.confidence);
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, badgeColor);
+            ImGui::ProgressBar(activeSnap.confidence, ImVec2(100, 12), "");
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::TextDisabled("[N/A]");
+        }
+        ImGui::Columns(1);
     }
-    ImGui::Columns(1);
 
     ImGui::Separator();
     ImGui::Spacing();
@@ -4845,6 +4964,9 @@ void Application::cleanup() {
         }
         if (texInfo.texture_id_last != 0) {
             glDeleteTextures(1, &texInfo.texture_id_last);
+        }
+        for (uint32_t tid : texInfo.texture_ids_periodic) {
+            if (tid != 0) glDeleteTextures(1, &tid);
         }
     }
     m_targetTextures.clear();
