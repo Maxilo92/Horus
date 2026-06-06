@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.14.4] - 2026-06-06
+
+### Added
+- **SubZoom Precision Search**: Auto-zooms now utilize a precision search pass during the "HOLD" phase. This leverages localized Object Detection on the cropped sub-zoom frame to verify if the object is still present in that region, even when global tracking fails.
+- **Precision Overlay**: The HUD and UI windows now display a "SEARCH: [class] ([confidence])" overlay on sub-zooms during the hold phase when the precision search yields positive hits.
+- **DNN Thread Safety**: Added `std::mutex` to protect `cv::dnn::Net::forward` passes, ensuring the new async precision search doesn't crash the detector pipeline.
+
+## [1.14.3] - 2026-06-06
+
+### Fixed
+- **App Freezes & Mutex Contention**: Eliminated micro-freezes caused by heavy main-thread memory copies by removing redundant `m_sharedFrame` deep copies from the core worker loop.
+- **Memory Leak in Target History**: Implemented history pruning for `m_internalTargetHistory` to limit tracking vectors to the 128 most recent targets, preventing indefinite growth and linear `std::vector` iterations.
+- **Disk I/O Bottleneck**: Reduced DataLogger flushing frequency from every frame to every 30 frames, smoothing out disk write spikes while maintaining strong data integrity.
+
+## [1.14.2] - 2026-06-06
+
+### Fixed
+- **Ghost Drift Elimination**: Fixed a critical feedback loop in the Multi-Tracker and Pixel-Lock systems where velocity-based extrapolation of lagged detections reinforced noisy velocity estimates, causing stationary target boxes to drift away.
+- **Kalman Stability**: Reduced velocity process noise in the Kalman Filter and increased velocity clamping thresholds to ensure stationary objects remain locked and stable.
+- **Lag Compensation Safeguard**: Implemented a proximity check that disables detection extrapolation when the raw detection is already near the current prediction, effectively killing "magical" drift while maintaining accuracy for high-speed targets.
+
 ## [1.14.1] - 2026-06-06
 
 ### Fixed
