@@ -222,6 +222,21 @@ bool Application::init(int argc, char** argv) {
         log(LogLevel::INFO, "Loading model: " + modelPath);
         m_detector = std::make_unique<ObjectDetector>(modelPath, labelsPath);
         log(LogLevel::INFO, "Detector initialized");
+
+        // --- Face Recognizer (Plan 11) ---
+        std::string faceDetPath = "../Resources/face_detection_yunet_2023mar.onnx";
+        std::string faceRecPath = "../Resources/face_recognition_sface_2021dec.onnx";
+        FILE* f2 = fopen(faceDetPath.c_str(), "r");
+        if (!f2) { faceDetPath = "../assets/models/face_detection_yunet_2023mar.onnx"; faceRecPath = "../assets/models/face_recognition_sface_2021dec.onnx"; f2 = fopen(faceDetPath.c_str(), "r"); }
+        if (!f2) { faceDetPath = "assets/models/face_detection_yunet_2023mar.onnx";    faceRecPath = "assets/models/face_recognition_sface_2021dec.onnx";    f2 = fopen(faceDetPath.c_str(), "r"); }
+        if (f2) {
+            fclose(f2);
+            log(LogLevel::INFO, "Loading face models: " + faceDetPath);
+            m_faceRecognizer = std::make_unique<FaceRecognizer>(faceDetPath, faceRecPath);
+            log(LogLevel::INFO, "Face Recognizer initialized");
+        } else {
+            log(LogLevel::WARN, "Face recognition models not found. Feature disabled.");
+        }
     } catch (const std::exception& e) {
         log(LogLevel::ERR, std::string("Detector init failed: ") + e.what());
         std::cerr << "[ERROR] Detector fail: " << e.what() << std::endl;
@@ -398,6 +413,9 @@ void Application::savePersistedSettings() const {
     out << "subZoomsUseSeparateWindows=" << (m_settings.subZoomsUseSeparateWindows ? 1 : 0) << '\n';
     out << "subZoomPaddingPx=" << m_settings.subZoomPaddingPx << '\n';
     out << "subZoomMagnification=" << m_settings.subZoomMagnification << '\n';
+    // Face Recognition Settings (Plan 11)
+    out << "faceRecognitionEnabled=" << (m_settings.faceRecognitionEnabled ? 1 : 0) << '\n';
+    out << "faceRecognitionThreshold=" << m_settings.faceRecognitionThreshold << '\n';
     // Audio Feedback Settings
     out << "audioEnabled=" << (m_settings.audioEnabled ? 1 : 0) << '\n';
     out << "audioMasterVolume=" << m_settings.audioMasterVolume << '\n';
@@ -520,6 +538,9 @@ void Application::loadPersistedSettings() {
             else if (key == "subZoomsUseSeparateWindows") m_settings.subZoomsUseSeparateWindows = ParseBoolSetting(value);
             else if (key == "subZoomPaddingPx") m_settings.subZoomPaddingPx = std::stoi(value);
             else if (key == "subZoomMagnification") m_settings.subZoomMagnification = std::stof(value);
+            // Face Recognition Settings (Plan 11)
+            else if (key == "faceRecognitionEnabled") m_settings.faceRecognitionEnabled = ParseBoolSetting(value);
+            else if (key == "faceRecognitionThreshold") m_settings.faceRecognitionThreshold = std::stof(value);
             // Audio Feedback Settings
             else if (key == "audioEnabled") m_settings.audioEnabled = ParseBoolSetting(value);
             else if (key == "audioMasterVolume") m_settings.audioMasterVolume = std::stof(value);
@@ -1163,22 +1184,32 @@ void Application::trackingWorkerLoop() {
                 m_pixelLockActive = false;
             }
             if (m_pixelLockRequested.exchange(false)) {
-                cv::Point pt; { std::lock_guard<std::mutex> lock(m_dataMutex); pt = m_pixelLockPoint; }
-                int ts = 60;
-                cv::Rect tr(std::max(0, pt.x - ts/2), std::max(0, pt.y - ts/2), ts, ts);
+                cv::Rect tr; { std::lock_guard<std::mutex> lock(m_dataMutex); tr = m_pixelLockRect; }
+                
+                // Clamp to frame boundaries
+                tr.x = std::max(0, tr.x);
+                tr.y = std::max(0, tr.y);
                 if (tr.x + tr.width > trackingFrame.cols) tr.width = trackingFrame.cols - tr.x;
                 if (tr.y + tr.height > trackingFrame.rows) tr.height = trackingFrame.rows - tr.y;
-                if (tr.width > 10 && tr.height > 10) {
+
+                if (tr.width > 4 && tr.height > 4) {
                     m_pixelTemplate = trackingFrame(tr).clone();
                     m_pixelLockActive = true; m_pixelVx = 0.0f; m_pixelVy = 0.0f;
-                    m_pixelCenterX = static_cast<float>(pt.x); m_pixelCenterY = static_cast<float>(pt.y);
+                    m_pixelCenterX = static_cast<float>(tr.x + tr.width / 2.0f);
+                    m_pixelCenterY = static_cast<float>(tr.y + tr.height / 2.0f);
                     m_pixelLockRect = tr;
                     m_sharedLockedTarget.state = TrackingState::LOCKED;
                     m_sharedLockedTarget.track_id = m_tracker->getNextIdAndIncrement();
                     m_sharedLockedTarget.class_id = -1; m_sharedLockedTarget.className = "Pixel Target";
                     m_sharedLockedTarget.box = tr; m_sharedLockedTarget.confidence = 1.0f;
                     m_sharedLockedTarget.lost_frames = 0; m_sharedLockedTarget.trail.clear();
-                    m_sharedLockedTarget.trail.push_back(pt);
+                    m_sharedLockedTarget.trail.push_back(cv::Point(static_cast<int>(m_pixelCenterX), static_cast<int>(m_pixelCenterY)));
+                    
+                    // Trigger sound effect
+                    m_audioEngine.playLockAcquired();
+                    log(LogLevel::INFO, "Pixel target locked via selection: (" + 
+                        std::to_string(tr.x) + ", " + std::to_string(tr.y) + ", " + 
+                        std::to_string(tr.width) + "x" + std::to_string(tr.height) + ")");
                 }
             }
             if (m_pixelLockRectUpdateRequested.exchange(false)) {
@@ -1195,6 +1226,10 @@ void Application::trackingWorkerLoop() {
                     m_sharedLockedTarget.state = TrackingState::LOCKED;
                     if (m_sharedLockedTarget.track_id < 0) m_sharedLockedTarget.track_id = m_tracker->getNextIdAndIncrement();
                     m_sharedLockedTarget.box = rect; m_sharedLockedTarget.confidence = 1.0f; m_sharedLockedTarget.lost_frames = 0;
+                    
+                    // Clear trail on manual move/resize to avoid "jump" lines
+                    m_sharedLockedTarget.trail.clear();
+                    m_sharedLockedTarget.trail.push_back(cv::Point(static_cast<int>(m_pixelCenterX), static_cast<int>(m_pixelCenterY)));
                 }
             }
 
@@ -1279,10 +1314,87 @@ void Application::trackingWorkerLoop() {
                     }
                 }
 
+                // --- Plan 11 Safeguard: Global Deduplication NMS ---
+                // If we have mixed real-time (recovery) and lagged (global) detections,
+                // the lagged ones might spawn ghost tracks. We perform NMS to suppress them.
+                if (!detections.empty()) {
+                    std::vector<cv::Rect> b;
+                    std::vector<float> c;
+                    for (const auto& d : detections) {
+                        b.push_back(d.box);
+                        c.push_back(d.confidence);
+                    }
+                    std::vector<int> idx;
+                    // Strict NMS to ensure only one box per physical object
+                    cv::dnn::NMSBoxes(b, c, 0.05f, 0.3f, idx);
+                    
+                    std::vector<Detection> uniqueDets;
+                    for (int i : idx) uniqueDets.push_back(detections[i]);
+                    detections = std::move(uniqueDets);
+                }
+
                 // Update tracker
                 m_tracker->update(detections, settings, detectorLag);
                 
                 tracked = m_tracker->getTrackedObjects(settings.trackerMaxTrailLength);
+
+                // --- Face Recognition Integration (Plan 11) ---
+                if (settings.faceRecognitionEnabled && m_faceRecognizer) {
+                    for (auto& obj : tracked) {
+                        // COCO class 0 = person
+                        if (obj.class_id == 0 && obj.is_confirmed) {
+                            bool runRecognition = false;
+                            
+                            {
+                                std::lock_guard<std::mutex> lock(m_faceMutex);
+                                if (m_trackIdToFace.find(obj.track_id) == m_trackIdToFace.end()) {
+                                    runRecognition = true;
+                                } else {
+                                    // Periodic re-check to ensure consistency (every 60 frames)
+                                    if (m_totalFramesProcessed.load() % 60 == 0) {
+                                        runRecognition = true;
+                                    }
+                                }
+                            }
+
+                            if (runRecognition) {
+                                auto faceResults = m_faceRecognizer->process(trackingFrame, obj.box, settings.faceRecognitionThreshold);
+                                if (!faceResults.empty()) {
+                                    // Take the best match (first result for now)
+                                    const auto& fr = faceResults[0];
+                                    if (fr.identityId != -1) {
+                                        std::lock_guard<std::mutex> lock(m_faceMutex);
+                                        m_trackIdToFace[obj.track_id] = {fr.identityId, fr.name};
+                                    }
+                                }
+                            }
+
+                            // Apply cached identity
+                            {
+                                std::lock_guard<std::mutex> lock(m_faceMutex);
+                                auto it = m_trackIdToFace.find(obj.track_id);
+                                if (it != m_trackIdToFace.end()) {
+                                    obj.face_id = it->second.first;
+                                    obj.face_name = it->second.second;
+                                }
+                            }
+                        }
+                    }
+
+                    // Clean up cache for dead tracks
+                    {
+                        std::lock_guard<std::mutex> lock(m_faceMutex);
+                        for (auto it = m_trackIdToFace.begin(); it != m_trackIdToFace.end(); ) {
+                            bool stillExists = false;
+                            for (const auto& obj : tracked) {
+                                if (obj.track_id == it->first) { stillExists = true; break; }
+                            }
+                            if (!stillExists) it = m_trackIdToFace.erase(it);
+                            else ++it;
+                        }
+                    }
+                }
+
                 updateTargetHistory(tracked, trackingFrame);
 
                 // Update pixel target using template matching if active
@@ -3336,9 +3448,29 @@ void Application::run() {
             updateGLTexture(record.snapshot_last.image, texInfo.texture_id_last, texInfo.texture_version_last, record.cropped_image_last_version);
             
             // Sync periodic snapshot textures
-            if (texInfo.texture_ids_periodic.size() < record.periodic_snapshots.size()) {
+            if (texInfo.gallery_version != record.gallery_version || texInfo.texture_ids_periodic.size() != record.periodic_snapshots.size()) {
+                // If decimation happened or size changed, clear everything to ensure correct mapping
+                for (uint32_t tid : texInfo.texture_ids_periodic) {
+                    if (tid != 0) glDeleteTextures(1, &tid);
+                }
+                texInfo.texture_ids_periodic.clear();
                 texInfo.texture_ids_periodic.resize(record.periodic_snapshots.size(), 0);
+                texInfo.texture_versions_periodic.clear();
                 texInfo.texture_versions_periodic.resize(record.periodic_snapshots.size(), -1);
+                
+                // Adjust UI selection index for decimation
+                auto& uiState = m_analyzerUiStates[record.track_id];
+                if (uiState.selected_snapshot_idx != -1) {
+                    if (uiState.selected_snapshot_idx == 0) {
+                        // Discovery is kept at index 0
+                    } else if (uiState.selected_snapshot_idx % 2 == 0) {
+                        uiState.selected_snapshot_idx /= 2;
+                    } else {
+                        uiState.selected_snapshot_idx = -1; // Image was dropped
+                    }
+                }
+
+                texInfo.gallery_version = record.gallery_version;
             }
             for (size_t i = 0; i < record.periodic_snapshots.size(); ++i) {
                 updateGLTexture(record.periodic_snapshots[i].image, texInfo.texture_ids_periodic[i], texInfo.texture_versions_periodic[i], 1);
@@ -3783,6 +3915,9 @@ void Application::run() {
                             m_roiManager->cancelDrag();
                             std::lock_guard<std::mutex> lock(m_dataMutex);
                             m_pixelLockPoint = m_editDragStartMouse;
+                            // Set a default 60x60 rect for point lock
+                            int ts = 60;
+                            m_pixelLockRect = cv::Rect(m_editDragStartMouse.x - ts/2, m_editDragStartMouse.y - ts/2, ts, ts);
                             m_pixelLockRequested.store(true);
                         } else {
                             // Significant drag -> Create target
@@ -3949,7 +4084,10 @@ void Application::run() {
                 bool isHovered = (hoveredZoneId == 999);
                 bool isEditing = (m_editZoneId == 999);
                 ImU32 col = (isHovered || isEditing) ? IM_COL32(255, 255, 0, 255) : IM_COL32(255, 50, 50, 255);
-                float borderThickness = (isHovered || isEditing) ? 2.5f : 1.5f;
+                
+                // Only draw the box outline here if we are actively interacting with it.
+                // Otherwise, the HUD::drawTrackedObject will handle the standard box rendering.
+                float borderThickness = (isHovered || isEditing) ? 2.5f : 0.0f;
 
                 ImVec2 rMin(view.pos_x + m_lockedTarget.box.x * view.scale,
                             view.pos_y + m_lockedTarget.box.y * view.scale);
@@ -3961,12 +4099,18 @@ void Application::run() {
                 ImVec2 bl(rMin.x, rMax.y);
                 ImVec2 br(rMax.x, rMax.y);
 
-                drawList->AddRect(rMin, rMax, col, 0.0f, 0, borderThickness);
+                if (borderThickness > 0.0f) {
+                    drawList->AddRect(rMin, rMax, col, 0.0f, 0, borderThickness);
+                }
+                
                 drawList->AddRectFilled(rMin, rMax, IM_COL32(255, 50, 50, 25)); // Faint red fill
-                drawList->AddRectFilled(ImVec2(tl.x - 3, tl.y - 3), ImVec2(tl.x + 3, tl.y + 3), col);
-                drawList->AddRectFilled(ImVec2(tr.x - 3, tr.y - 3), ImVec2(tr.x + 3, tr.y + 3), col);
-                drawList->AddRectFilled(ImVec2(bl.x - 3, bl.y - 3), ImVec2(bl.x + 3, bl.y + 3), col);
-                drawList->AddRectFilled(ImVec2(br.x - 3, br.y - 3), ImVec2(br.x + 3, br.y + 3), col);
+                
+                if (isHovered || isEditing) {
+                    drawList->AddRectFilled(ImVec2(tl.x - 3, tl.y - 3), ImVec2(tl.x + 3, tl.y + 3), col);
+                    drawList->AddRectFilled(ImVec2(tr.x - 3, tr.y - 3), ImVec2(tr.x + 3, tr.y + 3), col);
+                    drawList->AddRectFilled(ImVec2(bl.x - 3, bl.y - 3), ImVec2(bl.x + 3, bl.y + 3), col);
+                    drawList->AddRectFilled(ImVec2(br.x - 3, br.y - 3), ImVec2(br.x + 3, br.y + 3), col);
+                }
 
                 char targetLbl[64];
                 snprintf(targetLbl, sizeof(targetLbl), "[PIXEL TARGET] ID:%d", m_lockedTarget.track_id);
@@ -4421,6 +4565,10 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             record.trail = obj.trail;
             record.is_currently_active = true;
 
+            // Face Recognition (Plan 11)
+            record.face_id   = obj.face_id;
+            record.face_name = obj.face_name;
+
             // Crop image with expanded padding (50% on each side)
             float paddingFactor = 0.5f;
             cv::Rect roi = obj.box;
@@ -4466,13 +4614,19 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             it->trail = obj.trail;
             it->is_currently_active = true;
 
+            // Face Recognition (Plan 11)
+            if (obj.face_id != -1) {
+                it->face_id   = obj.face_id;
+                it->face_name = obj.face_name;
+            }
+
             if (obj.confidence > it->max_confidence) {
                 it->max_confidence = obj.confidence;
             }
 
-            // Check if 500ms has elapsed since last snapshot (Increased frequency as requested)
+            // Check if adaptive interval has elapsed since last snapshot
             auto now = std::chrono::steady_clock::now();
-            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - it->last_snapshot_time).count() >= 500) {
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - it->last_snapshot_time).count() >= it->current_snapshot_interval_ms) {
                 float paddingFactor = 0.5f;
                 cv::Rect roi = obj.box;
                 int padW = static_cast<int>(roi.width * paddingFactor);
@@ -4494,6 +4648,37 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                     snap.confidence = obj.confidence;
                     it->periodic_snapshots.push_back(snap);
                     it->last_snapshot_time = now;
+
+                    // Adaptive Decimation (Military-Grade)
+                    // Keep max 24 images per target. If full, drop every 2nd image and double the interval.
+                    const size_t MAX_GALLERY_SIZE = 24;
+                    if (it->periodic_snapshots.size() > MAX_GALLERY_SIZE) {
+                        std::vector<TargetSnapshot> decimated;
+                        decimated.reserve(MAX_GALLERY_SIZE);
+                        
+                        // Always keep Discovery (0) and decimate the rest
+                        decimated.push_back(it->periodic_snapshots[0]);
+                        for (size_t i = 2; i < it->periodic_snapshots.size(); i += 2) {
+                            decimated.push_back(it->periodic_snapshots[i]);
+                        }
+                        
+                        it->periodic_snapshots = std::move(decimated);
+                        it->current_snapshot_interval_ms *= 2;
+                        it->gallery_version++;
+                        
+                        // Adjust manual selection index if it exists
+                        if (it->snapshot_mid_manual_idx != -1) {
+                            if (it->snapshot_mid_manual_idx == 0) {
+                                // Discovery is kept
+                            } else if (it->snapshot_mid_manual_idx % 2 == 0) {
+                                it->snapshot_mid_manual_idx = it->snapshot_mid_manual_idx / 2;
+                            } else {
+                                it->snapshot_mid_manual_idx = -1; // Image was deleted, reset to auto-best
+                            }
+                        }
+                        
+                        log(LogLevel::INFO, "Decimated gallery for Target ID " + std::to_string(it->track_id) + ". New interval: " + std::to_string(it->current_snapshot_interval_ms) + "ms");
+                    }
 
                     it->snapshot_last = snap;
                     it->cropped_image_last_version++;

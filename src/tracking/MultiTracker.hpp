@@ -79,9 +79,7 @@ private:
     std::vector<std::vector<MatchCost>> computeCostMatrix(
         const std::vector<int>&      trackIds,
         const std::vector<cv::Rect>& predictedBoxes,
-        const std::vector<cv::Rect>& detBoxes,
-        const std::vector<int>&      trackClassIds,
-        const std::vector<int>&      detClassIds,
+        const std::vector<Detection>& detections,
         float                        maxCenterDistPx,
         int                          lagFrames,
         float                        reacquisitionMaxDist) const;

@@ -38,21 +38,21 @@ void TrackState::initKalmanFilter(const cv::Rect& box) {
 
     // Prozess-Rauschen: höherer Wert = Kalman folgt Messung schneller
     // Für w and h: kleine Varianz (0.01) – modelliert langsame Größenänderung
-    cv::setIdentity(kf.processNoiseCov, cv::Scalar(1e-3));
+    cv::setIdentity(kf.processNoiseCov, cv::Scalar(1e-4));
     kf.processNoiseCov.at<double>(0, 0) = 0.01;
     kf.processNoiseCov.at<double>(1, 1) = 0.01;
     kf.processNoiseCov.at<double>(2, 2) = 0.01;
     kf.processNoiseCov.at<double>(3, 3) = 0.01;
-    kf.processNoiseCov.at<double>(4, 4) = 5.0;  // vx – hohe Unsicherheit
-    kf.processNoiseCov.at<double>(5, 5) = 5.0;  // vy
+    kf.processNoiseCov.at<double>(4, 4) = 1.0;  // vx – reduziert von 5.0 für mehr Stabilität
+    kf.processNoiseCov.at<double>(5, 5) = 1.0;  // vy
 
     // Mess-Rauschen: Wie viel Ungenauigkeit hat der Detektor?
-    cv::setIdentity(kf.measurementNoiseCov, cv::Scalar(4.0));
+    cv::setIdentity(kf.measurementNoiseCov, cv::Scalar(2.0)); // Reduziert von 4.0
 
     // Initiale Fehler-Kovarianz: hohe Unsicherheit für Geschwindigkeit
     cv::setIdentity(kf.errorCovPost, cv::Scalar(1.0));
-    kf.errorCovPost.at<double>(4, 4) = 100.0;
-    kf.errorCovPost.at<double>(5, 5) = 100.0;
+    kf.errorCovPost.at<double>(4, 4) = 10.0; // Reduziert von 100.0
+    kf.errorCovPost.at<double>(5, 5) = 10.0;
 
     // Initialzustand
     const double cx = box.x + box.width  / 2.0;
@@ -115,29 +115,16 @@ void MultiTracker::update(const std::vector<Detection>& detections,
     // --- Phase 1: Kalman-Predict für alle aktiven Tracks ---
     std::vector<int>     trackIds;
     std::vector<cv::Rect> predictedBoxes;
-    std::vector<int>     trackClassIds;
     trackIds.reserve(m_tracks.size());
     predictedBoxes.reserve(m_tracks.size());
-    trackClassIds.reserve(m_tracks.size());
 
     for (auto& [id, track] : m_tracks) {
         track.kf.predict();
         trackIds.push_back(id);
         predictedBoxes.push_back(track.getPredictedBoundingBox());
-        trackClassIds.push_back(track.class_id);
     }
 
     const int nTracks = static_cast<int>(trackIds.size());
-
-    // Detektions-Klassen-IDs
-    std::vector<int> detClassIds;
-    detClassIds.reserve(nDets);
-    std::vector<cv::Rect> detBoxes;
-    detBoxes.reserve(nDets);
-    for (const auto& det : detections) {
-        detClassIds.push_back(det.class_id);
-        detBoxes.push_back(det.box);
-    }
 
     // --- Phase 2: Hybride Cost-Matrix berechnen ---
     // Max. erlaubte Zentrum-Distanz für ein Match:
@@ -149,8 +136,7 @@ void MultiTracker::update(const std::vector<Detection>& detections,
     std::vector<bool> matchedDets(nDets, false);
 
     if (nTracks > 0 && nDets > 0) {
-        auto costMatrix = computeCostMatrix(trackIds, predictedBoxes, detBoxes,
-                                            trackClassIds, detClassIds,
+        auto costMatrix = computeCostMatrix(trackIds, predictedBoxes, detections,
                                             maxCenterDist, safeLag,
                                             settings.trackerReacquisitionMaxDist);
         // Mindest-Score für ein gültiges Match:
@@ -170,7 +156,8 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             
             // Extrapolate the detection coordinates using the track's estimated velocity
             cv::Rect extBox = det.box;
-            if (safeLag > 0) {
+            // Plan 11 Safeguard: Recovery-Detektionen sind bereits Echtzeit
+            if (safeLag > 0 && !det.is_recovery) {
                 double vx = track.kf.statePost.at<double>(4);
                 double vy = track.kf.statePost.at<double>(5);
                 extBox.x += static_cast<int>(std::round(safeLag * vx));
@@ -216,6 +203,20 @@ void MultiTracker::update(const std::vector<Detection>& detections,
         if (!matchedDets[di]) {
             // Plan 11 Safeguard: Recovery-Detektionen (Zoom/Motion) dürfen KEINE neuen Tracks erzeugen
             if (detections[di].is_recovery) continue;
+
+            // Plan 11 Safeguard: Vermeidung von "Ghost"-Tracks durch Duplikate (z.B. bei Lag)
+            // Prüfe, ob die Detektion bereits von einem aktiven Track abgedeckt wird.
+            bool isDuplicate = false;
+            for (const auto& [id, track] : m_tracks) {
+                if (track.lost_frames == 0 && track.is_confirmed) {
+                    float iou = calculateIoU(detections[di].box, track.getBoundingBox());
+                    if (iou > 0.35f) {
+                        isDuplicate = true;
+                        break;
+                    }
+                }
+            }
+            if (isDuplicate) continue;
 
             m_tracks.emplace(m_nextId, TrackState(m_nextId, detections[di]));
             ++m_nextId;
@@ -318,15 +319,13 @@ int MultiTracker::getActiveTrackCount() const {
 std::vector<std::vector<MatchCost>> MultiTracker::computeCostMatrix(
     const std::vector<int>&      trackIds,
     const std::vector<cv::Rect>& predictedBoxes,
-    const std::vector<cv::Rect>& detBoxes,
-    const std::vector<int>&      trackClassIds,
-    const std::vector<int>&      detClassIds,
+    const std::vector<Detection>& detections,
     float                        maxCenterDistPx,
     int                          lagFrames,
     float                        reacquisitionMaxDist) const
 {
     const int nT = static_cast<int>(predictedBoxes.size());
-    const int nD = static_cast<int>(detBoxes.size());
+    const int nD = static_cast<int>(detections.size());
 
     std::vector<std::vector<MatchCost>> matrix(nT, std::vector<MatchCost>(nD, {0,1,0}));
 
@@ -349,13 +348,14 @@ std::vector<std::vector<MatchCost>> MultiTracker::computeCostMatrix(
 
         for (int di = 0; di < nD; ++di) {
             // Klassen-Konsistenz: andere Klasse = kein Match
-            if (trackClassIds[ti] != detClassIds[di]) {
+            if (trackRef.class_id != detections[di].class_id) {
                 matrix[ti][di] = {0.0f, 1.0f, 0.0f};
                 continue;
             }
 
-            cv::Rect db = detBoxes[di];
-            if (lagFrames > 0) {
+            cv::Rect db = detections[di].box;
+            // Plan 11 Safeguard: Recovery-Detektionen sind bereits Echtzeit, kein Lag-Ausgleich nötig
+            if (lagFrames > 0 && !detections[di].is_recovery) {
                 const auto& track = m_tracks.at(trackIds[ti]);
                 double vx = track.kf.statePost.at<double>(4);
                 double vy = track.kf.statePost.at<double>(5);
