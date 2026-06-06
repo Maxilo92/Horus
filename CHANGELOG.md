@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.14.1] - 2026-06-06
+
+### Fixed
+- **Vision Model Restoration**: Corrected a critical failure where face detection and recognition models were saved as HTML files instead of binary ONNX files. Re-downloaded authentic models from Hugging Face, restoring full facial analysis capabilities.
+
 ## [1.14.0] - 2026-06-06
 
 ### Added
