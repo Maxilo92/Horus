@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.11.5] - 2026-06-06
+
+### Added
+
+- **Asynchronous Detection Thread**: Decoupled object detection from the main real-time tracking thread, allowing the camera reader and UI rendering to run at the source's native 30 FPS without stutter or lag.
+- **Remote GPU Inference Server**: Added `scripts/server.py` containing a lightweight Python FastAPI server using PyTorch + CUDA to run YOLOv8m (Medium) on the RTX 3050.
+- **Remote GPU Inference Client**: Integrated a `libcurl`-based network inference client in `ObjectDetector` to compress, upload, and map object detections over LAN.
+- **Remote Inference UI Controls**: Added Server IP, Port, and Activation controls to the "Detection & Tracking" tab in the Settings window.
+- **Resilient Network Dead-Reckoning**: Configured the MultiTracker to persist tracks for up to 90 frames (approx 3 seconds) without updates when remote inference is active, letting Kalman prediction bridge network jitter smoothly.
+- **JSON Parsing Tests**: Added unit tests in `tests/unit_tests.cpp` to verify parsing of remote JSON detection arrays.
+
 ## [1.11.4] - 2026-06-06
 
 ### Added

@@ -450,3 +450,40 @@ TEST(PixelTrackingTest, SearchWindowClampingShift) {
     EXPECT_EQ(rectH, 220);
 }
 
+TEST(ObjectDetectorTest, ParseDetectionsJson) {
+    std::string json = "{\"detections\": [{\"class_id\": 2, \"confidence\": 0.85, \"box\": [100, 200, 50, 60]}]}";
+    std::vector<std::string> classes = {"person", "bicycle", "car", "motorcycle"};
+    
+    auto detections = ObjectDetector::parseDetectionsJson(json, classes);
+    ASSERT_EQ(detections.size(), 1);
+    EXPECT_EQ(detections[0].class_id, 2);
+    EXPECT_EQ(detections[0].className, "car");
+    EXPECT_NEAR(detections[0].confidence, 0.85f, 1e-4);
+    EXPECT_EQ(detections[0].box.x, 100);
+    EXPECT_EQ(detections[0].box.y, 200);
+    EXPECT_EQ(detections[0].box.width, 50);
+    EXPECT_EQ(detections[0].box.height, 60);
+}
+
+TEST(ObjectDetectorTest, ParseDetectionsJsonMultiple) {
+    std::string json = "{\"detections\": ["
+                       "{\"class_id\": 0, \"confidence\": 0.92, \"box\": [10, 20, 30, 40]},"
+                       "{\"class_id\": 2, \"confidence\": 0.76, \"box\": [110, 120, 130, 140]}"
+                       "]}";
+    std::vector<std::string> classes = {"person", "bicycle", "car", "motorcycle"};
+    
+    auto detections = ObjectDetector::parseDetectionsJson(json, classes);
+    ASSERT_EQ(detections.size(), 2);
+    
+    EXPECT_EQ(detections[0].class_id, 0);
+    EXPECT_EQ(detections[0].className, "person");
+    EXPECT_NEAR(detections[0].confidence, 0.92f, 1e-4);
+    EXPECT_EQ(detections[0].box.x, 10);
+    
+    EXPECT_EQ(detections[1].class_id, 2);
+    EXPECT_EQ(detections[1].className, "car");
+    EXPECT_NEAR(detections[1].confidence, 0.76f, 1e-4);
+    EXPECT_EQ(detections[1].box.x, 110);
+}
+
+

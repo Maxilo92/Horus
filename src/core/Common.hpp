@@ -204,6 +204,13 @@ struct SystemSettings {
     bool  audioLockLostEnabled     = true;
     float audioLockLostFreqHz      = 300.0f;
     float audioLockLostDurMs       = 200.0f;
+
+    // ----------------------------------------------------------------
+    // Remote Inference Settings (network GPU offloading)
+    // ----------------------------------------------------------------
+    bool        remoteInferenceEnabled = false;
+    std::string remoteInferenceIp      = "127.0.0.1";
+    int         remoteInferencePort    = 8000;
 };
 
 #endif // COMMON_HPP

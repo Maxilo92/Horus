@@ -7,6 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Find OpenCV
 find_package(OpenCV REQUIRED)
 
+# Find CURL for Remote Inference
+find_package(CURL REQUIRED)
+
 # Find OpenGL, GLFW, and GLEW
 find_package(OpenGL REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -70,6 +73,7 @@ target_include_directories(Tactileviewer PRIVATE
     ${imgui_SOURCE_DIR}/backends
     ${GLFW_INCLUDE_DIRS}
     ${GLEW_INCLUDE_DIRS}
+    ${CURL_INCLUDE_DIRS}
 )
 
 target_compile_definitions(Tactileviewer PRIVATE
@@ -81,6 +85,7 @@ target_link_libraries(Tactileviewer
     OpenGL::GL
     ${GLFW_LIBRARIES}
     ${GLEW_LIBRARIES}
+    ${CURL_LIBRARIES}
     "-framework AudioToolbox"
     "-framework CoreFoundation"
 )
@@ -123,6 +128,7 @@ target_include_directories(unit_tests PRIVATE
     ${GLFW_INCLUDE_DIRS}
     ${GLEW_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
+    ${CURL_INCLUDE_DIRS}
 )
 
 target_compile_definitions(unit_tests PRIVATE
@@ -134,6 +140,7 @@ target_link_libraries(unit_tests
     OpenGL::GL
     ${GLFW_LIBRARIES}
     ${GLEW_LIBRARIES}
+    ${CURL_LIBRARIES}
     "-framework AudioToolbox"
     "-framework CoreFoundation"
 )

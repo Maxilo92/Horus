@@ -162,6 +162,7 @@ void Application::log(LogLevel level, const std::string& msg) {
 }
 
 bool Application::init(int argc, char** argv) {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
     m_settingsPath = GetDefaultSettingsPath();
     loadPersistedSettings();
 
@@ -239,9 +240,10 @@ bool Application::init(int argc, char** argv) {
         log(LogLevel::INFO, "Audio engine initialised");
     }
 
-    log(LogLevel::INFO, "System initialized — starting worker thread");
+    log(LogLevel::INFO, "System initialized — starting threads");
 
     m_running = true;
+    m_detectorThread = std::thread(&Application::detectorWorkerLoop, this);
     m_workerThread = std::thread(&Application::workerLoop, this);
     return true;
 }
@@ -303,6 +305,9 @@ void Application::savePersistedSettings() const {
 
     out << "# Tactileviewer persistent settings\n";
     out << "cameraAddress=" << cameraAddress << '\n';
+    out << "remoteInferenceEnabled=" << (m_settings.remoteInferenceEnabled ? 1 : 0) << '\n';
+    out << "remoteInferenceIp=" << m_settings.remoteInferenceIp << '\n';
+    out << "remoteInferencePort=" << m_settings.remoteInferencePort << '\n';
     out << "detectorConfThreshold=" << m_settings.detectorConfThreshold << '\n';
     out << "detectorScoreThreshold=" << m_settings.detectorScoreThreshold << '\n';
     out << "detectorNmsThreshold=" << m_settings.detectorNmsThreshold << '\n';
@@ -404,6 +409,9 @@ void Application::loadPersistedSettings() {
 
         try {
             if (key == "cameraAddress") m_cameraAddress = value;
+            else if (key == "remoteInferenceEnabled") m_settings.remoteInferenceEnabled = ParseBoolSetting(value);
+            else if (key == "remoteInferenceIp") m_settings.remoteInferenceIp = value;
+            else if (key == "remoteInferencePort") m_settings.remoteInferencePort = std::stoi(value);
             else if (key == "detectorConfThreshold") m_settings.detectorConfThreshold = std::stof(value);
             else if (key == "detectorScoreThreshold") m_settings.detectorScoreThreshold = std::stof(value);
             else if (key == "detectorNmsThreshold") m_settings.detectorNmsThreshold = std::stof(value);
@@ -675,33 +683,32 @@ void Application::workerLoop() {
         }
 
         std::vector<Detection> detections;
-        if (currentSettings.enableDetection) {
-            bool runDetector = (frameSkipCounter == 0);
-            frameSkipCounter = (frameSkipCounter + 1) % (currentSettings.detectionSkipFrames + 1);
-
-            if (runDetector) {
-                cv::Mat inputFrame = trackingFrame;
-                if (currentSettings.grayscaleInput) {
-                    cv::Mat gray;
-                    cv::cvtColor(trackingFrame, gray, cv::COLOR_BGR2GRAY);
-                    cv::cvtColor(gray, inputFrame, cv::COLOR_GRAY2BGR);
-                }
-                detections = m_detector->detect(inputFrame, currentSettings);
-
-                // ── ROI Filter (Plan 04) ──────────────────────────────────
-                // Filter out detections outside active ROI zones.
-                // If no zone is active, all detections pass through unchanged.
-                if (m_roiManager->hasActiveROI()) {
-                    m_roiManager->filterDetections(detections);
-                }
-
-                m_workerDetectionCount.store(static_cast<int>(detections.size()));
-            }
+        bool hasNewDetections = false;
+        
+        if (m_detectorNewResults.load()) {
+            std::lock_guard<std::mutex> lock(m_detectorMutex);
+            m_detections = m_detectorResults;
+            m_detectorNewResults = false;
+            hasNewDetections = true;
         }
+        detections = m_detections; // Use latest available detections for HUD rendering
 
         std::vector<TrackedObject> tracked;
         if (currentSettings.enableTracking) {
-            m_tracker->update(detections, currentSettings);
+            if (currentSettings.enableDetection) {
+                // If detector is running asynchronously, we only supply new detections 
+                // when they actually arrive. On other frames, we pass an empty vector 
+                // to let the tracker predict (dead reckoning).
+                if (hasNewDetections) {
+                    m_tracker->update(detections, currentSettings);
+                } else {
+                    m_tracker->update({}, currentSettings);
+                }
+            } else {
+                // Detection disabled completely, update tracker with empty detections
+                m_tracker->update({}, currentSettings);
+            }
+            
             tracked = m_tracker->getTrackedObjects(currentSettings.trackerMaxTrailLength);
             updateTargetHistory(tracked, trackingFrame);
 
@@ -945,6 +952,20 @@ void Application::workerLoop() {
             }
         }
 
+        // Trigger next detection if enabled and detector is idle
+        if (currentSettings.enableDetection && !m_detectorBusy.load()) {
+            bool runDetector = (frameSkipCounter == 0);
+            frameSkipCounter = (frameSkipCounter + 1) % (currentSettings.detectionSkipFrames + 1);
+
+            if (runDetector) {
+                std::lock_guard<std::mutex> lock(m_detectorMutex);
+                trackingFrame.copyTo(m_detectorFrameCopy);
+                m_detectorSettingsCopy = currentSettings;
+                m_detectorBusy = true;
+                m_detectorCv.notify_one();
+            }
+        }
+
         // --- Handle Target Locking Logic ---
         if (m_lockRequested.exchange(false)) {
             m_sharedLockedTarget.track_id = m_requestedLockId.load();
@@ -1158,6 +1179,58 @@ void Application::workerLoop() {
             m_newDataAvailable       = true;
         }
     }
+}
+
+void Application::detectorWorkerLoop() {
+    log(LogLevel::INFO, "Detector thread started");
+    while (m_running) {
+        cv::Mat frameToProcess;
+        SystemSettings settingsToUse;
+        
+        {
+            std::unique_lock<std::mutex> lock(m_detectorMutex);
+            m_detectorCv.wait(lock, [this]() {
+                return !m_running || m_detectorBusy.load();
+            });
+            
+            if (!m_running) break;
+            
+            m_detectorFrameCopy.copyTo(frameToProcess);
+            settingsToUse = m_detectorSettingsCopy;
+        }
+        
+        if (frameToProcess.empty()) {
+            m_detectorBusy = false;
+            continue;
+        }
+        
+        std::vector<Detection> results;
+        try {
+            cv::Mat inputFrame = frameToProcess;
+            if (settingsToUse.grayscaleInput) {
+                cv::Mat gray;
+                cv::cvtColor(frameToProcess, gray, cv::COLOR_BGR2GRAY);
+                cv::cvtColor(gray, inputFrame, cv::COLOR_GRAY2BGR);
+            }
+            results = m_detector->detect(inputFrame, settingsToUse);
+            
+            if (m_roiManager->hasActiveROI()) {
+                m_roiManager->filterDetections(results);
+            }
+            
+            m_workerDetectionCount.store(static_cast<int>(results.size()));
+        } catch (const std::exception& e) {
+            log(LogLevel::ERR, std::string("Async detection failed: ") + e.what());
+        }
+        
+        {
+            std::lock_guard<std::mutex> lock(m_detectorMutex);
+            m_detectorResults = std::move(results);
+            m_detectorNewResults = true;
+            m_detectorBusy = false;
+        }
+    }
+    log(LogLevel::INFO, "Detector thread stopping");
 }
 
 // -----------------------------------------------------------------------
@@ -2591,6 +2664,33 @@ void Application::renderSettingsWindow() {
             changed |= ImGui::Checkbox("Grayscale Input##ds",&m_settings.grayscaleInput);
 
             ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Remote GPU Offloading (LAN)");
+            changed |= ImGui::Checkbox("Enable Remote Inference##rem", &m_settings.remoteInferenceEnabled);
+            
+            ImGui::BeginDisabled(!m_settings.remoteInferenceEnabled);
+            
+            static char ipBuf[64];
+            static bool ipBufInit = false;
+            if (!ipBufInit) {
+                strncpy(ipBuf, m_settings.remoteInferenceIp.c_str(), sizeof(ipBuf));
+                ipBufInit = true;
+            }
+            if (ImGui::InputText("Server IP##rem", ipBuf, sizeof(ipBuf))) {
+                m_settings.remoteInferenceIp = ipBuf;
+                changed = true;
+            }
+            
+            int port = m_settings.remoteInferencePort;
+            if (ImGui::InputInt("Server Port##rem", &port)) {
+                if (port > 0 && port < 65536) {
+                    m_settings.remoteInferencePort = port;
+                    changed = true;
+                }
+            }
+            
+            ImGui::EndDisabled();
+
+            ImGui::Separator();
             ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Tracker Settings");
             changed |= ImGui::SliderFloat("Min Match Score##ts", &m_settings.trackerMinMatchScore, 0.01f, 1.0f, "%.3f");
             changed |= ImGui::SliderFloat("Max Center Dist##ts", &m_settings.trackerMaxCenterDistPx, 10.0f, 800.0f, "%.0f");
@@ -3716,7 +3816,17 @@ void Application::renderTargetAnalyzer() {
 
 void Application::cleanup() {
     m_running = false;
+    
+    // Wake up detector thread to let it terminate
+    {
+        std::lock_guard<std::mutex> lk(m_detectorMutex);
+        m_detectorCv.notify_all();
+    }
+    
+    if (m_detectorThread.joinable()) m_detectorThread.join();
     if (m_workerThread.joinable()) m_workerThread.join();
+
+    curl_global_cleanup();
 
     // Delete target history textures
     for (auto& [id, texInfo] : m_targetTextures) {

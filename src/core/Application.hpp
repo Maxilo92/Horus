@@ -8,6 +8,7 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 #include <deque>
 #include <cstring>
@@ -54,6 +55,7 @@ private:
     bool initImGui();
     void cleanup();
     void workerLoop();
+    void detectorWorkerLoop();
     void handleTargetLocking(const ViewportInfo& view);
     void loadPersistedSettings();
     void savePersistedSettings() const;
@@ -100,7 +102,18 @@ private:
     SystemSettings             m_settings;
 
     std::thread              m_workerThread;
+    std::thread              m_detectorThread;
     std::atomic<bool>        m_running;
+    
+    // Asynchronous detector pipeline synchronization
+    std::mutex               m_detectorMutex;
+    std::condition_variable  m_detectorCv;
+    std::atomic<bool>        m_detectorBusy{false};
+    std::atomic<bool>        m_detectorNewResults{false};
+    cv::Mat                  m_detectorFrameCopy;
+    SystemSettings           m_detectorSettingsCopy;
+    std::vector<Detection>   m_detectorResults;
+
     std::mutex               m_dataMutex;
     cv::Mat                  m_sharedFrame;
     cv::Mat                  m_sharedZoomFrame;

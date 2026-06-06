@@ -195,8 +195,13 @@ void MultiTracker::update(const std::vector<Detection>& detections,
     }
 
     // --- Phase 5: Veraltete Tracks entfernen ---
+    int maxLost = settings.trackerMaxLostFrames;
+    if (settings.remoteInferenceEnabled) {
+        maxLost = std::max(maxLost, 90); // Tolerates up to 3 seconds of network/asynchronous lag
+    }
+
     for (auto it = m_tracks.begin(); it != m_tracks.end(); ) {
-        if (it->second.lost_frames > settings.trackerMaxLostFrames)
+        if (it->second.lost_frames > maxLost)
             it = m_tracks.erase(it);
         else
             ++it;
