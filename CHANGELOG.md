@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.11.4] - 2026-06-06
+
+### Added
+
+- **Target Zoom Release Control**: Added a highly visible, styled "UNLOCK TARGET / RELEASE LOCK" button at the top of the "Target Zoom" window whenever a target is locked, enabling direct target release.
+- **Tabbed Settings Window**: Restructured the Settings window layout into 5 separate tabs for clean organization: Display & HUD, Camera & Zoom, Detection & Tracking, Audio Alerts, and System & Admin.
+
+### Changed
+
+- `Application.cpp`: Redesigned `renderZoomWindow` and `renderSettingsWindow` for tabs and Zoom Window unlock actions.
+
 ## [1.11.3] - 2026-06-06
 
 ### Added

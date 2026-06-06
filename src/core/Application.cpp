@@ -1557,6 +1557,17 @@ static ImU32 ApplyBrightnessLocal(ImU32 col, float brightness) {
 void Application::renderZoomWindow(const cv::Mat& zoomFrame) {
     ImGui::Begin("Target Zoom");
 
+    if (m_lockedTarget.state != TrackingState::SEARCHING) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.25f, 0.25f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+        if (ImGui::Button("UNLOCK TARGET / RELEASE LOCK", ImVec2(-FLT_MIN, 28.0f))) {
+            m_releaseLockRequested.store(true);
+        }
+        ImGui::PopStyleColor(3);
+        ImGui::Spacing();
+    }
+
     if (m_lockedTarget.state != TrackingState::SEARCHING && !zoomFrame.empty()) {
         cv::Rect roi = m_lockedTarget.box;
 
@@ -2508,177 +2519,220 @@ void Application::renderDevConsole() {
 void Application::renderSettingsWindow() {
     if (!m_showSettingsWindow) return;
 
-    ImGui::SetNextWindowSize(ImVec2(420, 520), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(480, 560), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Settings", &m_showSettingsWindow)) {
         ImGui::End();
         return;
     }
 
     bool changed = false;
+    bool audioChanged = false;
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "APPLICATION SETTINGS");
     ImGui::Separator();
 
-    if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
-        changed |= ImGui::SliderFloat("HUD Brightness##s",
-            &m_settings.hudBrightness, 0.2f, 1.0f, "%.2f");
-        changed |= ImGui::SliderFloat("Crosshair Scale##s",
-            &m_settings.crosshairScale, 0.25f, 3.0f, "%.2f");
-        changed |= ImGui::SliderFloat("Box Line Width##s",
-            &m_settings.boxLineWidth, 0.5f, 5.0f, "%.1f");
-        if (ImGui::ColorEdit4("HUD Color##s",    m_hudColorF,
-                ImGuiColorEditFlags_AlphaBar)) {
-            m_settings.hudColor = Float4ToImU32(m_hudColorF);
-            changed = true;
+    if (ImGui::BeginTabBar("SettingsTabBar")) {
+        // --- TAB 1: Display & HUD ---
+        if (ImGui::BeginTabItem("Display & HUD")) {
+            ImGui::Spacing();
+            changed |= ImGui::SliderFloat("HUD Brightness##s",
+                &m_settings.hudBrightness, 0.2f, 1.0f, "%.2f");
+            changed |= ImGui::SliderFloat("Crosshair Scale##s",
+                &m_settings.crosshairScale, 0.25f, 3.0f, "%.2f");
+            changed |= ImGui::SliderFloat("Box Line Width##s",
+                &m_settings.boxLineWidth, 0.5f, 5.0f, "%.1f");
+            if (ImGui::ColorEdit4("HUD Color##s",    m_hudColorF,
+                    ImGuiColorEditFlags_AlphaBar)) {
+                m_settings.hudColor = Float4ToImU32(m_hudColorF);
+                changed = true;
+            }
+            if (ImGui::ColorEdit4("Target Color##s", m_targetColorF,
+                    ImGuiColorEditFlags_AlphaBar)) {
+                m_settings.targetColor = Float4ToImU32(m_targetColorF);
+                changed = true;
+            }
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "HUD Elements Toggle");
+            changed |= ImGui::Checkbox("Crosshair##s",           &m_settings.showCrosshair);
+            changed |= ImGui::Checkbox("Tactical Overlay##s",    &m_settings.showTacticalOverlay);
+            changed |= ImGui::Checkbox("Corner Brackets##s",     &m_settings.showCornerBrackets);
+            changed |= ImGui::Checkbox("Status Windows##s",      &m_settings.showStatusWindows);
+            changed |= ImGui::Checkbox("Show Track IDs##s",      &m_settings.showTrackIDs);
+            changed |= ImGui::Checkbox("Show Confidence##s",     &m_settings.showConfidence);
+            changed |= ImGui::Checkbox("Show Trails##s",         &m_settings.showTrails);
+            changed |= ImGui::Checkbox("Fading Trail Alpha##s",  &m_settings.showTrailFade);
+
+            ImGui::EndTabItem();
         }
-        if (ImGui::ColorEdit4("Target Color##s", m_targetColorF,
-                ImGuiColorEditFlags_AlphaBar)) {
-            m_settings.targetColor = Float4ToImU32(m_targetColorF);
-            changed = true;
+
+        // --- TAB 2: Camera & Zoom ---
+        if (ImGui::BeginTabItem("Camera & Zoom")) {
+            ImGui::Spacing();
+            changed |= ImGui::Checkbox("Request 4K camera resolution##s", &m_settings.request4KCamera);
+            changed |= ImGui::Checkbox("Enable 4K target zoom##s", &m_settings.enable4KZoom);
+            changed |= ImGui::SliderFloat("Target zoom magnification##s", &m_settings.targetZoomMagnification, 1.0f, 4.0f, "%.1fx");
+            ImGui::Separator();
+            changed |= ImGui::Checkbox("Enable Low-Light Enhancement##s", &m_settings.lowLightEnhancement);
+            if (m_settings.lowLightEnhancement) {
+                changed |= ImGui::SliderFloat("Contrast Clip Limit##s_ll", &m_settings.lowLightClipLimit, 1.0f, 10.0f, "%.1f");
+                changed |= ImGui::SliderInt("Noise Filter Kernel##s_ll", &m_settings.lowLightDenoiseKernel, 0, 9);
+            }
+
+            ImGui::EndTabItem();
         }
-        changed |= ImGui::Checkbox("Request 4K camera resolution##s", &m_settings.request4KCamera);
-        changed |= ImGui::Checkbox("Enable 4K target zoom##s", &m_settings.enable4KZoom);
-        changed |= ImGui::SliderFloat("Target zoom magnification##s", &m_settings.targetZoomMagnification, 1.0f, 4.0f, "%.1fx");
-        changed |= ImGui::Checkbox("Enable Low-Light Enhancement##s", &m_settings.lowLightEnhancement);
-        if (m_settings.lowLightEnhancement) {
-            changed |= ImGui::SliderFloat("Contrast Clip Limit##s_ll", &m_settings.lowLightClipLimit, 1.0f, 10.0f, "%.1f");
-            changed |= ImGui::SliderInt("Noise Filter Kernel##s_ll", &m_settings.lowLightDenoiseKernel, 0, 9);
+
+        // --- TAB 3: Detection & Tracking ---
+        if (ImGui::BeginTabItem("Detection & Tracking")) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Detector Settings");
+            changed |= ImGui::SliderFloat("Confidence##ds",  &m_settings.detectorConfThreshold,  0.01f, 1.0f, "%.3f");
+            changed |= ImGui::SliderFloat("Score##ds",       &m_settings.detectorScoreThreshold, 0.01f, 1.0f, "%.3f");
+            changed |= ImGui::SliderFloat("NMS##ds",         &m_settings.detectorNmsThreshold,   0.01f, 1.0f, "%.3f");
+            changed |= ImGui::SliderInt("Skip Frames##ds",   &m_settings.detectionSkipFrames, 0, 10);
+            changed |= ImGui::Checkbox("Grayscale Input##ds",&m_settings.grayscaleInput);
+
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Tracker Settings");
+            changed |= ImGui::SliderFloat("Min Match Score##ts", &m_settings.trackerMinMatchScore, 0.01f, 1.0f, "%.3f");
+            changed |= ImGui::SliderFloat("Max Center Dist##ts", &m_settings.trackerMaxCenterDistPx, 10.0f, 800.0f, "%.0f");
+            changed |= ImGui::SliderInt("Max Lost Frames##ts",   &m_settings.trackerMaxLostFrames,  1, 120);
+            changed |= ImGui::SliderInt("Trail Length##ts",      &m_settings.trackerMaxTrailLength, 5, 200);
+
+            ImGui::EndTabItem();
         }
-    }
 
-    if (ImGui::CollapsingHeader("HUD Elements")) {
-        changed |= ImGui::Checkbox("Crosshair##s",           &m_settings.showCrosshair);
-        changed |= ImGui::Checkbox("Tactical Overlay##s",    &m_settings.showTacticalOverlay);
-        changed |= ImGui::Checkbox("Corner Brackets##s",     &m_settings.showCornerBrackets);
-        changed |= ImGui::Checkbox("Status Windows##s",      &m_settings.showStatusWindows);
-        changed |= ImGui::Checkbox("Show Track IDs##s",      &m_settings.showTrackIDs);
-        changed |= ImGui::Checkbox("Show Confidence##s",     &m_settings.showConfidence);
-        changed |= ImGui::Checkbox("Show Trails##s",         &m_settings.showTrails);
-        changed |= ImGui::Checkbox("Fading Trail Alpha##s",  &m_settings.showTrailFade);
-    }
+        // --- TAB 4: Audio Alerts ---
+        if (ImGui::BeginTabItem("Audio Alerts")) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "ACOUSTIC ALERT SYSTEM");
+            ImGui::Separator();
 
-    if (ImGui::CollapsingHeader("Detector")) {
-        changed |= ImGui::SliderFloat("Confidence##ds",  &m_settings.detectorConfThreshold,  0.01f, 1.0f, "%.3f");
-        changed |= ImGui::SliderFloat("Score##ds",       &m_settings.detectorScoreThreshold, 0.01f, 1.0f, "%.3f");
-        changed |= ImGui::SliderFloat("NMS##ds",         &m_settings.detectorNmsThreshold,   0.01f, 1.0f, "%.3f");
-        changed |= ImGui::SliderInt("Skip Frames##ds",   &m_settings.detectionSkipFrames, 0, 10);
-        changed |= ImGui::Checkbox("Grayscale Input##ds",&m_settings.grayscaleInput);
-    }
+            audioChanged |= ImGui::Checkbox("Master Enable##aud", &m_settings.audioEnabled);
+            ImGui::BeginDisabled(!m_settings.audioEnabled);
 
-    if (ImGui::CollapsingHeader("Tracker")) {
-        changed |= ImGui::SliderFloat("Min Match Score##ts", &m_settings.trackerMinMatchScore, 0.01f, 1.0f, "%.3f");
-        changed |= ImGui::SliderFloat("Max Center Dist##ts", &m_settings.trackerMaxCenterDistPx, 10.0f, 800.0f, "%.0f");
-        changed |= ImGui::SliderInt("Max Lost Frames##ts",   &m_settings.trackerMaxLostFrames,  1, 120);
-        changed |= ImGui::SliderInt("Trail Length##ts",      &m_settings.trackerMaxTrailLength, 5, 200);
-    }
+            audioChanged |= ImGui::SliderFloat("Master Volume##aud", &m_settings.audioMasterVolume, 0.0f, 1.0f, "%.2f");
+            if (ImGui::Button("TEST ALL##aud")) {
+                AudioEngine::Config previewCfg;
+                previewCfg.masterEnabled       = m_settings.audioEnabled;
+                previewCfg.masterVolume        = m_settings.audioMasterVolume;
+                previewCfg.motionEnabled       = m_settings.audioMotionEnabled;
+                previewCfg.motionFreqHz        = m_settings.audioMotionFreqHz;
+                previewCfg.motionDurationMs    = m_settings.audioMotionDurationMs;
+                previewCfg.motionCooldownSec   = m_settings.audioMotionCooldownSec;
+                previewCfg.alarmEntryEnabled   = m_settings.audioAlarmEntryEnabled;
+                previewCfg.alarmEntryFreqHz    = m_settings.audioAlarmEntryFreqHz;
+                previewCfg.alarmEntryDurMs     = m_settings.audioAlarmEntryDurMs;
+                previewCfg.alarmExitEnabled    = m_settings.audioAlarmExitEnabled;
+                previewCfg.alarmExitFreqHz     = m_settings.audioAlarmExitFreqHz;
+                previewCfg.alarmExitDurMs      = m_settings.audioAlarmExitDurMs;
+                previewCfg.lockAcquiredEnabled = m_settings.audioLockAcquiredEnabled;
+                previewCfg.lockAcquiredFreqHz  = m_settings.audioLockAcquiredFreqHz;
+                previewCfg.lockAcquiredDurMs   = m_settings.audioLockAcquiredDurMs;
+                previewCfg.lockLostEnabled     = m_settings.audioLockLostEnabled;
+                previewCfg.lockLostFreqHz      = m_settings.audioLockLostFreqHz;
+                previewCfg.lockLostDurMs       = m_settings.audioLockLostDurMs;
+                m_audioEngine.applyConfig(previewCfg);
+                m_audioEngine.playMotionAlert();
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("(plays motion tone)");
 
-    if (ImGui::CollapsingHeader("Logging")) {
-        const char* levelNames[] = {"VERBOSE","INFO","WARN","ERROR"};
-        int lvl = m_settings.logLevel;
-        if (ImGui::Combo("Log Level##ls", &lvl, levelNames, 4)) {
-            m_settings.logLevel = lvl;
-            changed = true;
+            ImGui::Spacing();
+
+            if (ImGui::CollapsingHeader("Motion Alert##aud_coll", ImGuiTreeNodeFlags_DefaultOpen)) {
+                audioChanged |= ImGui::Checkbox("Enable##audm", &m_settings.audioMotionEnabled);
+                ImGui::BeginDisabled(!m_settings.audioMotionEnabled);
+                audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audm",  &m_settings.audioMotionFreqHz,     100.0f, 4000.0f, "%.0f Hz");
+                audioChanged |= ImGui::SliderFloat("Duration (ms)##audm",   &m_settings.audioMotionDurationMs,  20.0f,  500.0f, "%.0f ms");
+                audioChanged |= ImGui::SliderFloat("Cooldown (s)##audm",    &m_settings.audioMotionCooldownSec,  0.1f,   10.0f, "%.1f s");
+                if (ImGui::Button("TEST##audm")) {
+                    m_audioEngine.playMotionAlert();
+                }
+                ImGui::EndDisabled();
+            }
+
+            if (ImGui::CollapsingHeader("Alarm Zone — Entry##aud_coll")) {
+                audioChanged |= ImGui::Checkbox("Enable##aude", &m_settings.audioAlarmEntryEnabled);
+                ImGui::BeginDisabled(!m_settings.audioAlarmEntryEnabled);
+                audioChanged |= ImGui::SliderFloat("Frequency (Hz)##aude", &m_settings.audioAlarmEntryFreqHz, 100.0f, 4000.0f, "%.0f Hz");
+                audioChanged |= ImGui::SliderFloat("Duration (ms)##aude",  &m_settings.audioAlarmEntryDurMs,   20.0f,  500.0f, "%.0f ms");
+                if (ImGui::Button("TEST##aude")) {
+                    m_audioEngine.playAlarmEntry();
+                }
+                ImGui::EndDisabled();
+            }
+
+            if (ImGui::CollapsingHeader("Alarm Zone — Exit##aud_coll")) {
+                audioChanged |= ImGui::Checkbox("Enable##audx", &m_settings.audioAlarmExitEnabled);
+                ImGui::BeginDisabled(!m_settings.audioAlarmExitEnabled);
+                audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audx", &m_settings.audioAlarmExitFreqHz, 100.0f, 4000.0f, "%.0f Hz");
+                audioChanged |= ImGui::SliderFloat("Duration (ms)##audx",  &m_settings.audioAlarmExitDurMs,   20.0f,  500.0f, "%.0f ms");
+                if (ImGui::Button("TEST##audx")) {
+                    m_audioEngine.playAlarmExit();
+                }
+                ImGui::EndDisabled();
+            }
+
+            if (ImGui::CollapsingHeader("Target Lock — Acquired##aud_coll")) {
+                audioChanged |= ImGui::Checkbox("Enable##audla", &m_settings.audioLockAcquiredEnabled);
+                ImGui::BeginDisabled(!m_settings.audioLockAcquiredEnabled);
+                audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audla", &m_settings.audioLockAcquiredFreqHz, 100.0f, 4000.0f, "%.0f Hz");
+                audioChanged |= ImGui::SliderFloat("Duration (ms)##audla",  &m_settings.audioLockAcquiredDurMs,   20.0f,  500.0f, "%.0f ms");
+                if (ImGui::Button("TEST##audla")) {
+                    m_audioEngine.playLockAcquired();
+                }
+                ImGui::EndDisabled();
+            }
+
+            if (ImGui::CollapsingHeader("Target Lock — Lost##aud_coll")) {
+                audioChanged |= ImGui::Checkbox("Enable##audll", &m_settings.audioLockLostEnabled);
+                ImGui::BeginDisabled(!m_settings.audioLockLostEnabled);
+                audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audll", &m_settings.audioLockLostFreqHz, 100.0f, 4000.0f, "%.0f Hz");
+                audioChanged |= ImGui::SliderFloat("Duration (ms)##audll",  &m_settings.audioLockLostDurMs,   20.0f,  500.0f, "%.0f ms");
+                if (ImGui::Button("TEST##audll")) {
+                    m_audioEngine.playLockLost();
+                }
+                ImGui::EndDisabled();
+            }
+
+            ImGui::EndDisabled(); // master enable
+
+            ImGui::EndTabItem();
         }
-        changed |= ImGui::Checkbox("Log to File (not yet implemented)", &m_settings.logToFile);
-    }
 
-    // ── Audio Feedback ──────────────────────────────────────────────────────
-    bool audioChanged = false;
-    if (ImGui::CollapsingHeader("Audio Feedback")) {
-        ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "ACOUSTIC ALERT SYSTEM");
-        ImGui::Separator();
+        // --- TAB 5: System & Admin ---
+        if (ImGui::BeginTabItem("System & Admin")) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Logging Settings");
+            const char* levelNames[] = {"VERBOSE","INFO","WARN","ERROR"};
+            int lvl = m_settings.logLevel;
+            if (ImGui::Combo("Log Level##ls", &lvl, levelNames, 4)) {
+                m_settings.logLevel = lvl;
+                changed = true;
+            }
+            changed |= ImGui::Checkbox("Log to File (not yet implemented)", &m_settings.logToFile);
 
-        audioChanged |= ImGui::Checkbox("Master Enable##aud", &m_settings.audioEnabled);
-        ImGui::BeginDisabled(!m_settings.audioEnabled);
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.8f, 0.1f, 0.1f, 1.0f), "Danger Zone");
+            static bool confirmQuit = false;
+            ImGui::Checkbox("Enable Admin Actions##s_admin", &confirmQuit);
+            if (confirmQuit) {
+                if (ImGui::Button("Reset All Settings##s_reset", ImVec2(-1, 0))) {
+                    applyStandardPreset();
+                    changed = true;
+                    log(LogLevel::WARN, "All settings reset to defaults");
+                }
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.1f, 0.1f, 1.0f));
+                if (ImGui::Button("Quit Application##s_quit", ImVec2(-1, 0)))
+                    glfwSetWindowShouldClose(m_window, true);
+                ImGui::PopStyleColor();
+            } else {
+                ImGui::TextDisabled("(Admin actions locked)");
+            }
 
-        audioChanged |= ImGui::SliderFloat("Master Volume##aud", &m_settings.audioMasterVolume, 0.0f, 1.0f, "%.2f");
-        if (ImGui::Button("TEST ALL##aud")) {
-            AudioEngine::Config previewCfg;
-            previewCfg.masterEnabled       = m_settings.audioEnabled;
-            previewCfg.masterVolume        = m_settings.audioMasterVolume;
-            previewCfg.motionEnabled       = m_settings.audioMotionEnabled;
-            previewCfg.motionFreqHz        = m_settings.audioMotionFreqHz;
-            previewCfg.motionDurationMs    = m_settings.audioMotionDurationMs;
-            previewCfg.motionCooldownSec   = m_settings.audioMotionCooldownSec;
-            previewCfg.alarmEntryEnabled   = m_settings.audioAlarmEntryEnabled;
-            previewCfg.alarmEntryFreqHz    = m_settings.audioAlarmEntryFreqHz;
-            previewCfg.alarmEntryDurMs     = m_settings.audioAlarmEntryDurMs;
-            previewCfg.alarmExitEnabled    = m_settings.audioAlarmExitEnabled;
-            previewCfg.alarmExitFreqHz     = m_settings.audioAlarmExitFreqHz;
-            previewCfg.alarmExitDurMs      = m_settings.audioAlarmExitDurMs;
-            previewCfg.lockAcquiredEnabled = m_settings.audioLockAcquiredEnabled;
-            previewCfg.lockAcquiredFreqHz  = m_settings.audioLockAcquiredFreqHz;
-            previewCfg.lockAcquiredDurMs   = m_settings.audioLockAcquiredDurMs;
-            previewCfg.lockLostEnabled     = m_settings.audioLockLostEnabled;
-            previewCfg.lockLostFreqHz      = m_settings.audioLockLostFreqHz;
-            previewCfg.lockLostDurMs       = m_settings.audioLockLostDurMs;
-            m_audioEngine.applyConfig(previewCfg);
-            m_audioEngine.playMotionAlert();
+            ImGui::EndTabItem();
         }
-        ImGui::SameLine();
-        ImGui::TextDisabled("(plays motion tone)");
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "MOTION ALERT");
-        audioChanged |= ImGui::Checkbox("Enable##audm", &m_settings.audioMotionEnabled);
-        ImGui::BeginDisabled(!m_settings.audioMotionEnabled);
-        audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audm",  &m_settings.audioMotionFreqHz,     100.0f, 4000.0f, "%.0f Hz");
-        audioChanged |= ImGui::SliderFloat("Duration (ms)##audm",   &m_settings.audioMotionDurationMs,  20.0f,  500.0f, "%.0f ms");
-        audioChanged |= ImGui::SliderFloat("Cooldown (s)##audm",    &m_settings.audioMotionCooldownSec,  0.1f,   10.0f, "%.1f s");
-        if (ImGui::Button("TEST##audm")) {
-            m_audioEngine.playMotionAlert();
-        }
-        ImGui::EndDisabled();
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.2f, 1.0f), "ALARM ZONE — ENTRY");
-        audioChanged |= ImGui::Checkbox("Enable##aude", &m_settings.audioAlarmEntryEnabled);
-        ImGui::BeginDisabled(!m_settings.audioAlarmEntryEnabled);
-        audioChanged |= ImGui::SliderFloat("Frequency (Hz)##aude", &m_settings.audioAlarmEntryFreqHz, 100.0f, 4000.0f, "%.0f Hz");
-        audioChanged |= ImGui::SliderFloat("Duration (ms)##aude",  &m_settings.audioAlarmEntryDurMs,   20.0f,  500.0f, "%.0f ms");
-        if (ImGui::Button("TEST##aude")) {
-            m_audioEngine.playAlarmEntry();
-        }
-        ImGui::EndDisabled();
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.8f, 0.6f, 0.0f, 1.0f), "ALARM ZONE — EXIT");
-        audioChanged |= ImGui::Checkbox("Enable##audx", &m_settings.audioAlarmExitEnabled);
-        ImGui::BeginDisabled(!m_settings.audioAlarmExitEnabled);
-        audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audx", &m_settings.audioAlarmExitFreqHz, 100.0f, 4000.0f, "%.0f Hz");
-        audioChanged |= ImGui::SliderFloat("Duration (ms)##audx",  &m_settings.audioAlarmExitDurMs,   20.0f,  500.0f, "%.0f ms");
-        if (ImGui::Button("TEST##audx")) {
-            m_audioEngine.playAlarmExit();
-        }
-        ImGui::EndDisabled();
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.6f, 1.0f), "TARGET LOCK — ACQUIRED");
-        audioChanged |= ImGui::Checkbox("Enable##audla", &m_settings.audioLockAcquiredEnabled);
-        ImGui::BeginDisabled(!m_settings.audioLockAcquiredEnabled);
-        audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audla", &m_settings.audioLockAcquiredFreqHz, 100.0f, 4000.0f, "%.0f Hz");
-        audioChanged |= ImGui::SliderFloat("Duration (ms)##audla",  &m_settings.audioLockAcquiredDurMs,   20.0f,  500.0f, "%.0f ms");
-        if (ImGui::Button("TEST##audla")) {
-            m_audioEngine.playLockAcquired();
-        }
-        ImGui::EndDisabled();
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "TARGET LOCK — LOST");
-        audioChanged |= ImGui::Checkbox("Enable##audll", &m_settings.audioLockLostEnabled);
-        ImGui::BeginDisabled(!m_settings.audioLockLostEnabled);
-        audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audll", &m_settings.audioLockLostFreqHz, 100.0f, 4000.0f, "%.0f Hz");
-        audioChanged |= ImGui::SliderFloat("Duration (ms)##audll",  &m_settings.audioLockLostDurMs,   20.0f,  500.0f, "%.0f ms");
-        if (ImGui::Button("TEST##audll")) {
-            m_audioEngine.playLockLost();
-        }
-        ImGui::EndDisabled();
-
-        ImGui::EndDisabled(); // master enable
+        ImGui::EndTabBar();
     }
 
     ImGui::Separator();
@@ -2691,8 +2745,6 @@ void Application::renderSettingsWindow() {
         savePersistedSettings();
     }
 
-    // Apply audio engine config immediately when audio params change
-    // (runs on render thread; applyConfig is safe outside the worker hot-path)
     if (audioChanged) {
         AudioEngine::Config audioCfg;
         audioCfg.masterEnabled       = m_settings.audioEnabled;
