@@ -1,6 +1,17 @@
 # Changelog
 
-## [1.11.6] - 2026-06-06
+## [1.11.7] - 2026-06-06
+
+### Added
+
+- **Multiple Sub Zooms for Motion Tracking**: Added up to 4 automatic sub zooms that crop and track detected movements.
+  - **Dynamic Overlay mode**: Shows sub zooms as PiP inserts on the corners/margins of the main camera view with leader lines pointing to the movements.
+  - **Separate Windows mode**: Shows sub zooms in 4 separate dockable/floating ImGui windows, toggled via settings.
+  - **2-Second Hold Time**: Preserves the crop and display of the sub zooms for 2.0 seconds after the movement disappears, with visual indicators (e.g. orange dashed leader lines and "HOLD" tags) when holding.
+  - **Independent Motion Logging**: Logs motion events separately (under class name `"Motion"` and track ID offset by 10000) unless they overlap with existing tracked targets (overlap ratio > 0.2).
+  - **Persistence & Presets**: Configured `settings.ini` to persist sub zoom settings across app launches.
+
+## [1.11.5] - 2026-06-06
 
 ### Added
 

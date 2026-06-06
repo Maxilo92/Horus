@@ -486,4 +486,26 @@ TEST(ObjectDetectorTest, ParseDetectionsJsonMultiple) {
     EXPECT_EQ(detections[1].box.x, 110);
 }
 
+// --- SubZooms Tests ---
+
+TEST(SubZoomsTest, SettingsDefaultValues) {
+    SystemSettings settings;
+    EXPECT_TRUE(settings.subZoomsEnabled);
+    EXPECT_FALSE(settings.subZoomsUseSeparateWindows);
+}
+
+TEST(SubZoomsTest, MotionTargetOverlapLogic) {
+    cv::Rect targetBox(100, 100, 50, 50);
+    
+    cv::Rect motionBoxOverlap(110, 110, 50, 50); // overlap is 40x40 = 1600. area = 2500. ratio = 0.64
+    cv::Rect interOverlap = motionBoxOverlap & targetBox;
+    double ratioOverlap = (double)interOverlap.area() / motionBoxOverlap.area();
+    EXPECT_GT(ratioOverlap, 0.2);
+    
+    cv::Rect motionBoxNoOverlap(200, 200, 50, 50);
+    cv::Rect interNoOverlap = motionBoxNoOverlap & targetBox;
+    double ratioNoOverlap = (interNoOverlap.area() > 0) ? (double)interNoOverlap.area() / motionBoxNoOverlap.area() : 0.0;
+    EXPECT_LE(ratioNoOverlap, 0.2);
+}
+
 

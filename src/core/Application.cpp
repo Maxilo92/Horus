@@ -68,6 +68,19 @@ static std::set<int> ParsePriorityClasses(const std::string& value) {
     return classes;
 }
 
+static ImU32 ApplyBrightnessLocal(ImU32 col, float brightness) {
+    float r = ((col >>  0) & 0xFF) * brightness;
+    float g = ((col >>  8) & 0xFF) * brightness;
+    float b = ((col >> 16) & 0xFF) * brightness;
+    float a = ((col >> 24) & 0xFF);
+    return IM_COL32(
+        static_cast<int>(r),
+        static_cast<int>(g),
+        static_cast<int>(b),
+        static_cast<int>(a)
+    );
+}
+
 static std::string SerializePriorityClasses(const std::set<int>& classes) {
     std::ostringstream out;
     bool first = true;
@@ -690,6 +703,155 @@ void Application::workerLoop() {
             }
         }
 
+        // Update sub zooms in worker thread if enabled
+        if (currentSettings.motionDetectionEnabled && currentSettings.subZoomsEnabled) {
+            auto now = std::chrono::steady_clock::now();
+            
+            // Clean up old inactive tracks
+            for (auto it = m_workerMotionTracks.begin(); it != m_workerMotionTracks.end(); ) {
+                float elapsed = std::chrono::duration<float>(now - it->lastSeen).count();
+                if (elapsed > 2.0f) {
+                    it = m_workerMotionTracks.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+
+            // Match new motionRegions to existing tracks
+            std::vector<bool> regionMatched(motionRegions.size(), false);
+            std::vector<bool> trackMatched(m_workerMotionTracks.size(), false);
+            
+            // Match based on center distance
+            for (size_t i = 0; i < motionRegions.size(); ++i) {
+                cv::Point2f regionCenter(
+                    motionRegions[i].x + motionRegions[i].width / 2.0f,
+                    motionRegions[i].y + motionRegions[i].height / 2.0f
+                );
+                
+                int bestTrackIdx = -1;
+                float bestDist = 200.0f; // Max center distance in pixels to associate
+                
+                for (size_t j = 0; j < m_workerMotionTracks.size(); ++j) {
+                    if (trackMatched[j]) continue;
+                    
+                    cv::Point2f trackCenter(
+                        m_workerMotionTracks[j].box.x + m_workerMotionTracks[j].box.width / 2.0f,
+                        m_workerMotionTracks[j].box.y + m_workerMotionTracks[j].box.height / 2.0f
+                    );
+                    
+                    float dist = cv::norm(regionCenter - trackCenter);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestTrackIdx = static_cast<int>(j);
+                    }
+                }
+                
+                if (bestTrackIdx != -1) {
+                    m_workerMotionTracks[bestTrackIdx].box = motionRegions[i];
+                    m_workerMotionTracks[bestTrackIdx].lastSeen = now;
+                    m_workerMotionTracks[bestTrackIdx].active = true;
+                    regionMatched[i] = true;
+                    trackMatched[bestTrackIdx] = true;
+                }
+            }
+            
+            // Add unmatched regions as new tracks
+            for (size_t i = 0; i < motionRegions.size(); ++i) {
+                if (regionMatched[i]) continue;
+                
+                // Only spawn if min area requirement is met
+                if (motionRegions[i].area() >= currentSettings.motionMinArea) {
+                    WorkerMotionTrack t;
+                    t.id = m_nextMotionId++;
+                    t.box = motionRegions[i];
+                    t.lastSeen = now;
+                    t.active = true;
+                    m_workerMotionTracks.push_back(t);
+                }
+            }
+            
+            // Mark tracks not seen in this frame as inactive (but keep them for 2s hold)
+            for (size_t j = 0; j < m_workerMotionTracks.size(); ++j) {
+                if (!trackMatched[j]) {
+                    m_workerMotionTracks[j].active = false;
+                }
+            }
+            
+            // Assign tracks to the 4 slots of localSubZooms
+            std::vector<bool> slotUpdated(4, false);
+            
+            // Keep tracks that are already assigned
+            for (int i = 0; i < 4; ++i) {
+                if (m_sharedSubZooms[i].active) {
+                    int assignedId = m_sharedSubZooms[i].motion_id;
+                    auto trackIt = std::find_if(m_workerMotionTracks.begin(), m_workerMotionTracks.end(),
+                        [assignedId](const WorkerMotionTrack& t) { return t.id == assignedId; });
+                        
+                    if (trackIt != m_workerMotionTracks.end()) {
+                        localSubZooms[i].active = true;
+                        localSubZooms[i].motion_id = trackIt->id;
+                        localSubZooms[i].box = trackIt->box;
+                        localSubZooms[i].isLost = !trackIt->active;
+                        
+                        // Crop the frame
+                        cv::Rect roi = trackIt->box;
+                        roi.x = std::max(0, roi.x);
+                        roi.y = std::max(0, roi.y);
+                        if (roi.x + roi.width > trackingFrame.cols) roi.width = trackingFrame.cols - roi.x;
+                        if (roi.y + roi.height > trackingFrame.rows) roi.height = trackingFrame.rows - roi.y;
+                        if (roi.width > 0 && roi.height > 0) {
+                            trackingFrame(roi).copyTo(localSubZooms[i].frame);
+                        }
+                        
+                        slotUpdated[i] = true;
+                    }
+                }
+            }
+            
+            // Fill empty slots with unassigned tracks
+            for (const auto& track : m_workerMotionTracks) {
+                bool alreadyAssigned = false;
+                for (int i = 0; i < 4; ++i) {
+                    if (slotUpdated[i] && localSubZooms[i].motion_id == track.id) {
+                        alreadyAssigned = true;
+                        break;
+                    }
+                }
+                
+                if (alreadyAssigned) continue;
+                
+                // Find first free slot
+                int freeSlotIdx = -1;
+                for (int i = 0; i < 4; ++i) {
+                    if (!slotUpdated[i] && !localSubZooms[i].active) {
+                        freeSlotIdx = i;
+                        break;
+                    }
+                }
+                
+                if (freeSlotIdx != -1) {
+                    localSubZooms[freeSlotIdx].active = true;
+                    localSubZooms[freeSlotIdx].motion_id = track.id;
+                    localSubZooms[freeSlotIdx].box = track.box;
+                    localSubZooms[freeSlotIdx].isLost = !track.active;
+                    
+                    // Crop
+                    cv::Rect roi = track.box;
+                    roi.x = std::max(0, roi.x);
+                    roi.y = std::max(0, roi.y);
+                    if (roi.x + roi.width > trackingFrame.cols) roi.width = trackingFrame.cols - roi.x;
+                    if (roi.y + roi.height > trackingFrame.rows) roi.height = trackingFrame.rows - roi.y;
+                    if (roi.width > 0 && roi.height > 0) {
+                        trackingFrame(roi).copyTo(localSubZooms[freeSlotIdx].frame);
+                    }
+                    
+                    slotUpdated[freeSlotIdx] = true;
+                }
+            }
+        } else {
+            m_workerMotionTracks.clear();
+        }
+
         std::vector<Detection> detections;
         bool hasNewDetections = false;
         
@@ -956,7 +1118,35 @@ void Application::workerLoop() {
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now().time_since_epoch()).count());
                 double sessionMs = static_cast<double>(nowMs - m_logSessionStartMs);
-                m_dataLogger->logFrame(sessionMs, tracked, 0.0 /* no calibration yet */);
+                
+                std::vector<TrackedObject> logObjects = tracked;
+                for (const auto& track : m_workerMotionTracks) {
+                    bool overlaps = false;
+                    for (const auto& obj : tracked) {
+                        if (!obj.is_active || !obj.is_confirmed) continue;
+                        cv::Rect inter = track.box & obj.box;
+                        if (inter.area() > 0) {
+                            double ratio = (double)inter.area() / track.box.area();
+                            if (ratio > 0.2) {
+                                overlaps = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!overlaps) {
+                        TrackedObject motionObj;
+                        motionObj.track_id = track.id + 10000;
+                        motionObj.class_id = -99;
+                        motionObj.className = "Motion";
+                        motionObj.box = track.box;
+                        motionObj.confidence = 1.0f;
+                        motionObj.lost_frames = 0;
+                        motionObj.is_active = true;
+                        motionObj.is_confirmed = true;
+                        logObjects.push_back(motionObj);
+                    }
+                }
+                m_dataLogger->logFrame(sessionMs, logObjects, 0.0 /* no calibration yet */);
             }
         }
 
@@ -1188,6 +1378,16 @@ void Application::workerLoop() {
             m_sharedTrackingHeight   = trackingFrame.rows;
             m_sharedZoomWidth        = zoomCrop.cols;
             m_sharedZoomHeight       = zoomCrop.rows;
+            
+            // Copy sub zoom data to shared state
+            for (int i = 0; i < 4; ++i) {
+                m_sharedSubZooms[i].active = localSubZooms[i].active;
+                m_sharedSubZooms[i].motion_id = localSubZooms[i].motion_id;
+                m_sharedSubZooms[i].box = localSubZooms[i].box;
+                m_sharedSubZooms[i].isLost = localSubZooms[i].isLost;
+                localSubZooms[i].frame.copyTo(m_sharedSubZooms[i].frame);
+            }
+            
             m_newDataAvailable       = true;
         }
     }
@@ -1623,21 +1823,7 @@ void Application::renderDataPanel() {
     }
     ImGui::End();
 }
-// -----------------------------------------------------------------------
-// UI: Zoom Window
-// -----------------------------------------------------------------------
-static ImU32 ApplyBrightnessLocal(ImU32 col, float brightness) {
-    float r = ((col >>  0) & 0xFF) * brightness;
-    float g = ((col >>  8) & 0xFF) * brightness;
-    float b = ((col >> 16) & 0xFF) * brightness;
-    float a = ((col >> 24) & 0xFF);
-    return IM_COL32(
-        static_cast<int>(r),
-        static_cast<int>(g),
-        static_cast<int>(b),
-        static_cast<int>(a)
-    );
-}
+
 
 void Application::renderZoomWindow(const cv::Mat& zoomFrame) {
     ImGui::Begin("Target Zoom");
@@ -1893,6 +2079,12 @@ void Application::renderDevConsole() {
             if (m_settings.motionDetectionEnabled) {
                 ImGui::SameLine();
                 settingsChanged |= ImGui::Checkbox("Show Overlay##md", &m_settings.motionShowOverlay);
+                
+                settingsChanged |= ImGui::Checkbox("Enable Sub Zooms##sz", &m_settings.subZoomsEnabled);
+                if (m_settings.subZoomsEnabled) {
+                    ImGui::SameLine();
+                    settingsChanged |= ImGui::Checkbox("Use Separate Windows##sz", &m_settings.subZoomsUseSeparateWindows);
+                }
 
                 ImGui::SetNextItemWidth(220.0f);
                 if (ImGui::SliderFloat("Sensitivity##md", &m_settings.motionSensitivity, 5.0f, 100.0f, "%.1f")) {
@@ -2656,6 +2848,13 @@ void Application::renderSettingsWindow() {
             changed |= ImGui::Checkbox("Enable 4K target zoom##s", &m_settings.enable4KZoom);
             changed |= ImGui::SliderFloat("Target zoom magnification##s", &m_settings.targetZoomMagnification, 1.0f, 4.0f, "%.1fx");
             ImGui::Separator();
+            ImGui::TextDisabled("Sub Zooms");
+            changed |= ImGui::Checkbox("Enable Sub Zooms##szs", &m_settings.subZoomsEnabled);
+            if (m_settings.subZoomsEnabled) {
+                ImGui::SameLine();
+                changed |= ImGui::Checkbox("Use Separate Windows##szs", &m_settings.subZoomsUseSeparateWindows);
+            }
+            ImGui::Separator();
             changed |= ImGui::Checkbox("Enable Low-Light Enhancement##s", &m_settings.lowLightEnhancement);
             if (m_settings.lowLightEnhancement) {
                 changed |= ImGui::SliderFloat("Contrast Clip Limit##s_ll", &m_settings.lowLightClipLimit, 1.0f, 10.0f, "%.1f");
@@ -2926,7 +3125,26 @@ void Application::run() {
                 m_zoomWidth          = m_sharedZoomWidth.load();
                 m_zoomHeight         = m_sharedZoomHeight.load();
                 m_renderer->updateTexture(currentFrame);
+                
+                // Copy sub zooms local data
+                for (int i = 0; i < 4; ++i) {
+                    m_subZooms[i].active = m_sharedSubZooms[i].active;
+                    m_subZooms[i].motion_id = m_sharedSubZooms[i].motion_id;
+                    m_subZooms[i].box = m_sharedSubZooms[i].box;
+                    m_subZooms[i].isLost = m_sharedSubZooms[i].isLost;
+                    m_sharedSubZooms[i].frame.copyTo(m_subZooms[i].frame);
+                }
+                
                 m_newDataAvailable   = false;
+            }
+        }
+
+        // Update sub zoom OpenGL textures
+        if (m_settings.subZoomsEnabled) {
+            for (int i = 0; i < 4; ++i) {
+                if (m_subZooms[i].active && !m_subZooms[i].frame.empty()) {
+                    m_subZoomRenderers[i]->updateTexture(m_subZooms[i].frame);
+                }
             }
         }
 
@@ -3503,8 +3721,164 @@ void Application::run() {
 
             m_hud->render(drawList, static_cast<int>(avail.x), static_cast<int>(avail.y),
                           m_cameraFps, m_trackedObjects, m_lockedTarget, view, m_settings);
+
+            if (m_settings.subZoomsEnabled && !m_settings.subZoomsUseSeparateWindows) {
+                // Draw inserts at edges
+                float insert_w = 120.0f;
+                float insert_h = 120.0f;
+                float margin = 20.0f;
+                
+                // Scale inserts if viewport is small
+                float scaleFactor = std::min(1.0f, view.target_w / 640.0f);
+                insert_w *= scaleFactor;
+                insert_h *= scaleFactor;
+                margin *= scaleFactor;
+                
+                ImU32 outlineColorActive = IM_COL32(0, 200, 100, 220); // Green
+                ImU32 outlineColorHolding = IM_COL32(255, 120, 0, 220); // Orange
+                ImU32 lineColorActive = IM_COL32(0, 200, 100, 150);
+                ImU32 lineColorHolding = IM_COL32(255, 120, 0, 100);
+                
+                if (m_settings.hudColor != 0) {
+                    outlineColorActive = ApplyBrightnessLocal(m_settings.hudColor, m_settings.hudBrightness);
+                    lineColorActive = ApplyBrightnessLocal(m_settings.hudColor, m_settings.hudBrightness * 0.7f);
+                }
+                
+                for (int i = 0; i < 4; ++i) {
+                    if (m_subZooms[i].active) {
+                        ImVec2 pos;
+                        if (i == 0) { // Top-Left
+                            pos = ImVec2(view.pos_x + margin, view.pos_y + margin + 110.0f * scaleFactor);
+                        } else if (i == 1) { // Top-Right
+                            pos = ImVec2(view.pos_x + view.target_w - insert_w - margin, view.pos_y + margin);
+                        } else if (i == 2) { // Bottom-Left
+                            pos = ImVec2(view.pos_x + margin, view.pos_y + view.target_h - insert_h - margin - 70.0f * scaleFactor);
+                        } else { // Bottom-Right
+                            pos = ImVec2(view.pos_x + view.target_w - insert_w - margin, view.pos_y + view.target_h - insert_h - margin);
+                        }
+                        
+                        ImVec2 mCenter(
+                            view.pos_x + (m_subZooms[i].box.x + m_subZooms[i].box.width / 2.0f) * view.scale,
+                            view.pos_y + (m_subZooms[i].box.y + m_subZooms[i].box.height / 2.0f) * view.scale
+                        );
+                        
+                        ImVec2 insertCenter(pos.x + insert_w / 2.0f, pos.y + insert_h / 2.0f);
+                        ImU32 lineCol = m_subZooms[i].isLost ? lineColorHolding : lineColorActive;
+                        ImU32 borderCol = m_subZooms[i].isLost ? outlineColorHolding : outlineColorActive;
+                        
+                        // Draw leader line first
+                        if (m_subZooms[i].isLost) {
+                            float dx = mCenter.x - insertCenter.x;
+                            float dy = mCenter.y - insertCenter.y;
+                            float len = std::hypot(dx, dy);
+                            if (len > 1.0f) {
+                                dx /= len; dy /= len;
+                                float dist = 0.0f;
+                                float dashLen = 6.0f;
+                                float gapLen = 4.0f;
+                                while (dist < len) {
+                                    float nextDist = std::min(len, dist + dashLen);
+                                    drawList->AddLine(
+                                        ImVec2(insertCenter.x + dx * dist, insertCenter.y + dy * dist),
+                                        ImVec2(insertCenter.x + dx * nextDist, insertCenter.y + dy * nextDist),
+                                        lineCol, 1.0f
+                                    );
+                                    dist += dashLen + gapLen;
+                                }
+                            }
+                        } else {
+                            drawList->AddLine(insertCenter, mCenter, lineCol, 1.0f);
+                        }
+                        
+                        drawList->AddCircleFilled(mCenter, 3.0f, borderCol);
+                        
+                        if (m_subZoomRenderers[i]->getTextureID() != 0) {
+                            drawList->AddImage(
+                                reinterpret_cast<void*>(static_cast<intptr_t>(m_subZoomRenderers[i]->getTextureID())),
+                                pos, ImVec2(pos.x + insert_w, pos.y + insert_h)
+                            );
+                        }
+                        
+                        drawList->AddRect(pos, ImVec2(pos.x + insert_w, pos.y + insert_h), borderCol, 0.0f, 0, 1.5f);
+                        
+                        char slotName[32];
+                        snprintf(slotName, sizeof(slotName), "M-%02d", m_subZooms[i].motion_id);
+                        
+                        drawList->AddRectFilled(
+                            ImVec2(pos.x + 2, pos.y + 2),
+                            ImVec2(pos.x + 40 * scaleFactor, pos.y + 16 * scaleFactor),
+                            IM_COL32(0, 0, 0, 180)
+                        );
+                        drawList->AddText(
+                            ImVec2(pos.x + 4, pos.y + 2),
+                            borderCol,
+                            slotName
+                        );
+                        
+                        if (m_subZooms[i].isLost) {
+                            drawList->AddRectFilled(
+                                pos,
+                                ImVec2(pos.x + insert_w, pos.y + insert_h),
+                                IM_COL32(0, 0, 0, 80)
+                            );
+                            const char* holdText = "HOLD";
+                            ImVec2 textSize = ImGui::CalcTextSize(holdText);
+                            drawList->AddText(
+                                ImVec2(pos.x + (insert_w - textSize.x) / 2.0f, pos.y + (insert_h - textSize.y) / 2.0f),
+                                outlineColorHolding,
+                                holdText
+                            );
+                        }
+                    }
+                }
+            }
         }
         ImGui::End();
+
+        // Render 4 separate sub zoom windows if enabled
+        if (m_settings.subZoomsEnabled && m_settings.subZoomsUseSeparateWindows) {
+            for (int i = 0; i < 4; ++i) {
+                if (m_subZooms[i].active) {
+                    char windowName[64];
+                    snprintf(windowName, sizeof(windowName), "Sub Zoom %d (M-%02d)", i + 1, m_subZooms[i].motion_id);
+                    
+                    ImGui::SetNextWindowSize(ImVec2(180, 220), ImGuiCond_FirstUseEver);
+                    ImGui::Begin(windowName);
+                    
+                    if (m_subZoomRenderers[i]->getTextureID() != 0) {
+                        ImVec2 avail = ImGui::GetContentRegionAvail();
+                        float size = std::min(avail.x, avail.y - 30.0f);
+                        ImVec2 pos = ImGui::GetCursorScreenPos();
+                        
+                        ImDrawList* wDrawList = ImGui::GetWindowDrawList();
+                        wDrawList->AddImage(
+                            reinterpret_cast<void*>(static_cast<intptr_t>(m_subZoomRenderers[i]->getTextureID())),
+                            pos, ImVec2(pos.x + size, pos.y + size)
+                        );
+                        
+                        ImU32 borderCol = m_subZooms[i].isLost ? IM_COL32(255, 120, 0, 220) : IM_COL32(0, 200, 100, 220);
+                        if (m_settings.hudColor != 0) {
+                            borderCol = m_subZooms[i].isLost ? IM_COL32(255, 120, 0, 220) : ApplyBrightnessLocal(m_settings.hudColor, m_settings.hudBrightness);
+                        }
+                        
+                        wDrawList->AddRect(pos, ImVec2(pos.x + size, pos.y + size), borderCol, 0.0f, 0, 1.5f);
+                        
+                        ImGui::Dummy(ImVec2(size, size));
+                        
+                        if (m_subZooms[i].isLost) {
+                            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "STATUS: HOLDING");
+                        } else {
+                            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "STATUS: TRACKING");
+                        }
+                        ImGui::Text("Box: %d,%d %dx%d", m_subZooms[i].box.x, m_subZooms[i].box.y, m_subZooms[i].box.width, m_subZooms[i].box.height);
+                    } else {
+                        ImGui::Text("No Frame Available");
+                    }
+                    
+                    ImGui::End();
+                }
+            }
+        }
 
         // ── 2. Data Panel ────────────────────────────────────────────────
         renderDataPanel();
