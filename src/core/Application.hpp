@@ -56,6 +56,7 @@ private:
     void cleanup();
     void workerLoop();
     void detectorWorkerLoop();
+    void trackingWorkerLoop();
     void handleTargetLocking(const ViewportInfo& view);
     void loadPersistedSettings();
     void savePersistedSettings() const;
@@ -85,6 +86,7 @@ private:
 
     std::unique_ptr<CameraModule>    m_camera;
     std::unique_ptr<VideoRenderer>   m_renderer;
+    std::unique_ptr<VideoRenderer>   m_heatmapRenderer;
     std::unique_ptr<VideoRenderer>   m_zoomRenderer;
     std::unique_ptr<HUD>             m_hud;
     std::unique_ptr<ObjectDetector>  m_detector;
@@ -117,8 +119,9 @@ private:
 
     std::mutex               m_dataMutex;
     cv::Mat                  m_sharedFrame;
-    cv::Mat                  m_sharedZoomFrame;
-    std::vector<Detection>     m_sharedDetections;
+    cv::Mat                  m_sharedTrackingFrame;
+    cv::Mat                  m_sharedHeatmapFrame;
+    std::vector<Detection>   m_sharedDetections;
     std::vector<TrackedObject> m_sharedTrackedObjects;
     TrackedTarget            m_sharedLockedTarget;
     SystemSettings           m_sharedSettings;
@@ -253,9 +256,13 @@ private:
     std::vector<UniqueTargetRecord> m_sharedTargetHistory;
     int m_selectedAnalyzerTargetId = -1;
     struct TextureInfo {
-        uint32_t texture_id = 0;
+        uint32_t texture_id_first = 0;
+        int texture_version_first = -1;
+        uint32_t texture_id_mid = 0;
+        int texture_version_mid = -1;
+        uint32_t texture_id_last = 0;
+        int texture_version_last = -1;
         float max_confidence = 0.0f;
-        int texture_version = -1;
     };
     std::unordered_map<int, TextureInfo> m_targetTextures;
 
@@ -270,6 +277,21 @@ private:
         bool isLost = false;
     };
     SharedSubZoom m_sharedSubZooms[4];
+    SharedSubZoom m_subZooms[4]; // render-thread local copy
+    std::unique_ptr<VideoRenderer> m_subZoomRenderers[4];
+
+    struct WorkerMotionTrack {
+        int id;
+        cv::Rect box;
+        std::chrono::steady_clock::time_point lastSeen;
+        bool active = true;
+    };
+    std::vector<WorkerMotionTrack> m_workerMotionTracks;
+    int m_nextMotionId = 1;
+};
+
+#endif // APPLICATION_HPP
+dSubZoom m_sharedSubZooms[4];
     SharedSubZoom m_subZooms[4]; // render-thread local copy
     std::unique_ptr<VideoRenderer> m_subZoomRenderers[4];
 

@@ -140,6 +140,7 @@ Application::Application()
 
     m_camera       = std::make_unique<CameraModule>();
     m_renderer     = std::make_unique<VideoRenderer>();
+    m_heatmapRenderer = std::make_unique<VideoRenderer>();
     m_zoomRenderer = std::make_unique<VideoRenderer>();
     for (int i = 0; i < 4; ++i) {
         m_subZoomRenderers[i] = std::make_unique<VideoRenderer>();
@@ -370,6 +371,8 @@ void Application::savePersistedSettings() const {
     out << "lowLightDenoiseKernel=" << m_settings.lowLightDenoiseKernel << '\n';
     out << "motionDetectionEnabled=" << (m_settings.motionDetectionEnabled ? 1 : 0) << '\n';
     out << "motionShowOverlay=" << (m_settings.motionShowOverlay ? 1 : 0) << '\n';
+    out << "motionHeatmapOverlay=" << (m_settings.motionHeatmapOverlay ? 1 : 0) << '\n';
+    out << "motionHeatmapDecay=" << m_settings.motionHeatmapDecay << '\n';
     out << "motionSensitivity=" << m_settings.motionSensitivity << '\n';
     out << "motionMinArea=" << m_settings.motionMinArea << '\n';
     out << "motionBlurKernel=" << m_settings.motionBlurKernel << '\n';
@@ -476,6 +479,8 @@ void Application::loadPersistedSettings() {
             else if (key == "lowLightDenoiseKernel") m_settings.lowLightDenoiseKernel = std::stoi(value);
             else if (key == "motionDetectionEnabled") m_settings.motionDetectionEnabled = ParseBoolSetting(value);
             else if (key == "motionShowOverlay") m_settings.motionShowOverlay = ParseBoolSetting(value);
+            else if (key == "motionHeatmapOverlay") m_settings.motionHeatmapOverlay = ParseBoolSetting(value);
+            else if (key == "motionHeatmapDecay") m_settings.motionHeatmapDecay = std::stof(value);
             else if (key == "motionSensitivity") m_settings.motionSensitivity = std::stof(value);
             else if (key == "motionMinArea") m_settings.motionMinArea = std::stoi(value);
             else if (key == "motionBlurKernel") m_settings.motionBlurKernel = std::stoi(value);
@@ -695,6 +700,11 @@ void Application::workerLoop() {
         if (currentSettings.motionDetectionEnabled && !trackingFrame.empty()) {
             m_motionDetector.process(trackingFrame, currentSettings);
             motionRegions = m_motionDetector.getMotionRegions();
+            
+            if (currentSettings.motionHeatmapOverlay) {
+                std::lock_guard<std::mutex> lock(m_dataMutex);
+                m_motionDetector.getHeatmapImage().copyTo(m_sharedHeatmapFrame);
+            }
         }
 
         // Update motion tracks and sub zooms in worker thread
@@ -1376,7 +1386,7 @@ void Application::workerLoop() {
             trackingFrame.copyTo(m_sharedFrame);
             zoomCrop.copyTo(m_sharedZoomFrame);
             m_sharedDetections       = detections;
-            m_sharedTrackedObjects   = tracked;
+            // m_sharedTrackedObjects is now updated by trackingWorkerLoop
             m_sharedTargetHistory    = m_targetHistory;
             m_sharedMotionRegions    = motionRegions;
             m_sharedCameraFps        = currentFps;
@@ -1399,6 +1409,210 @@ void Application::workerLoop() {
             m_newDataAvailable       = true;
         }
     }
+}
+
+void Application::trackingWorkerLoop() {
+    log(LogLevel::INFO, "Tracking thread started");
+    while (m_running) {
+        cv::Mat trackingFrame;
+        SystemSettings settings;
+        std::vector<Detection> detections;
+        int detectorLag = 0;
+
+        {
+            std::unique_lock<std::mutex> lock(m_trackingMutex);
+            m_trackingCv.wait(lock, [this]() {
+                return !m_running || m_trackingBusy.load();
+            });
+
+            if (!m_running) break;
+
+            m_trackingFrameCopy.copyTo(trackingFrame);
+            settings = m_trackingSettingsCopy;
+            detections = m_trackingDetectionsCopy;
+            detectorLag = m_trackingDetectorLag;
+        }
+
+        if (trackingFrame.empty()) {
+            m_trackingBusy = false;
+            continue;
+        }
+
+        // --- Tracking Logic (moved from workerLoop) ---
+        std::vector<TrackedObject> tracked;
+        if (settings.enableTracking) {
+            // Update tracker
+            m_tracker->update(detections, settings, detectorLag);
+            
+            tracked = m_tracker->getTrackedObjects(settings.trackerMaxTrailLength);
+            updateTargetHistory(tracked, trackingFrame);
+
+            // Update pixel target using template matching if active
+            if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+                if (!m_pixelLockDragging.load()) {
+                    cv::Rect lastBox = m_sharedLockedTarget.box;
+
+                    // Predict next position using constant velocity motion model
+                    m_pixelCenterX += m_pixelVx;
+                    m_pixelCenterY += m_pixelVy;
+
+                    cv::Rect predictedBox(
+                        static_cast<int>(std::round(m_pixelCenterX - lastBox.width / 2.0f)),
+                        static_cast<int>(std::round(m_pixelCenterY - lastBox.height / 2.0f)),
+                        lastBox.width,
+                        lastBox.height
+                    );
+
+                    int pad = 80; // Larger search window to prevent tracking loss
+                    int rectW = predictedBox.width + pad * 2;
+                    int rectH = predictedBox.height + pad * 2;
+                    int rectX = predictedBox.x - pad;
+                    int rectY = predictedBox.y - pad;
+
+                    if (rectW > trackingFrame.cols) rectW = trackingFrame.cols;
+                    if (rectH > trackingFrame.rows) rectH = trackingFrame.rows;
+
+                    if (rectX < 0) rectX = 0;
+                    if (rectY < 0) rectY = 0;
+                    if (rectX + rectW > trackingFrame.cols) rectX = trackingFrame.cols - rectW;
+                    if (rectY + rectH > trackingFrame.rows) rectY = trackingFrame.rows - rectH;
+
+                    cv::Rect searchRect(rectX, rectY, rectW, rectH);
+
+                    if (searchRect.width >= m_pixelTemplate.cols && searchRect.height >= m_pixelTemplate.rows) {
+                        cv::Mat result;
+                        cv::matchTemplate(trackingFrame(searchRect), m_pixelTemplate, result, cv::TM_CCOEFF_NORMED);
+
+                        double minVal, maxVal;
+                        cv::Point minLoc, maxLoc;
+                        cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
+
+                        if (maxVal > 0.5) {
+                            // Sub-pixel peak interpolation (quadratic fit)
+                            double dx = 0.0, dy = 0.0;
+                            if (maxLoc.x > 0 && maxLoc.x < result.cols - 1) {
+                                float valL = result.at<float>(maxLoc.y, maxLoc.x - 1);
+                                float valR = result.at<float>(maxLoc.y, maxLoc.x + 1);
+                                float valC = static_cast<float>(maxVal);
+                                float denom = valL - 2.0f * valC + valR;
+                                if (std::abs(denom) > 1e-5f) dx = static_cast<double>((valL - valR) / (2.0f * denom));
+                            }
+                            if (maxLoc.y > 0 && maxLoc.y < result.rows - 1) {
+                                float valT = result.at<float>(maxLoc.y - 1, maxLoc.x);
+                                float valB = result.at<float>(maxLoc.y + 1, maxLoc.x);
+                                float valC = static_cast<float>(maxVal);
+                                float denom = valT - 2.0f * valC + valB;
+                                if (std::abs(denom) > 1e-5f) dy = static_cast<double>((valT - valB) / (2.0f * denom));
+                            }
+
+                            double new_center_x = searchRect.x + maxLoc.x + dx + m_pixelTemplate.cols / 2.0;
+                            double new_center_y = searchRect.y + maxLoc.y + dy + m_pixelTemplate.rows / 2.0;
+
+                            float alpha = settings.trackerVelocitySmoothing;
+                            m_pixelVx = alpha * static_cast<float>(new_center_x - (lastBox.x + lastBox.width / 2.0)) + (1.0f - alpha) * m_pixelVx;
+                            m_pixelVy = alpha * static_cast<float>(new_center_y - (lastBox.y + lastBox.height / 2.0)) + (1.0f - alpha) * m_pixelVy;
+
+                            m_pixelCenterX = static_cast<float>(new_center_x);
+                            m_pixelCenterY = static_cast<float>(new_center_y);
+
+                            cv::Rect newBox(
+                                static_cast<int>(std::round(m_pixelCenterX - m_pixelTemplate.cols / 2.0f)),
+                                static_cast<int>(std::round(m_pixelCenterY - m_pixelTemplate.rows / 2.0f)),
+                                m_pixelTemplate.cols,
+                                m_pixelTemplate.rows
+                            );
+
+                            m_sharedLockedTarget.box = newBox;
+                            m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
+                            m_sharedLockedTarget.lost_frames = 0;
+                            m_sharedLockedTarget.state = TrackingState::LOCKED;
+
+                            cv::Point newCenter(newBox.x + newBox.width / 2, newBox.y + newBox.height / 2);
+                            m_sharedLockedTarget.trail.push_back(newCenter);
+                            if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(settings.trackerMaxTrailLength)) {
+                                m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
+                            }
+
+                            if (maxVal > 0.85) {
+                                cv::Mat matchedPatch = trackingFrame(newBox);
+                                if (matchedPatch.size() == m_pixelTemplate.size() && matchedPatch.type() == m_pixelTemplate.type()) {
+                                    double beta = 0.05;
+                                    cv::addWeighted(m_pixelTemplate, 1.0 - beta, matchedPatch, beta, 0.0, m_pixelTemplate);
+                                }
+                            }
+                        } else {
+                            m_sharedLockedTarget.lost_frames++;
+                            m_pixelVx *= settings.trackerDeadReckoningDamping;
+                            m_pixelVy *= settings.trackerDeadReckoningDamping;
+                            m_sharedLockedTarget.box = predictedBox;
+                            if (m_sharedLockedTarget.lost_frames > settings.trackerMaxLostFrames) {
+                                m_sharedLockedTarget.state = TrackingState::LOST;
+                                m_pixelLockActive = false;
+                            } else {
+                                m_sharedLockedTarget.state = TrackingState::LOST;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+                TrackedObject pixelObj;
+                pixelObj.track_id = m_sharedLockedTarget.track_id;
+                pixelObj.class_id = -1;
+                pixelObj.className = m_sharedLockedTarget.className;
+                pixelObj.box = m_sharedLockedTarget.box;
+                pixelObj.confidence = m_sharedLockedTarget.confidence;
+                pixelObj.lost_frames = m_sharedLockedTarget.lost_frames;
+                pixelObj.is_active = (m_sharedLockedTarget.state == TrackingState::LOCKED);
+                pixelObj.is_confirmed = true;
+                pixelObj.trail = m_sharedLockedTarget.trail;
+                tracked.push_back(pixelObj);
+            }
+
+            m_workerTrackCount.store(static_cast<int>(tracked.size()));
+
+            // Alarm Zone Checks
+            auto zones = m_roiManager->getROIs();
+            std::unordered_set<int> activeZoneIds;
+            for (const auto& z : zones) {
+                if (z.active && z.function == ROIFunction::ALARM) {
+                    activeZoneIds.insert(z.id);
+                    std::unordered_set<int> currentTracksInZone;
+                    for (const auto& obj : tracked) {
+                        cv::Point center(obj.box.x + obj.box.width / 2, obj.box.y + obj.box.height / 2);
+                        if (z.rect.contains(center)) currentTracksInZone.insert(obj.track_id);
+                    }
+                    for (int tid : currentTracksInZone) {
+                        if (m_activeAlarms[z.id].find(tid) == m_activeAlarms[z.id].end()) {
+                            log(LogLevel::WARN, "ALARM: Object #" + std::to_string(tid) + " entered Alarm Zone '" + z.label + "'");
+                            m_audioEngine.playAlarmEntry();
+                        }
+                    }
+                    for (int tid : m_activeAlarms[z.id]) {
+                        if (currentTracksInZone.find(tid) == currentTracksInZone.end()) {
+                            log(LogLevel::INFO, "Object #" + std::to_string(tid) + " left Alarm Zone '" + z.label + "'");
+                            m_audioEngine.playAlarmExit();
+                        }
+                    }
+                    m_activeAlarms[z.id] = currentTracksInZone;
+                }
+            }
+            for (auto it = m_activeAlarms.begin(); it != m_activeAlarms.end(); ) {
+                if (activeZoneIds.find(it->first) == activeZoneIds.end()) it = m_activeAlarms.erase(it);
+                else ++it;
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_dataMutex);
+            m_sharedTrackedObjects = tracked;
+            m_sharedTargetHistory = m_targetHistory;
+        }
+
+        m_trackingBusy = false;
+    }
+    log(LogLevel::INFO, "Tracking thread stopping");
 }
 
 void Application::detectorWorkerLoop() {
@@ -2087,7 +2301,15 @@ void Application::renderDevConsole() {
             if (m_settings.motionDetectionEnabled) {
                 ImGui::SameLine();
                 settingsChanged |= ImGui::Checkbox("Show Overlay##md", &m_settings.motionShowOverlay);
-                
+                ImGui::SameLine();
+                settingsChanged |= ImGui::Checkbox("Heatmap##md", &m_settings.motionHeatmapOverlay);
+
+                if (m_settings.motionHeatmapOverlay) {
+                    ImGui::SetNextItemWidth(140);
+                    settingsChanged |= ImGui::SliderFloat("Heatmap Decay##md", &m_settings.motionHeatmapDecay, 0.5f, 0.99f, "%.2f");
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("How fast the heatmap cools down.\n0.90 = medium persistence, 0.99 = high persistence.");
+                }
+
                 settingsChanged |= ImGui::Checkbox("Enable Sub Zooms##sz", &m_settings.subZoomsEnabled);
                 if (m_settings.subZoomsEnabled) {
                     ImGui::SameLine();
@@ -3097,6 +3319,7 @@ void Application::renderSettingsWindow() {
 void Application::run() {
     cv::Mat currentFrame;
     cv::Mat currentZoomFrame;
+    cv::Mat currentHeatmap;
     while (!glfwWindowShouldClose(m_window)) {
         glfwPollEvents();
 
@@ -3120,6 +3343,7 @@ void Application::run() {
             if (m_newDataAvailable) {
                 m_sharedFrame.copyTo(currentFrame);
                 m_sharedZoomFrame.copyTo(currentZoomFrame);
+                m_sharedHeatmapFrame.copyTo(currentHeatmap);
                 m_detections         = m_sharedDetections;
                 m_trackedObjects     = m_sharedTrackedObjects;
                 m_targetHistory      = m_sharedTargetHistory;
@@ -3133,6 +3357,9 @@ void Application::run() {
                 m_zoomWidth          = m_sharedZoomWidth.load();
                 m_zoomHeight         = m_sharedZoomHeight.load();
                 m_renderer->updateTexture(currentFrame);
+                if (!currentHeatmap.empty()) {
+                    m_heatmapRenderer->updateTexture(currentHeatmap);
+                }
                 
                 // Copy sub zooms local data
                 for (int i = 0; i < 4; ++i) {
@@ -3157,31 +3384,36 @@ void Application::run() {
         }
 
         // Texture generation/updates for target history
-        for (const auto& record : m_targetHistory) {
-            if (!record.cropped_image.empty()) {
-                auto& texInfo = m_targetTextures[record.track_id];
-                if (texInfo.texture_id == 0 || record.cropped_image_version > texInfo.texture_version) {
-                    if (texInfo.texture_id == 0) {
-                        glGenTextures(1, &texInfo.texture_id);
-                    }
-                    glBindTexture(GL_TEXTURE_2D, texInfo.texture_id);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-                    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                    glPixelStorei(GL_UNPACK_ROW_LENGTH, record.cropped_image.step / record.cropped_image.elemSize());
-
-                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, record.cropped_image.cols, record.cropped_image.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, record.cropped_image.data);
-
-                    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-                    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-
-                    texInfo.max_confidence = record.max_confidence;
-                    texInfo.texture_version = record.cropped_image_version;
+        auto updateGLTexture = [](const cv::Mat& img, uint32_t& tex_id, int& tex_version, int current_version) {
+            if (img.empty()) return;
+            if (tex_id == 0 || current_version > tex_version) {
+                if (tex_id == 0) {
+                    glGenTextures(1, &tex_id);
                 }
+                glBindTexture(GL_TEXTURE_2D, tex_id);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, img.step / img.elemSize());
+
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, img.cols, img.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, img.data);
+
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+                tex_version = current_version;
             }
+        };
+
+        for (const auto& record : m_targetHistory) {
+            auto& texInfo = m_targetTextures[record.track_id];
+            updateGLTexture(record.cropped_image_first, texInfo.texture_id_first, texInfo.texture_version_first, record.cropped_image_first_version);
+            updateGLTexture(record.cropped_image_mid, texInfo.texture_id_mid, texInfo.texture_version_mid, record.cropped_image_mid_version);
+            updateGLTexture(record.cropped_image_last, texInfo.texture_id_last, texInfo.texture_version_last, record.cropped_image_last_version);
+            texInfo.max_confidence = record.max_confidence;
         }
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -3280,6 +3512,12 @@ void Application::run() {
             drawList->AddImage(reinterpret_cast<void*>(static_cast<intptr_t>(m_renderer->getTextureID())),
                                ImVec2(view.pos_x, view.pos_y),
                                ImVec2(view.pos_x + view.target_w, view.pos_y + view.target_h));
+
+            if (m_settings.motionDetectionEnabled && m_settings.motionHeatmapOverlay && m_heatmapRenderer->getTextureID() != 0) {
+                drawList->AddImage(reinterpret_cast<void*>(static_cast<intptr_t>(m_heatmapRenderer->getTextureID())),
+                                   ImVec2(view.pos_x, view.pos_y),
+                                   ImVec2(view.pos_x + view.target_w, view.pos_y + view.target_h));
+            }
 
             // ── ROI Edit Mode: drag-to-draw/move/resize ───────────────
             int hoveredZoneId = -1;
@@ -4117,8 +4355,12 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
 
     std::string timestamp = getTimestamp();
 
-    // Mark all existing history records as inactive first
+    // Mark all existing history records as inactive first, but keep track of previously active IDs
+    std::vector<int> previouslyActiveIds;
     for (auto& record : m_targetHistory) {
+        if (record.is_currently_active) {
+            previouslyActiveIds.push_back(record.track_id);
+        }
         record.is_currently_active = false;
     }
 
@@ -4140,7 +4382,6 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             record.last_box = obj.box;
             record.trail = obj.trail;
             record.is_currently_active = true;
-            record.cropped_image_version = 0;
 
             // Crop image
             cv::Rect roi = obj.box;
@@ -4149,8 +4390,24 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             if (roi.x + roi.width > currentFrame.cols) roi.width = currentFrame.cols - roi.x;
             if (roi.y + roi.height > currentFrame.rows) roi.height = currentFrame.rows - roi.y;
             if (roi.width > 0 && roi.height > 0) {
-                record.cropped_image = currentFrame(roi).clone();
+                cv::Mat crop = currentFrame(roi).clone();
+                record.cropped_image_first = crop;
+                record.cropped_image_mid = crop;
+                record.cropped_image_last = crop;
+
+                // Add the very first snapshot
+                TargetSnapshot snap;
+                snap.image = crop;
+                snap.timestamp = timestamp;
+                snap.box = obj.box;
+                snap.confidence = obj.confidence;
+                record.periodic_snapshots.push_back(snap);
             }
+            record.last_snapshot_time = std::chrono::steady_clock::now();
+            record.cropped_image_first_version = 1;
+            record.cropped_image_mid_version = 1;
+            record.cropped_image_last_version = 1;
+
             m_targetHistory.push_back(record);
         } else {
             // Existing target
@@ -4159,36 +4416,73 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             it->trail = obj.trail;
             it->is_currently_active = true;
 
-            bool shouldUpdateCrop = false;
             if (obj.confidence > it->max_confidence) {
                 it->max_confidence = obj.confidence;
-                shouldUpdateCrop = true;
             }
 
-            // Also update if the new box has a larger area (resolution) than the current saved crop
-            // and we have a decent confidence score (>= 0.4) to avoid low-confidence noise/blobs
-            int newArea = obj.box.width * obj.box.height;
-            int currentArea = it->cropped_image.cols * it->cropped_image.rows;
-            if (obj.confidence >= 0.4f && newArea > currentArea) {
-                shouldUpdateCrop = true;
-            }
-
-            // Or if manual capture was explicitly requested for this target ID
-            if (manualCaptureId == obj.track_id) {
-                shouldUpdateCrop = true;
-            }
-
-            if (shouldUpdateCrop) {
-                // Update crop image
+            // Check if 1 second has elapsed since last snapshot
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - it->last_snapshot_time).count() >= 1000) {
                 cv::Rect roi = obj.box;
                 roi.x = std::max(0, roi.x);
                 roi.y = std::max(0, roi.y);
                 if (roi.x + roi.width > currentFrame.cols) roi.width = currentFrame.cols - roi.x;
                 if (roi.y + roi.height > currentFrame.rows) roi.height = currentFrame.rows - roi.y;
                 if (roi.width > 0 && roi.height > 0) {
-                    it->cropped_image = currentFrame(roi).clone();
-                    it->cropped_image_version++;
+                    TargetSnapshot snap;
+                    snap.image = currentFrame(roi).clone();
+                    snap.timestamp = timestamp;
+                    snap.box = obj.box;
+                    snap.confidence = obj.confidence;
+                    it->periodic_snapshots.push_back(snap);
+                    it->last_snapshot_time = now;
+
+                    it->cropped_image_last = snap.image;
+                    it->cropped_image_last_version++;
+
+                    int midIdx = it->periodic_snapshots.size() / 2;
+                    it->cropped_image_mid = it->periodic_snapshots[midIdx].image;
+                    it->cropped_image_mid_version++;
                 }
+            }
+
+            // Or if manual capture was explicitly requested for this target ID
+            if (manualCaptureId == obj.track_id) {
+                cv::Rect roi = obj.box;
+                roi.x = std::max(0, roi.x);
+                roi.y = std::max(0, roi.y);
+                if (roi.x + roi.width > currentFrame.cols) roi.width = currentFrame.cols - roi.x;
+                if (roi.y + roi.height > currentFrame.rows) roi.height = currentFrame.rows - roi.y;
+                if (roi.width > 0 && roi.height > 0) {
+                    cv::Mat manualCrop = currentFrame(roi).clone();
+                    it->cropped_image_mid = manualCrop;
+                    it->cropped_image_mid_version++;
+                    log(LogLevel::INFO, "Manual snapshot updated for Target ID " + std::to_string(obj.track_id));
+                }
+            }
+        }
+    }
+
+    // Check for targets that transitioned to lost (archived)
+    for (auto& record : m_targetHistory) {
+        if (!record.is_currently_active && std::find(previouslyActiveIds.begin(), previouslyActiveIds.end(), record.track_id) != previouslyActiveIds.end()) {
+            // Target was just lost! Finalize visual chronology from periodic_snapshots
+            if (!record.periodic_snapshots.empty()) {
+                record.cropped_image_first = record.periodic_snapshots.front().image;
+                record.cropped_image_first_version++;
+
+                int midIdx = record.periodic_snapshots.size() / 2;
+                record.cropped_image_mid = record.periodic_snapshots[midIdx].image;
+                record.cropped_image_mid_version++;
+
+                record.cropped_image_last = record.periodic_snapshots.back().image;
+                record.cropped_image_last_version++;
+
+                // Discard all periodic snapshots to free memory (keeping only the 3 final keyframe crops)
+                record.periodic_snapshots.clear();
+                record.periodic_snapshots.shrink_to_fit();
+
+                log(LogLevel::INFO, "Finalized visual chronology for Target ID " + std::to_string(record.track_id) + ". Kept 3 keyframes.");
             }
         }
     }
@@ -4204,7 +4498,9 @@ bool Application::exportTarget(const UniqueTargetRecord& record) {
     while (idStr.length() < 3) idStr = "0" + idStr;
 
     std::string jsonPath = baseDir + "/target_" + idStr + "_details.json";
-    std::string imgPath = baseDir + "/target_" + idStr + "_visual.png";
+    std::string imgPathFirst = baseDir + "/target_" + idStr + "_discovery.png";
+    std::string imgPathMid   = baseDir + "/target_" + idStr + "_midtrack.png";
+    std::string imgPathLast  = baseDir + "/target_" + idStr + "_lastseen.png";
 
     // Write JSON file
     std::ofstream file(jsonPath);
@@ -4234,14 +4530,20 @@ bool Application::exportTarget(const UniqueTargetRecord& record) {
     file << "}\n";
     file.close();
 
-    // Write image
-    if (!record.cropped_image.empty()) {
-        if (cv::imwrite(imgPath, record.cropped_image)) {
-            log(LogLevel::INFO, "Exported target image to " + imgPath);
-        } else {
-            log(LogLevel::ERR, "Failed to write target image: " + imgPath);
+    // Write image keyframes
+    auto writeKeyframe = [&](const std::string& path, const cv::Mat& img, const char* label) {
+        if (!img.empty()) {
+            if (cv::imwrite(path, img)) {
+                log(LogLevel::INFO, "Exported " + std::string(label) + " target image to " + path);
+            } else {
+                log(LogLevel::ERR, "Failed to write " + std::string(label) + " target image: " + path);
+            }
         }
-    }
+    };
+
+    writeKeyframe(imgPathFirst, record.cropped_image_first, "discovery");
+    writeKeyframe(imgPathMid, record.cropped_image_mid, "midtrack");
+    writeKeyframe(imgPathLast, record.cropped_image_last, "lastseen");
 
     log(LogLevel::INFO, "Exported target details to " + jsonPath);
     return true;
@@ -4281,27 +4583,42 @@ void Application::renderTargetAnalyzer() {
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "TARGET REPORT: ID %03d", selectedRecord.track_id);
     ImGui::Separator();
 
-    // Render cropped image if available
-    uint32_t texID = 0;
+    // Render visual chronology
+    ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.9f, 1.0f), "VISUAL CHRONOLOGY (KEYFRAMES)");
+    ImGui::Spacing();
+
+    uint32_t texFirst = 0, texMid = 0, texLast = 0;
     auto texIt = m_targetTextures.find(selectedRecord.track_id);
     if (texIt != m_targetTextures.end()) {
-        texID = texIt->second.texture_id;
+        texFirst = texIt->second.texture_id_first;
+        texMid = texIt->second.texture_id_mid;
+        texLast = texIt->second.texture_id_last;
     }
 
-    if (texID != 0 && !selectedRecord.cropped_image.empty()) {
-        // Display cropped image centered
-        float imgAspect = static_cast<float>(selectedRecord.cropped_image.cols) / selectedRecord.cropped_image.rows;
-        float displayW = 200.0f;
-        float displayH = displayW / imgAspect;
+    ImGui::Columns(3, "visual_history_cols", false);
+    
+    // Set a clean column width
+    float colW = ImGui::GetColumnWidth() - 10.0f;
+    float displayW = std::clamp(colW, 40.0f, 150.0f);
 
-        // Centering
-        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - displayW) * 0.5f);
-        ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(texID)), ImVec2(displayW, displayH));
-        ImGui::Spacing();
-    } else {
-        ImGui::TextDisabled("No visual crop available.");
-    }
+    auto renderSnapshotColumn = [&](const char* label, uint32_t texID, const cv::Mat& img) {
+        ImGui::Text("%s", label);
+        if (texID != 0 && !img.empty()) {
+            float imgAspect = static_cast<float>(img.cols) / img.rows;
+            float displayH = displayW / imgAspect;
+            ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(texID)), ImVec2(displayW, displayH));
+        } else {
+            ImGui::TextDisabled("[N/A]");
+        }
+        ImGui::NextColumn();
+    };
 
+    renderSnapshotColumn("1. Discovery", texFirst, selectedRecord.cropped_image_first);
+    renderSnapshotColumn("2. Mid-Track", texMid, selectedRecord.cropped_image_mid);
+    renderSnapshotColumn("3. Last Seen", texLast, selectedRecord.cropped_image_last);
+
+    ImGui::Columns(1);
+    ImGui::Spacing();
     ImGui::Separator();
 
     ImGui::Columns(2, "analyzer_details", false);
@@ -4392,8 +4709,14 @@ void Application::cleanup() {
 
     // Delete target history textures
     for (auto& [id, texInfo] : m_targetTextures) {
-        if (texInfo.texture_id != 0) {
-            glDeleteTextures(1, &texInfo.texture_id);
+        if (texInfo.texture_id_first != 0) {
+            glDeleteTextures(1, &texInfo.texture_id_first);
+        }
+        if (texInfo.texture_id_mid != 0) {
+            glDeleteTextures(1, &texInfo.texture_id_mid);
+        }
+        if (texInfo.texture_id_last != 0) {
+            glDeleteTextures(1, &texInfo.texture_id_last);
         }
     }
     m_targetTextures.clear();

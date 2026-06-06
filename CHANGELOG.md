@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.12.1] - 2026-06-06
+
+### Added
+
+- **Motion Heatmap (Optical Flow)**: Implementierung eines Heatmap-Overlays, das Bewegungsgeschwindigkeit visualisiert. Nutzt OpenCV Dense Optical Flow (`calcOpticalFlowFarneback`) auf einer skalierten Maske für Echtzeit-Performance.
+- **Geschwindigkeitsabhängige Farbgebung**: Je schneller die Bewegung, desto roter das Signal (Mapping via `COLORMAP_JET`). Bereiche ohne Bewegung bleiben transparent.
+- **Heatmap-Akkumulation & Decay**: Bewegungen hinterlassen Spuren, die mit einer einstellbaren Decay-Rate (`motionHeatmapDecay`) verblassen.
+- **Echtzeit-Optimierung**: Berechnung des Optical Flows auf 1/4 der Originalauflösung zur Einhaltung der Military-Grade Performance-Vorgaben.
+- **HUD-Integration**: Nahtlose Überlagerung des Heatmap-Textur-Layers über den Haupt-Kamerastream im HUD.
+- **Konfigurations-Panel**: Neue Steuerelemente im Motion-Settings-Bereich für Heatmap-Toggle und Decay-Rate (Persistence).
+
+### Changed
+
+- `VideoRenderer`: Unterstützung für 4-Kanal-Texturen (RGBA/BGRA) für transparente Overlays hinzugefügt.
+- `Common.hpp`: `SystemSettings` um `motionHeatmapOverlay` und `motionHeatmapDecay` erweitert.
+- `Application.hpp/cpp`: Pipeline-Integration, Texture-Sync (Worker → Render Thread) und Einstellungs-Persistenz implementiert.
+
+## [1.12.0] - 2026-06-06
+
+### Added
+
+- **Drei-Punkt-Chronologie im Target Analyzer**: Der Target Analyzer zeigt nun eine visuelle Chronologie mit mindestens 3 Schlüsselbildern (Entdeckung, Mittendrin, Letzte Sichtung) statt nur eines einzelnen Thumbnails.
+- **Periodische Snapshots**: Während der aktiven Verfolgung wird jede Sekunde ein hochauflösender Bildausschnitt des Objekts erfasst und im Hintergrund gepuffert. Der Puffer wird dynamisch zur Aktualisierung des Mittendrin- und Letzte-Sichtung-Bildes ausgewertet.
+- **Speicheroptimierung**: Bei Verlust oder Archivierung des Targets werden alle zwischenzeitlich gepufferten periodischen Snapshots aus dem Arbeitsspeicher freigegeben, sodass nur die drei Schlüsselbilder dauerhaft im Speicher bleiben.
+- **Drei-Wege Bild-Export**: Der Target-Export speichert nun alle drei Schlüsselbilder separat (`target_XXX_discovery.png`, `target_XXX_midtrack.png`, `target_XXX_lastseen.png`) zusammen mit dem JSON-Report.
+- **Unit Testing**: Neuer Test `TargetHistoryTest.VisualChronologySnapshottingAndFinalizing` zur Validierung des periodischen Snapshot-Puffers und der Speicherbereinigung.
+
+### Changed
+
+- `Common.hpp`: `UniqueTargetRecord` um Strukturen für Visual Chronology erweitert (`cropped_image_first`, `cropped_image_mid`, `cropped_image_last`, `periodic_snapshots`, etc.).
+- `Application.hpp`: `TextureInfo` für drei GPU-Texturen und deren Cache-Versionierung angepasst.
+- `Application.cpp`: Texture-Upload-Loop, Target-Historien-Update, Details-Export, Target Analyzer UI und Aufräumfunktionen für das Drei-Texturen-System implementiert.
+
 ## [1.11.12] - 2026-06-06
 
 ### Added

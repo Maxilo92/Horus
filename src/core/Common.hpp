@@ -6,6 +6,7 @@
 #include <vector>
 #include <set>
 #include <cstdint>
+#include <chrono>
 
 // Kein imgui.h hier – ImU32 = uint32_t, kompatibel ohne imgui-Abhängigkeit
 
@@ -55,6 +56,13 @@ struct TrackedTarget {
     std::vector<cv::Point> trail;
 };
 
+struct TargetSnapshot {
+    cv::Mat image;
+    std::string timestamp;
+    cv::Rect box;
+    float confidence = 0.0f;
+};
+
 // Target History: Eindeutige Targets zur Aufzeichnung und Analyse
 struct UniqueTargetRecord {
     int track_id = -1;
@@ -66,9 +74,21 @@ struct UniqueTargetRecord {
     cv::Rect first_box;
     cv::Rect last_box;
     std::vector<cv::Point> trail;
-    cv::Mat cropped_image;
-    int cropped_image_version = 0;
+    
+    // Key milestones images
+    cv::Mat cropped_image_first;
+    cv::Mat cropped_image_mid;
+    cv::Mat cropped_image_last;
+    
+    int cropped_image_first_version = 0;
+    int cropped_image_mid_version = 0;
+    int cropped_image_last_version = 0;
+    
     bool is_currently_active = false;
+
+    // Buffer for periodic captures during active tracking
+    std::vector<TargetSnapshot> periodic_snapshots;
+    std::chrono::steady_clock::time_point last_snapshot_time;
 };
 
 struct SystemSettings {
@@ -166,6 +186,8 @@ struct SystemSettings {
     // ----------------------------------------------------------------
     bool     motionDetectionEnabled  = false;  // Toggle motion detection pipeline
     bool     motionShowOverlay       = true;   // Draw motion regions in HUD
+    bool     motionHeatmapOverlay    = false;  // Enable dense optical flow heatmap
+    float    motionHeatmapDecay      = 0.90f;  // Decay rate for heatmap intensity [0.0–1.0]
     float    motionSensitivity       = 30.0f;  // MOG2 varThreshold: lower = more sensitive [5–100]
     int      motionMinArea           = 50;     // Minimum contour area in pixels to report [1–5000]
     int      motionBlurKernel        = 5;      // Gaussian pre-blur kernel size (1 = disabled, must be odd) [1–21]

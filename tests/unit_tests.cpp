@@ -585,4 +585,62 @@ TEST(AudioEngineTest, ConfigInitAndSynthesis) {
     engine.shutdown();
 }
 
+// --- TargetHistory Tests ---
+TEST(TargetHistoryTest, VisualChronologySnapshottingAndFinalizing) {
+    UniqueTargetRecord record;
+    EXPECT_TRUE(record.cropped_image_first.empty());
+    EXPECT_TRUE(record.cropped_image_mid.empty());
+    EXPECT_TRUE(record.cropped_image_last.empty());
+
+    cv::Mat mockFrame = cv::Mat::ones(100, 100, CV_8UC3);
+
+    record.track_id = 42;
+    record.cropped_image_first = mockFrame.clone();
+    record.cropped_image_mid = mockFrame.clone();
+    record.cropped_image_last = mockFrame.clone();
+    record.cropped_image_first_version = 1;
+    record.cropped_image_mid_version = 1;
+    record.cropped_image_last_version = 1;
+
+    TargetSnapshot snap1;
+    snap1.image = mockFrame.clone();
+    snap1.timestamp = "2026-06-06 17:00:00";
+    snap1.confidence = 0.8f;
+    snap1.box = cv::Rect(10, 10, 20, 20);
+    record.periodic_snapshots.push_back(snap1);
+
+    EXPECT_EQ(record.periodic_snapshots.size(), 1);
+
+    TargetSnapshot snap2;
+    cv::Mat mockFrame2 = cv::Mat::zeros(100, 100, CV_8UC3);
+    snap2.image = mockFrame2.clone();
+    snap2.timestamp = "2026-06-06 17:00:01";
+    snap2.confidence = 0.9f;
+    snap2.box = cv::Rect(15, 15, 20, 20);
+    record.periodic_snapshots.push_back(snap2);
+
+    if (!record.periodic_snapshots.empty()) {
+        record.cropped_image_first = record.periodic_snapshots.front().image;
+        record.cropped_image_first_version++;
+
+        int midIdx = record.periodic_snapshots.size() / 2;
+        record.cropped_image_mid = record.periodic_snapshots[midIdx].image;
+        record.cropped_image_mid_version++;
+
+        record.cropped_image_last = record.periodic_snapshots.back().image;
+        record.cropped_image_last_version++;
+
+        record.periodic_snapshots.clear();
+    }
+
+    EXPECT_EQ(record.periodic_snapshots.size(), 0);
+    EXPECT_FALSE(record.cropped_image_first.empty());
+    EXPECT_FALSE(record.cropped_image_mid.empty());
+    EXPECT_FALSE(record.cropped_image_last.empty());
+    EXPECT_EQ(record.cropped_image_first_version, 2);
+    EXPECT_EQ(record.cropped_image_mid_version, 2);
+    EXPECT_EQ(record.cropped_image_last_version, 2);
+}
+
+
 
