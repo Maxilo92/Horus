@@ -1,5 +1,87 @@
 # Changelog
 
+## [1.14.0] - 2026-06-06
+
+### Added
+- **Asynchronous Capture Thread**: Implemented a dedicated high-priority thread for camera frame acquisition. This decouples the camera feed from the heavy-duty vision processing.
+- **High-Speed Rendering**: The main video feed now renders at the camera's native rate (30 FPS) by directly consuming raw frames from the capture thread, bypassing the slower vision and detection pipelines.
+- **Multi-Threaded Pipeline Architecture**: Refactored the internal engine to support independent rates for capture (30 FPS), display (30+ FPS), and vision processing (adaptive FPS based on CPU load).
+
+### Changed
+- Moved camera management and hot-swap logic to the Capture Thread for better system responsiveness.
+- Updated the main loop to use raw capture frames for the background while maintaining synchronized overlays from the vision threads.
+
+## [1.13.8] - 2026-06-06
+
+### Fixed
+- **Bounding Box Jitter Suppression**: Implemented an "Anti-Wobble" mechanism to stabilize bounding boxes for stationary objects. If an object moves less than 4 pixels relative to its predicted position, the measurement is heavily smoothed (85% prediction blend). 
+- **Stationary Drift Control**: Added velocity clamping that snaps velocities below 0.5 px/frame to zero, preventing micro-drift and ensuring boxes remain rock-solid when objects are not moving.
+
+## [1.13.7] - 2026-06-06
+
+### Fixed
+- **Bounding Box Synchronization**: Resolved a critical lag issue where bounding boxes would "hang behind" moving objects. The tracker now only receives fresh detections, allowing the Kalman filter to perform smooth dead reckoning (extrapolation) between asynchronous detection updates. This ensures boxes stay pinned to objects even at high speeds and lower detection frame rates.
+- **Unit Test Stabilization**: Updated `MultiTrackerTest.SuccessfulTracking` to use appropriate tolerances for Kalman filter outputs, ensuring reliable CI/CD results despite numerical smoothing.
+
+## [1.13.6] - 2026-06-06
+
+### Added
+- **Gallery Context Menu**: Added a right-click context menu to the Target Analyzer gallery.
+- **Set as Best Representative**: Moved the "Set as Best" action from left-click to the context menu to prevent accidental selections.
+- **Snapshot Export**: Added an "Export Snapshot" option to the context menu to save individual gallery images to the `exports/` directory.
+- **Gallery Large View**: Added a "Open Large View" option to the context menu to view snapshots in a large modal.
+
+### Changed
+- **Gallery Interaction**: Left-clicking a gallery item now only highlights/selects it visually instead of immediately setting it as the "Best Representative".
+
+## [1.13.5] - 2026-06-06
+
+### Added
+- **Adaptive Gallery Decimation (Military-Grade)**: Intelligente Reduzierung der Bildfrequenz bei langen Tracks. Die Galerie wird auf maximal 24 Bilder begrenzt; bei Überschreiten wird jedes zweite Bild entfernt und das Erfassungsintervall verdoppelt. Dies garantiert eine zeitliche Abdeckung über die gesamte Track-Dauer ohne Systemüberlastung.
+- **Robust UI Synchronization**: Die Textur-Synchronisation und die manuelle Bildauswahl wurden an die Decimation-Logik angepasst, um eine konsistente Anzeige zu gewährleisten.
+
+### Fixed
+- **HUD Compilation Error**: Fehler in `drawStatusWindows` behoben, bei dem auf eine nicht deklarierte Variable zugegriffen wurde.
+- **Pixel Target Creation from Drag**: Das Ziehen eines Auswahlfeldes mit der Maus erstellte zwar ein visuelles Rechteck, aber die Tracking-Logik nutzte oft Standardwerte. Der Pixel-Tracker nutzt nun das exakt aufgezogene Rechteck als Template.
+
+## [1.13.4] - 2026-06-06
+
+### Added
+- **Bidirectional Target Selection Sync**: Vollständige Synchronisation zwischen visuellem Target-Lock (HUD), der Target History und dem Analyzer-Fenster. Ein Lock-on im Video-Feed öffnet automatisch den Analyzer; die Auswahl eines aktiven Ziels in der History triggert den visuellen Lock-on.
+
+### Fixed
+- **Pixel Target Rendering Consolidation**: Doppelte Bounding-Boxen beim Pixeltarget behoben. Die HUD-Zeichnung übernimmt nun die Standard-Box, während die interaktiven Handles nur bei Bedarf eingeblendet werden.
+- **Trail Suppression on Manual Move**: Beim manuellen Verschieben oder Ändern der Größe eines Pixeltargets wird der Bewegungspfad (Trail) nun zurückgesetzt, um störende Verbindungslinien zwischen alter und neuer Position zu vermeiden.
+
+## [1.13.3] - 2026-06-06
+
+### Added
+- **UI Persistence**: Visibility states of Settings, Dev Console, Data Panel, Zoom Window, and Target Analyzer are now persisted across application restarts.
+- **Dev Console Shortcut**: Added `F12` as a global keyboard shortcut to toggle the Developer Console.
+
+### Fixed
+- **Gallery UI Responsiveness**: Der Galleryview-Toggle und die Bildauswahl reagieren nun unmittelbar und zuverlässig. Die UI-Zustände wurden vom Tracking-Datenstrom entkoppelt, um ein Überschreiben durch den Hintergrund-Thread zu verhindern.
+
+## [1.13.2] - 2026-06-06
+
+### Added
+- **Found/Lost Timestamps in History**: Added "Found" and "Lost" columns to the Target History table for precise temporal tracking.
+- **Always-On Target Manipulation**: Enabled resizing and moving of ROI zones and Pixel Targets at any time without requiring an explicit "Edit Mode" toggle.
+- **Contextual Drag-to-Create**: Dragging the mouse over empty space now creates a Pixel Target box by default. ROI zones are created instead when "ROI Edit Mode" is active.
+- **Unified Interaction Pipeline**: Integrated single-point locking, drag-to-create, and target manipulation into a single, conflict-free interaction loop.
+
+### Changed
+- **Expanded Snapshot Padding**: Alle Ziel-Snapshots (Discovery, Periodic, Manual) werden nun mit einem zusätzlichen Padding von 50% extrahiert. Dies bietet mehr Umgebungskontext für die nachträgliche manuelle Ausschnittswahl.
+
+## [1.13.1] - 2026-06-06
+
+### Added
+- **Advanced Target Gallery & Manual Selection**: Neue Galerie-Ansicht im Target Analyzer zur Verwaltung aller periodisch erfassten Ziel-Bilder.
+- **Manual "Best Image" Selection**: Benutzer können nun manuell das beste Bild aus der Galerie auswählen, welches als primärer Repräsentant für das Ziel verwendet wird.
+- **Gallery Toggle**: Umschaltbare Ansicht zwischen detaillierter Einzelansicht und der vollständigen Bild-Galerie.
+- **Increased Snapshot Frequency**: Die Erfassungsrate für Ziel-Snapshots wurde auf 500ms erhöht, um eine lückenlosere visuelle Historie zu gewährleisten.
+- **Persistent Gallery**: Ziel-Galerien bleiben nun auch nach Signalverlust (Archivierung) vollständig erhalten.
+
 ## [1.13.0] - 2026-06-06
 
 ### Added
@@ -361,7 +443,7 @@
 ## [1.10.11] - 2026-06-05
 ### Added
 - **Echte Zoom-Verstärkung für Target Zoom**: Ergänzt um `targetZoomMagnification` (Standard `1.8x`). Der Zoom-Ausschnitt wird nun um das Zielzentrum verkleinert berechnet, sodass bei aktivem 4K-Zoom ein deutlich stärkerer visueller Zoom entsteht statt nur gleicher Bildausschnitt in höherer Auflösung.
-- **Neue UI-Regler für Zoom-Faktor**: In Dev Console und Settings gibt es jetzt einen Slider `Target Zoom Magnification` (`1.0x` bis `4.0x`) für direkte Live-Anpassung.
+- **Neue UI-Regler für Zoom-Faktor**: In Dev Console and Settings gibt es jetzt einen Slider `Target Zoom Magnification` (`1.0x` bis `4.0x`) für direkte Live-Anpassung.
 - **Zoom-Overlay-Status**: Das Target-Zoom-Overlay zeigt jetzt zusätzlich `4K ZOOM: ON/OFF` und den aktuellen Vergrößerungsfaktor an.
 
 ### Changed
@@ -579,14 +661,14 @@
 
 ## [1.6.2] - 2026-06-05
 
-+### Added
-+- **UI Restoration:** Re-implemented ImGui Docking and the "Dashboard" layout.
-+- **Dedicated Windows:** Restored "Camera View" and added a new "Data Panel" for real-time object telemetry.
-+### Fixed
-+- **Camera Config:** Set default camera ID to 1 as requested by the user.
-+- **Architecture Regression:** Resolved the regression where the camera feed was rendered as a background instead of a windowed component.
-+
- ## [1.5.3] - 2026-06-05
+### Added
+- **UI Restoration:** Re-implemented ImGui Docking and the "Dashboard" layout.
+- **Dedicated Windows:** Restored "Camera View" and added a new "Data Panel" for real-time object telemetry.
+### Fixed
+- **Camera Config:** Set default camera ID to 1 as requested by the user.
+- **Architecture Regression:** Resolved the regression where the camera feed was rendered as a background instead of a windowed component.
+
+## [1.5.3] - 2026-06-05
 ### Fixed
 - **ImGui API Compatibility:** Fixed a build error where `DockSpaceOverViewport` was called with incorrect parameters. Corrected the signature to match the Dear ImGui `docking` branch.
 
@@ -646,7 +728,7 @@
 - **Hybrides IoU + Distanz-Matching:** Bei schnell-bewegten Objekten (Personen, Autos, Fahrräder) greift ein normalisierter Zentrum-Distanz-Score als Fallback wenn IoU ≈ 0. Adaptiver Gate skaliert mit Objektgröße.
 - **Klassen-spezifische Farbkodierung:** Person=Amber, Fahrrad=Cyan, Auto=Grün, Motorrad=Orange, Bus=Lime, Truck=Gelbgrün.
 - **Bewegungspfad (Trail):** Centroid-History mit Alpha-Fade für jedes getrackte Objekt. Konfigurierbare Trail-Länge (0–60 Punkte).
-- **Track-ID Badge:** Stabile, monoton steigende ID über jeder Bounding Box (`PRS #042`).
+- **Track-ID Badge:** Stabile, monoton steigende ID over jeder Bounding Box (`PRS #042`).
 - **Confidence-Balken:** Visueller Balken am unteren Rand jeder Box zeigt Detektor-Konfidenz.
 - **Priority-Class-Filter:** Nur relevante Verkehrsklassen (Person/Bicycle/Car/Motorcycle/Bus/Truck) aktiv. Einzeln konfigurierbar per Checkbox.
 - **Rechtsklick Lock-Release:** Rechtsklick im Camera-View gibt den Single-Target-Lock frei.

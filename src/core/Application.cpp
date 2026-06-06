@@ -276,6 +276,7 @@ bool Application::init(int argc, char** argv) {
     log(LogLevel::INFO, "System initialized — starting threads");
 
     m_running = true;
+    m_captureThread  = std::thread(&Application::captureWorkerLoop, this);
     m_detectorThread = std::thread(&Application::detectorWorkerLoop, this);
     m_trackingThread = std::thread(&Application::trackingWorkerLoop, this);
     m_workerThread = std::thread(&Application::workerLoop, this);
@@ -647,29 +648,16 @@ void Application::applyPresetLowLight() {
 // Worker Thread
 // -----------------------------------------------------------------------
 
-void Application::workerLoop() {
-    cv::Mat rawFrame;
-    cv::Mat trackingFrame;
-    // Persistent buffers for zero-heap low-light processing
-    cv::Mat labFrame;
-    std::vector<cv::Mat> labChannels;
-    cv::Ptr<cv::CLAHE> clahe;
-    cv::Mat zoomLab;
-    std::vector<cv::Mat> zoomChannels;
-    cv::Ptr<cv::CLAHE> zoomClahe;
-    cv::Mat zoomCrop;
-    float currentFps = 0.0f;
-    auto lastTime = std::chrono::steady_clock::now();
-    int frameSkipCounter = 0;
-
+void Application::captureWorkerLoop() {
+    log(LogLevel::INFO, "Capture thread started");
+    cv::Mat frame;
     while (m_running) {
-        // --- Read current settings ---
+        // --- Read current settings for camera resolution ---
         SystemSettings currentSettings;
         {
             std::lock_guard<std::mutex> lock(m_dataMutex);
             currentSettings = m_sharedSettings;
         }
-        SharedSubZoom localSubZooms[4];
 
         // ── Camera resolution / mode change ────────────────────────────
         static bool lastRequest4K = currentSettings.request4KCamera;
@@ -725,9 +713,54 @@ void Application::workerLoop() {
             }
         }
 
-        if (!m_camera->read(rawFrame)) {
+        if (m_camera->read(frame)) {
+            if (!frame.empty()) {
+                std::lock_guard<std::mutex> lock(m_captureMutex);
+                frame.copyTo(m_captureFrame);
+                m_captureNewFrameVision = true;
+                m_captureNewFrameDisplay = true;
+                m_totalFramesProcessed.fetch_add(1);
+            }
+        } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
-            continue;
+        }
+    }
+    log(LogLevel::INFO, "Capture thread stopping");
+}
+
+void Application::workerLoop() {
+    cv::Mat rawFrame;
+    cv::Mat trackingFrame;
+    // Persistent buffers for zero-heap low-light processing
+    cv::Mat labFrame;
+    std::vector<cv::Mat> labChannels;
+    cv::Ptr<cv::CLAHE> clahe;
+    cv::Mat zoomLab;
+    std::vector<cv::Mat> zoomChannels;
+    cv::Ptr<cv::CLAHE> zoomClahe;
+    cv::Mat zoomCrop;
+    float currentFps = 0.0f;
+    auto lastTime = std::chrono::steady_clock::now();
+    int frameSkipCounter = 0;
+
+    while (m_running) {
+        // --- Read current settings ---
+        SystemSettings currentSettings;
+        {
+            std::lock_guard<std::mutex> lock(m_dataMutex);
+            currentSettings = m_sharedSettings;
+        }
+        SharedSubZoom localSubZooms[4];
+
+        // ── Consume from Capture Thread ────────────────────────────────
+        {
+            std::lock_guard<std::mutex> lock(m_captureMutex);
+            if (!m_captureNewFrameVision) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                continue; 
+            }
+            m_captureFrame.copyTo(rawFrame);
+            m_captureNewFrameVision = false;
         }
 
         auto now = std::chrono::steady_clock::now();
@@ -986,12 +1019,15 @@ void Application::workerLoop() {
         bool hasNewDetections = false;
         int detectorLag = 0;
         
+        static bool s_pendingDetections = false;
+        static uint64_t s_detectionTriggerFrame = 0;
+
         if (m_detectorNewResults.load()) {
             std::lock_guard<std::mutex> lock(m_detectorMutex);
             m_detections = m_detectorResults;
             m_detectorNewResults = false;
-            hasNewDetections = true;
-            detectorLag = m_totalFramesProcessed.load() - m_detectorTriggerFrame.load();
+            s_pendingDetections = true;
+            s_detectionTriggerFrame = m_detectorTriggerFrame.load();
         }
         detections = m_detections; // Use latest available detections for HUD rendering
 
@@ -1002,18 +1038,22 @@ void Application::workerLoop() {
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now().time_since_epoch()).count());
             
+            if (s_pendingDetections) {
+                hasNewDetections = true;
+                detectorLag = static_cast<int>(m_totalFramesProcessed.load() - s_detectionTriggerFrame);
+                s_pendingDetections = false;
+            }
+
             std::lock_guard<std::mutex> lock(m_trackingMutex);
             trackingFrame.copyTo(m_trackingFrameCopy);
             m_trackingSettingsCopy   = currentSettings;
-            m_trackingDetectionsCopy   = detections;
+            m_trackingDetectionsCopy   = hasNewDetections ? detections : std::vector<Detection>();
             m_trackingDetectorLag      = detectorLag;
             m_trackingSessionMs        = nowMs - m_logSessionStartMs;
             m_trackingMotionTracksCopy = m_workerMotionTracks;
             m_trackingBusy             = true;
             m_trackingCv.notify_one();
         }
-
-        m_totalFramesProcessed.fetch_add(1);
 
         // ── Data-Logging Session Management (Plan 03) ─────────────────────
         if (currentSettings.dataLoggingEnabled && !m_dataLogger->isOpen()) {
@@ -3369,12 +3409,23 @@ void Application::run() {
             m_fpsHistoryIdx = (m_fpsHistoryIdx + 1) % static_cast<int>(kFpsHistorySize);
         }
 
+        // ── High-Speed Texture Update (Direct from Capture) ──────────
+        {
+            std::lock_guard<std::mutex> lock(m_captureMutex);
+            if (m_captureNewFrameDisplay) {
+                m_captureFrame.copyTo(currentFrame);
+                m_captureNewFrameDisplay = false;
+                m_renderer->updateTexture(currentFrame);
+            }
+        }
+
         // Consume shared data
         std::vector<cv::Rect> currentMotionRegions;
         {
             std::lock_guard<std::mutex> lock(m_dataMutex);
             if (m_newDataAvailable) {
-                m_sharedFrame.copyTo(currentFrame);
+                // Note: We keep currentFrame from capture for high-speed background,
+                // but we still need the other shared data (zoom, heatmap, detections).
                 m_sharedZoomFrame.copyTo(currentZoomFrame);
                 m_sharedHeatmapFrame.copyTo(currentHeatmap);
                 m_detections         = m_sharedDetections;
@@ -3389,7 +3440,7 @@ void Application::run() {
                 m_trackingHeight     = m_sharedTrackingHeight.load();
                 m_zoomWidth          = m_sharedZoomWidth.load();
                 m_zoomHeight         = m_sharedZoomHeight.load();
-                m_renderer->updateTexture(currentFrame);
+                
                 if (!currentHeatmap.empty()) {
                     m_heatmapRenderer->updateTexture(currentHeatmap);
                 }
@@ -4944,6 +4995,7 @@ void Application::renderTargetAnalyzer() {
     auto& uiState = m_analyzerUiStates[selectedRecord.track_id];
 
     auto updateSharedRecord = [&](const std::function<void(UniqueTargetRecord&)>& func) {
+        func(selectedRecord); // Update local copy in m_targetHistory immediately
         std::lock_guard<std::mutex> lock(m_dataMutex);
         auto it = std::find_if(m_sharedTargetHistory.begin(), m_sharedTargetHistory.end(),
                                [&](const UniqueTargetRecord& r) { return r.track_id == selectedRecord.track_id; });
@@ -4998,26 +5050,64 @@ void Application::renderTargetAnalyzer() {
             if (texID != 0) {
                 ImGui::PushID(i);
                 
-                bool isSelected = (uiState.selected_snapshot_idx == i);
-                if (isSelected) {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
+                bool isHighlighted = (uiState.selected_snapshot_idx == i);
+                bool isActualBest  = (selectedRecord.snapshot_mid_manual_idx == i);
+
+                if (isActualBest) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.0f, 1.0f)); // Green for BEST
+                } else if (isHighlighted) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.4f, 0.8f, 1.0f)); // Blue for Highlight
                 }
 
                 if (ImGui::ImageButton("##gallery_item", reinterpret_cast<void*>(static_cast<intptr_t>(texID)), ImVec2(imgWidth, imgWidth * 0.75f))) {
                     uiState.selected_snapshot_idx = i;
-                    updateSharedRecord([&](UniqueTargetRecord& r) {
-                        r.snapshot_mid_manual_idx = i;
-                        if (i >= 0 && i < (int)r.periodic_snapshots.size()) {
-                            r.snapshot_mid = r.periodic_snapshots[i];
-                            r.cropped_image_mid_version++;
-                        }
-                    });
                 }
 
-                if (isSelected) {
+                if (ImGui::BeginPopupContextItem()) {
+                    if (ImGui::MenuItem("Set as Best Representative")) {
+                        updateSharedRecord([&](UniqueTargetRecord& r) {
+                            r.snapshot_mid_manual_idx = i;
+                            if (i >= 0 && i < (int)r.periodic_snapshots.size()) {
+                                r.snapshot_mid = r.periodic_snapshots[i];
+                                r.cropped_image_mid_version++;
+                            }
+                        });
+                        log(LogLevel::INFO, "Manually updated Best Representative for Target " + std::to_string(selectedRecord.track_id));
+                    }
+                    if (ImGui::MenuItem("Export Snapshot...")) {
+                        const auto& snap = selectedRecord.periodic_snapshots[i];
+                        if (!snap.image.empty()) {
+                            std::string baseDir = "exports";
+                            std::error_code ec;
+                            std::filesystem::create_directories(baseDir, ec);
+                            
+                            std::string timestampClean = snap.timestamp;
+                            std::replace(timestampClean.begin(), timestampClean.end(), ':', '-');
+                            std::replace(timestampClean.begin(), timestampClean.end(), ' ', '_');
+
+                            std::string path = baseDir + "/target_" + std::to_string(selectedRecord.track_id) + 
+                                              "_snap_" + std::to_string(i) + "_" + timestampClean + ".jpg";
+
+                            if (cv::imwrite(path, snap.image)) {
+                                log(LogLevel::INFO, "Exported snapshot to " + path);
+                            } else {
+                                log(LogLevel::ERR, "Failed to export snapshot to " + path);
+                            }
+                        }
+                    }
+                    if (ImGui::MenuItem("Open Large View")) {
+                        uiState.show_large_view_modal = true;
+                        uiState.large_view_snapshot_idx = i;
+                        uiState.large_view_tex_id = texID;
+                    }
+                    ImGui::EndPopup();
+                }
+
+                if (isActualBest || isHighlighted) {
                     ImGui::PopStyleColor();
                     // Draw selection border
-                    ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), IM_COL32(0, 255, 100, 255), 0.0f, 0, 2.0f);
+                    ImU32 borderColor = isActualBest ? IM_COL32(0, 255, 100, 255) : IM_COL32(0, 150, 255, 255);
+                    ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), borderColor, 0.0f, 0, 2.0f);
                 }
 
                 if (ImGui::IsItemHovered()) {
@@ -5025,7 +5115,8 @@ void Application::renderTargetAnalyzer() {
                     ImGui::Text("Snapshot %d", i + 1);
                     ImGui::Text("Time: %s", selectedRecord.periodic_snapshots[i].timestamp.c_str());
                     ImGui::Text("Confidence: %.2f", selectedRecord.periodic_snapshots[i].confidence);
-                    if (isSelected) ImGui::TextColored(ImVec4(0, 1, 0, 1), "CURRENT BEST");
+                    if (isActualBest) ImGui::TextColored(ImVec4(0, 1, 0, 1), "CURRENT BEST REPRESENTATIVE");
+                    if (isHighlighted) ImGui::TextColored(ImVec4(0, 0.6f, 1, 1), "SELECTED");
                     ImGui::EndTooltip();
                 }
 
@@ -5060,7 +5151,7 @@ void Application::renderTargetAnalyzer() {
         } else if (activeSnapshotIdx == 1) {
             activeSnap = selectedRecord.snapshot_mid;
             activeTexID = texMid;
-            snapLabel = (uiState.selected_snapshot_idx != -1) ? "MANUAL SELECTION (BEST)" : "AUTO SELECTION (BEST)";
+            snapLabel = (selectedRecord.snapshot_mid_manual_idx != -1) ? "MANUAL SELECTION (BEST)" : "AUTO SELECTION (BEST)";
             badgeColor = ImVec4(0.0f, 1.0f, 0.5f, 1.0f); // Green
         } else {
             activeSnap = selectedRecord.snapshot_last;
@@ -5211,6 +5302,43 @@ void Application::renderTargetAnalyzer() {
         m_selectedAnalyzerTargetId = -1;
     }
 
+    // Large View Modal (Plan 07 Extension)
+    if (uiState.show_large_view_modal) {
+        ImGui::OpenPopup("Gallery - Large View");
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(800, 650), ImGuiCond_FirstUseEver);
+    if (ImGui::BeginPopupModal("Gallery - Large View", &uiState.show_large_view_modal)) {
+        int idx = uiState.large_view_snapshot_idx;
+        if (idx >= 0 && idx < (int)selectedRecord.periodic_snapshots.size()) {
+            const auto& snap = selectedRecord.periodic_snapshots[idx];
+            if (!snap.image.empty() && uiState.large_view_tex_id != 0) {
+                float availW = ImGui::GetContentRegionAvail().x;
+                float availH = ImGui::GetContentRegionAvail().y - 45; // Space for status and button
+                
+                float aspect = (float)snap.image.rows / (float)snap.image.cols;
+                float imgW = availW;
+                float imgH = imgW * aspect;
+                if (imgH > availH) {
+                    imgH = availH;
+                    imgW = imgH / aspect;
+                }
+
+                ImGui::SetCursorPosX((availW - imgW) * 0.5f);
+                ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(uiState.large_view_tex_id)), ImVec2(imgW, imgH));
+                
+                ImGui::TextDisabled("Snapshot %d | Time: %s | Confidence: %.2f", idx + 1, snap.timestamp.c_str(), snap.confidence);
+            }
+        }
+
+        ImGui::Separator();
+        if (ImGui::Button("CLOSE", ImVec2(-FLT_MIN, 0))) {
+            uiState.show_large_view_modal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
     ImGui::End();
 }
 
@@ -5227,6 +5355,7 @@ void Application::cleanup() {
         m_trackingCv.notify_all();
     }
 
+    if (m_captureThread.joinable()) m_captureThread.join();
     if (m_detectorThread.joinable()) m_detectorThread.join();
     if (m_trackingThread.joinable()) m_trackingThread.join();
     if (m_workerThread.joinable()) m_workerThread.join();

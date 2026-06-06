@@ -25,6 +25,7 @@
 #include "ROIManager.hpp"
 #include "MotionDetector.hpp"
 #include "AudioEngine.hpp"
+#include "FaceRecognizer.hpp"
 #include "Common.hpp"
 
 // ---------------------------------------------------------------
@@ -51,13 +52,20 @@ public:
     void log(LogLevel level, const std::string& msg);
 
 private:
+    struct WorkerMotionTrack {
+        int id;
+        cv::Rect box;
+        std::chrono::steady_clock::time_point lastSeen;
+        bool active = true;
+    };
+
     bool initGLFW();
     bool initImGui();
     void cleanup();
     void workerLoop();
+    void captureWorkerLoop();
     void detectorWorkerLoop();
     void trackingWorkerLoop();
-    void handleTargetLocking(const ViewportInfo& view);
     void loadPersistedSettings();
     void savePersistedSettings() const;
     void applyStandardPreset();
@@ -92,6 +100,7 @@ private:
     std::unique_ptr<VideoRenderer>   m_zoomRenderer;
     std::unique_ptr<HUD>             m_hud;
     std::unique_ptr<ObjectDetector>  m_detector;
+    std::unique_ptr<FaceRecognizer>  m_faceRecognizer;
     std::unique_ptr<MultiTracker>    m_tracker;
     std::unique_ptr<DataLogger>      m_dataLogger;
     std::unique_ptr<ROIManager>      m_roiManager;
@@ -105,10 +114,17 @@ private:
     TrackedTarget              m_lockedTarget;
     SystemSettings             m_settings;
 
+    std::thread              m_captureThread;
     std::thread              m_workerThread;
     std::thread              m_detectorThread;
     std::thread              m_trackingThread;
     std::atomic<bool>        m_running;
+
+    // Asynchronous capture pipeline synchronization
+    std::mutex               m_captureMutex;
+    cv::Mat                  m_captureFrame;
+    std::atomic<bool>        m_captureNewFrameVision{false};
+    std::atomic<bool>        m_captureNewFrameDisplay{false};
     
     // Asynchronous detector pipeline synchronization
     std::mutex               m_detectorMutex;
@@ -128,6 +144,8 @@ private:
     SystemSettings           m_trackingSettingsCopy;
     std::vector<Detection>   m_trackingDetectionsCopy;
     int                      m_trackingDetectorLag = 0;
+    uint64_t                 m_trackingSessionMs = 0;
+    std::vector<WorkerMotionTrack> m_trackingMotionTracksCopy;
 
     std::mutex               m_dataMutex;
     cv::Mat                  m_sharedFrame;
@@ -281,9 +299,23 @@ private:
         int texture_version_mid = -1;
         uint32_t texture_id_last = 0;
         int texture_version_last = -1;
+        
+        std::vector<uint32_t> texture_ids_periodic;
+        std::vector<int> texture_versions_periodic;
+        int gallery_version = -1;
+
         float max_confidence = 0.0f;
     };
     std::unordered_map<int, TextureInfo> m_targetTextures;
+
+    struct AnalyzerUiState {
+        bool show_full_gallery = false;
+        int  selected_snapshot_idx = -1;
+        bool show_large_view_modal = false;
+        int  large_view_snapshot_idx = -1;
+        uint32_t large_view_tex_id = 0;
+    };
+    std::unordered_map<int, AnalyzerUiState> m_analyzerUiStates;
 
     // ---------------------------------------------------------------
     // Sub Zooms and Motion Tracking State
@@ -299,14 +331,13 @@ private:
     SharedSubZoom m_subZooms[4]; // render-thread local copy
     std::unique_ptr<VideoRenderer> m_subZoomRenderers[4];
 
-    struct WorkerMotionTrack {
-        int id;
-        cv::Rect box;
-        std::chrono::steady_clock::time_point lastSeen;
-        bool active = true;
-    };
     std::vector<WorkerMotionTrack> m_workerMotionTracks;
     int m_nextMotionId = 1;
+
+    // Face Recognition identity cache (Plan 11)
+    // track_id -> {face_id, face_name}
+    std::unordered_map<int, std::pair<int, std::string>> m_trackIdToFace;
+    std::mutex m_faceMutex;
 };
 
 #endif // APPLICATION_HPP
