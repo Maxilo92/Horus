@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.12.7] - 2026-06-06
+
+### Fixed
+- **Target Analyzer History Bug**: Ein kritischer Synchronisationsfehler wurde behoben, bei dem der Target Analyzer keine Objektdaten anzeigte. Die Ursache war eine fehlerhafte Zuweisung, bei der das Austausch-Objekt `m_sharedTargetHistory` kontinuierlich mit der veralteten UI-Kopie `m_targetHistory` überschrieben wurde, anstatt die aktualisierten Daten aus `m_internalTargetHistory` (Tracking-Thread) zu übernehmen.
+
+## [1.12.6] - 2026-06-06
+
+### Fixed
+- **Objekt-Markierung korrigiert**: Fehler behoben, bei dem keine Objekte im HUD markiert wurden. Die Ursache war eine unvollständige Migration der Tracking-Logik in einen separaten Thread, der niemals gestartet oder getriggert wurde.
+
+### Changed
+- **Pipeline-Refactoring**: Die Tracking-Pipeline (inkl. Multi-Tracking, Pixel-Locking, Alarm-Zonen-Prüfung und Daten-Logging) wurde vollständig in den dedizierten `trackingWorkerLoop` verschoben.
+- `Application.cpp`: Tracking-Thread wird nun in `init()` korrekt gestartet und über `m_trackingCv` synchron getriggert. Redundante Tracking-Logik aus dem `workerLoop` entfernt.
+- `Application.hpp`: Erweiterung der Synchronisations-Struktur um `m_trackingSessionMs` und `m_trackingMotionTracksCopy`.
+
+## [1.12.5] - 2026-06-06
+
+### Added
+- **Erweiterte Heatmap-Einstellungen**: Einführung von Sensitivitäts- und Transparenz-Reglern für das optische Fluss-Heatmap-Overlay.
+- **Heatmap-Sensitivität**: Neuer Parameter `motionHeatmapSensitivity` zur Feinjustierung der Intensitäts-Normalisierung. Ermöglicht die Erkennung kleinster Bewegungen durch Senkung des Schwellenwerts.
+- **Heatmap-Transparenz**: Neuer Parameter `motionHeatmapAlpha` für eine globale Deckkraft-Steuerung des Overlays, unabhängig von der Bewegungsintensität.
+- **Persistente Konfiguration**: Vollständige Integration der neuen Parameter in die Speicher/Lade-Logik (`config.ini`) und das HUD-Einstellungsmenü.
+
+### Changed
+- `MotionDetector.cpp`: Die Heatmap-Berechnung nutzt nun dynamische Parameter anstelle von Hardcoded-Werten für Normalisierung und Alpha-Blending.
+- `Application.cpp`: HUD-UI um Slidder für Heatmap-Sensitivität und Alpha erweitert (unter "Motion Detection > Heatmap").
+
 ## [1.12.4] - 2026-06-06
 
 ### Added

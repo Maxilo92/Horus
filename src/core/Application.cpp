@@ -262,6 +262,7 @@ bool Application::init(int argc, char** argv) {
 
     m_running = true;
     m_detectorThread = std::thread(&Application::detectorWorkerLoop, this);
+    m_trackingThread = std::thread(&Application::trackingWorkerLoop, this);
     m_workerThread = std::thread(&Application::workerLoop, this);
     return true;
 }
@@ -375,6 +376,8 @@ void Application::savePersistedSettings() const {
     out << "motionShowOverlay=" << (m_settings.motionShowOverlay ? 1 : 0) << '\n';
     out << "motionHeatmapOverlay=" << (m_settings.motionHeatmapOverlay ? 1 : 0) << '\n';
     out << "motionHeatmapDecay=" << m_settings.motionHeatmapDecay << '\n';
+    out << "motionHeatmapSensitivity=" << m_settings.motionHeatmapSensitivity << '\n';
+    out << "motionHeatmapAlpha=" << m_settings.motionHeatmapAlpha << '\n';
     out << "motionSensitivity=" << m_settings.motionSensitivity << '\n';
     out << "motionMinArea=" << m_settings.motionMinArea << '\n';
     out << "motionBlurKernel=" << m_settings.motionBlurKernel << '\n';
@@ -486,6 +489,8 @@ void Application::loadPersistedSettings() {
             else if (key == "motionShowOverlay") m_settings.motionShowOverlay = ParseBoolSetting(value);
             else if (key == "motionHeatmapOverlay") m_settings.motionHeatmapOverlay = ParseBoolSetting(value);
             else if (key == "motionHeatmapDecay") m_settings.motionHeatmapDecay = std::stof(value);
+            else if (key == "motionHeatmapSensitivity") m_settings.motionHeatmapSensitivity = std::stof(value);
+            else if (key == "motionHeatmapAlpha") m_settings.motionHeatmapAlpha = std::stof(value);
             else if (key == "motionSensitivity") m_settings.motionSensitivity = std::stof(value);
             else if (key == "motionMinArea") m_settings.motionMinArea = std::stoi(value);
             else if (key == "motionBlurKernel") m_settings.motionBlurKernel = std::stoi(value);
@@ -919,294 +924,38 @@ void Application::workerLoop() {
         }
         detections = m_detections; // Use latest available detections for HUD rendering
 
-        std::vector<TrackedObject> tracked;
-        if (currentSettings.enableTracking) {
-            if (currentSettings.enableDetection) {
-                // If detector is running asynchronously, we only supply new detections 
-                // when they actually arrive. On other frames, we pass an empty vector 
-                // to let the tracker predict (dead reckoning).
-                if (hasNewDetections) {
-                    m_tracker->update(detections, currentSettings, detectorLag);
-                } else {
-                    m_tracker->update({}, currentSettings, 0);
-                }
-            } else {
-                // Detection disabled completely, update tracker with empty detections
-                m_tracker->update({}, currentSettings, 0);
-            }
-            
-            tracked = m_tracker->getTrackedObjects(currentSettings.trackerMaxTrailLength);
-            updateTargetHistory(tracked, trackingFrame);
-
-            // Update pixel target using template matching if active
-            if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
-                if (m_pixelLockDragging.load()) {
-                    // Skip template matching while dragging
-                } else {
-                    cv::Rect lastBox = m_sharedLockedTarget.box;
-
-                    // Predict next position using constant velocity motion model
-                    m_pixelCenterX += m_pixelVx;
-                    m_pixelCenterY += m_pixelVy;
-
-                    cv::Rect predictedBox(
-                        static_cast<int>(std::round(m_pixelCenterX - lastBox.width / 2.0f)),
-                        static_cast<int>(std::round(m_pixelCenterY - lastBox.height / 2.0f)),
-                        lastBox.width,
-                        lastBox.height
-                    );
-
-                    int pad = 80; // Larger search window to prevent tracking loss
-                    int rectW = predictedBox.width + pad * 2;
-                    int rectH = predictedBox.height + pad * 2;
-                    int rectX = predictedBox.x - pad;
-                    int rectY = predictedBox.y - pad;
-
-                    // Ensure searchRect is within the frame, but doesn't shrink unless the frame itself is smaller than searchRect
-                    if (rectW > trackingFrame.cols) rectW = trackingFrame.cols;
-                    if (rectH > trackingFrame.rows) rectH = trackingFrame.rows;
-
-                    if (rectX < 0) rectX = 0;
-                    if (rectY < 0) rectY = 0;
-                    if (rectX + rectW > trackingFrame.cols) rectX = trackingFrame.cols - rectW;
-                    if (rectY + rectH > trackingFrame.rows) rectY = trackingFrame.rows - rectH;
-
-                    cv::Rect searchRect(rectX, rectY, rectW, rectH);
-
-                    if (searchRect.width >= m_pixelTemplate.cols && searchRect.height >= m_pixelTemplate.rows) {
-                        cv::Mat result;
-                        cv::matchTemplate(trackingFrame(searchRect), m_pixelTemplate, result, cv::TM_CCOEFF_NORMED);
-
-                        double minVal, maxVal;
-                        cv::Point minLoc, maxLoc;
-                        cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
-
-                        if (maxVal > 0.5) {
-                            // Sub-pixel peak interpolation (quadratic fit)
-                            double dx = 0.0;
-                            double dy = 0.0;
-
-                            if (maxLoc.x > 0 && maxLoc.x < result.cols - 1) {
-                                float valL = result.at<float>(maxLoc.y, maxLoc.x - 1);
-                                float valR = result.at<float>(maxLoc.y, maxLoc.x + 1);
-                                float valC = static_cast<float>(maxVal);
-                                float denom = valL - 2.0f * valC + valR;
-                                if (std::abs(denom) > 1e-5f) {
-                                    dx = static_cast<double>((valL - valR) / (2.0f * denom));
-                                }
-                            }
-                            if (maxLoc.y > 0 && maxLoc.y < result.rows - 1) {
-                                float valT = result.at<float>(maxLoc.y - 1, maxLoc.x);
-                                float valB = result.at<float>(maxLoc.y + 1, maxLoc.x);
-                                float valC = static_cast<float>(maxVal);
-                                float denom = valT - 2.0f * valC + valB;
-                                if (std::abs(denom) > 1e-5f) {
-                                    dy = static_cast<double>((valT - valB) / (2.0f * denom));
-                                }
-                            }
-
-                            double subpx_x = maxLoc.x + dx;
-                            double subpx_y = maxLoc.y + dy;
-
-                            // Convert back to frame coordinates
-                            double new_center_x = searchRect.x + subpx_x + m_pixelTemplate.cols / 2.0;
-                            double new_center_y = searchRect.y + subpx_y + m_pixelTemplate.rows / 2.0;
-
-                            // Calculate velocity based on actual displacement
-                            double last_center_x = lastBox.x + lastBox.width / 2.0;
-                            double last_center_y = lastBox.y + lastBox.height / 2.0;
-
-                            float alpha = currentSettings.trackerVelocitySmoothing;
-                            m_pixelVx = alpha * static_cast<float>(new_center_x - last_center_x) + (1.0f - alpha) * m_pixelVx;
-                            m_pixelVy = alpha * static_cast<float>(new_center_y - last_center_y) + (1.0f - alpha) * m_pixelVy;
-
-                            m_pixelCenterX = static_cast<float>(new_center_x);
-                            m_pixelCenterY = static_cast<float>(new_center_y);
-
-                            cv::Rect newBox(
-                                static_cast<int>(std::round(m_pixelCenterX - m_pixelTemplate.cols / 2.0f)),
-                                static_cast<int>(std::round(m_pixelCenterY - m_pixelTemplate.rows / 2.0f)),
-                                m_pixelTemplate.cols,
-                                m_pixelTemplate.rows
-                            );
-
-                            m_sharedLockedTarget.box = newBox;
-                            m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
-                            m_sharedLockedTarget.lost_frames = 0;
-                            m_sharedLockedTarget.state = TrackingState::LOCKED;
-
-                            cv::Point newCenter(newBox.x + newBox.width / 2, newBox.y + newBox.height / 2);
-                            m_sharedLockedTarget.trail.push_back(newCenter);
-                            if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(currentSettings.trackerMaxTrailLength)) {
-                                m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
-                            }
-
-                            // Adapt template dynamically on highly confident matches to handle rotation/lighting
-                            if (maxVal > 0.85) {
-                                cv::Mat matchedPatch = trackingFrame(newBox);
-                                if (matchedPatch.size() == m_pixelTemplate.size() && matchedPatch.type() == m_pixelTemplate.type()) {
-                                    double beta = 0.05; // 5% adaptation blend rate
-                                    cv::addWeighted(m_pixelTemplate, 1.0 - beta, matchedPatch, beta, 0.0, m_pixelTemplate);
-                                }
-                            }
-                        } else {
-                            m_sharedLockedTarget.lost_frames++;
-                            // Decay velocity when target is missed
-                            m_pixelVx *= currentSettings.trackerDeadReckoningDamping;
-                            m_pixelVy *= currentSettings.trackerDeadReckoningDamping;
-
-                            // Apply dead reckoning - update box based on predicted position
-                            m_sharedLockedTarget.box = predictedBox;
-
-                            if (m_sharedLockedTarget.lost_frames > currentSettings.trackerMaxLostFrames) {
-                                m_sharedLockedTarget.state = TrackingState::LOST;
-                                m_pixelLockActive = false;
-                            } else {
-                                m_sharedLockedTarget.state = TrackingState::LOST;
-                            }
-                        }
-                    } else {
-                        m_pixelLockActive = false;
-                        m_sharedLockedTarget.state = TrackingState::LOST;
-                    }
-                }
-            }
-
-            // Append pixel target as a tracked object so it gets rendered in HUD, UI, etc.
-            if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
-                TrackedObject pixelObj;
-                pixelObj.track_id = m_sharedLockedTarget.track_id; // 999
-                pixelObj.class_id = -1;
-                pixelObj.className = m_sharedLockedTarget.className; // "Pixel Target"
-                pixelObj.box = m_sharedLockedTarget.box;
-                pixelObj.confidence = m_sharedLockedTarget.confidence;
-                pixelObj.lost_frames = m_sharedLockedTarget.lost_frames;
-                pixelObj.is_active = (m_sharedLockedTarget.state == TrackingState::LOCKED);
-                pixelObj.is_confirmed = true;
-                pixelObj.trail = m_sharedLockedTarget.trail;
-                tracked.push_back(pixelObj);
-            }
-
-            m_workerTrackCount.store(static_cast<int>(tracked.size()));
-
-            // ── Alarm Zone Checks ───────────────────────────────────────
-            auto zones = m_roiManager->getROIs();
-            std::unordered_set<int> activeZoneIds;
-            for (const auto& z : zones) {
-                if (z.active && z.function == ROIFunction::ALARM) {
-                    activeZoneIds.insert(z.id);
-                    std::unordered_set<int> currentTracksInZone;
-                    for (const auto& obj : tracked) {
-                        cv::Point center(
-                            obj.box.x + obj.box.width  / 2,
-                            obj.box.y + obj.box.height / 2);
-                        if (z.rect.contains(center)) {
-                            currentTracksInZone.insert(obj.track_id);
-                        }
-                    }
-
-                    // Detect entry
-                    for (int tid : currentTracksInZone) {
-                        if (m_activeAlarms[z.id].find(tid) == m_activeAlarms[z.id].end()) {
-                            std::string clsName = "unknown";
-                            for (const auto& obj : tracked) {
-                                if (obj.track_id == tid) { clsName = obj.className; break; }
-                            }
-                            log(LogLevel::WARN, "ALARM: Object #" + std::to_string(tid) + " (" + clsName + ") entered Alarm Zone '" + z.label + "'");
-                            // ── Audio: alarm zone entry ──────────────────
-                            m_audioEngine.playAlarmEntry();
-                        }
-                    }
-
-                    // Detect exit
-                    for (int tid : m_activeAlarms[z.id]) {
-                        if (currentTracksInZone.find(tid) == currentTracksInZone.end()) {
-                            log(LogLevel::INFO, "Object #" + std::to_string(tid) + " left Alarm Zone '" + z.label + "'");
-                            // ── Audio: alarm zone exit ───────────────────
-                            m_audioEngine.playAlarmExit();
-                        }
-                    }
-
-                    m_activeAlarms[z.id] = currentTracksInZone;
-                }
-            }
-
-            // Cleanup removed or deactivated zones
-            for (auto it = m_activeAlarms.begin(); it != m_activeAlarms.end(); ) {
-                if (activeZoneIds.find(it->first) == activeZoneIds.end()) {
-                    it = m_activeAlarms.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-        }
-        m_totalFramesProcessed.fetch_add(1);
-
-        // ── Data-Logging (Plan 03) ────────────────────────────────────────
-        // Start/stop logger based on UI-controlled setting.
-        if (currentSettings.dataLoggingEnabled && !m_dataLogger->isOpen()) {
-            // Logging was just turned on — open a new file
-            LogFormat fmt = (currentSettings.dataLoggingFormat == 1)
-                ? LogFormat::JSON : LogFormat::CSV;
-            if (m_dataLogger->open(currentSettings.dataLoggingOutputDir, fmt)) {
-                log(LogLevel::INFO, "Data logging started: " + m_dataLogger->getCurrentPath());
-            } else {
-                log(LogLevel::ERR, "Data logger failed to open file");
-            }
-            m_logFrameCounter = 0;
-            // Record session start time in ms
-            m_logSessionStartMs = static_cast<uint64_t>(
+        // ── Tracking & Logging Trigger ──────────────────────────────────
+        // Move processing-heavy tracking and disk-I/O logging to dedicated thread
+        if (!m_trackingBusy.load()) {
+            uint64_t nowMs = static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now().time_since_epoch()).count());
-        } else if (!currentSettings.dataLoggingEnabled && m_dataLogger->isOpen()) {
-            // Logging was just turned off — close file
-            uint64_t rows = m_dataLogger->getRowsWritten();
-            m_dataLogger->close();
-            log(LogLevel::INFO, "Data logging stopped. Rows written: " + std::to_string(rows));
+            
+            std::lock_guard<std::mutex> lock(m_trackingMutex);
+            trackingFrame.copyTo(m_trackingFrameCopy);
+            m_trackingSettingsCopy   = currentSettings;
+            m_trackingDetectionsCopy   = detections;
+            m_trackingDetectorLag      = detectorLag;
+            m_trackingSessionMs        = nowMs - m_logSessionStartMs;
+            m_trackingMotionTracksCopy = m_workerMotionTracks;
+            m_trackingBusy             = true;
+            m_trackingCv.notify_one();
         }
 
-        if (currentSettings.dataLoggingEnabled && m_dataLogger->isOpen()) {
-            m_logFrameCounter++;
-            if (m_logFrameCounter >= currentSettings.dataLoggingFreqFrames) {
-                m_logFrameCounter = 0;
-                // Compute monotonic timestamp in ms from session start
-                uint64_t nowMs = static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch()).count());
-                double sessionMs = static_cast<double>(nowMs - m_logSessionStartMs);
-                
-                std::vector<TrackedObject> logObjects = tracked;
-                for (const auto& track : m_workerMotionTracks) {
-                    bool overlaps = false;
-                    for (const auto& obj : tracked) {
-                        if (!obj.is_active || !obj.is_confirmed) continue;
-                        cv::Rect inter = track.box & obj.box;
-                        if (inter.area() > 0) {
-                            double ratio = (double)inter.area() / track.box.area();
-                            if (ratio > 0.2) {
-                                overlaps = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (!overlaps) {
-                        TrackedObject motionObj;
-                        motionObj.track_id = track.id + 10000;
-                        motionObj.class_id = -99;
-                        motionObj.className = "Motion";
-                        motionObj.box = track.box;
-                        motionObj.confidence = 1.0f;
-                        motionObj.lost_frames = 0;
-                        motionObj.is_active = true;
-                        motionObj.is_confirmed = true;
-                        logObjects.push_back(motionObj);
-                    }
-                }
-                m_dataLogger->logFrame(sessionMs, logObjects, 0.0 /* no calibration yet */);
+        m_totalFramesProcessed.fetch_add(1);
+
+        // ── Data-Logging Session Management (Plan 03) ─────────────────────
+        if (currentSettings.dataLoggingEnabled && !m_dataLogger->isOpen()) {
+            LogFormat fmt = (currentSettings.dataLoggingFormat == 1) ? LogFormat::JSON : LogFormat::CSV;
+            if (m_dataLogger->open(currentSettings.dataLoggingOutputDir, fmt)) {
+                log(LogLevel::INFO, "Data logging started: " + m_dataLogger->getCurrentPath());
             }
+            m_logSessionStartMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+        } else if (!currentSettings.dataLoggingEnabled && m_dataLogger->isOpen()) {
+            m_dataLogger->close();
+            log(LogLevel::INFO, "Data logging stopped.");
         }
 
-        // Trigger next detection if enabled and detector is idle
         if (currentSettings.enableDetection && !m_detectorBusy.load()) {
             bool runDetector = (frameSkipCounter == 0);
             frameSkipCounter = (frameSkipCounter + 1) % (currentSettings.detectionSkipFrames + 1);
@@ -1219,137 +968,6 @@ void Application::workerLoop() {
                 m_detectorBusy = true;
                 m_detectorCv.notify_one();
             }
-        }
-
-        // --- Handle Target Locking Logic ---
-        if (m_lockRequested.exchange(false)) {
-            m_sharedLockedTarget.track_id = m_requestedLockId.load();
-            m_sharedLockedTarget.state = TrackingState::LOCKED;
-            m_pixelLockActive = false;
-        }
-
-        if (m_releaseLockRequested.exchange(false)) {
-            m_sharedLockedTarget.state = TrackingState::SEARCHING;
-            m_sharedLockedTarget.track_id = -1;
-            m_pixelLockActive = false;
-        }
-
-        // Process pixel lock request
-        if (m_pixelLockRequested.exchange(false)) {
-            cv::Point pt;
-            {
-                std::lock_guard<std::mutex> lock(m_dataMutex);
-                pt = m_pixelLockPoint;
-            }
-
-            int templateSize = 60;
-            cv::Rect templateRect(pt.x - templateSize / 2, pt.y - templateSize / 2, templateSize, templateSize);
-
-            // Clamp to frame
-            templateRect.x = std::max(0, templateRect.x);
-            templateRect.y = std::max(0, templateRect.y);
-            if (templateRect.x + templateRect.width > trackingFrame.cols) {
-                templateRect.width = trackingFrame.cols - templateRect.x;
-            }
-            if (templateRect.y + templateRect.height > trackingFrame.rows) {
-                templateRect.height = trackingFrame.rows - templateRect.y;
-            }
-
-            if (templateRect.width > 10 && templateRect.height > 10) {
-                m_pixelTemplate = trackingFrame(templateRect).clone();
-                m_pixelLockActive = true;
-                m_pixelVx = 0.0f;
-                m_pixelVy = 0.0f;
-                m_pixelCenterX = static_cast<float>(pt.x);
-                m_pixelCenterY = static_cast<float>(pt.y);
-                m_pixelLockRect = templateRect;
-
-                m_sharedLockedTarget.state = TrackingState::LOCKED;
-                m_sharedLockedTarget.track_id = m_tracker->getNextIdAndIncrement();
-                m_sharedLockedTarget.class_id = -1;
-                m_sharedLockedTarget.className = "Pixel Target";
-                m_sharedLockedTarget.box = templateRect;
-                m_sharedLockedTarget.confidence = 1.0f;
-                m_sharedLockedTarget.lost_frames = 0;
-                m_sharedLockedTarget.trail.clear();
-                m_sharedLockedTarget.trail.push_back(pt);
-            }
-        }
-
-        // Process pixel lock template update request (manual resize/drag)
-        if (m_pixelLockRectUpdateRequested.exchange(false)) {
-            cv::Rect rect;
-            {
-                std::lock_guard<std::mutex> lock(m_dataMutex);
-                rect = m_pixelLockRect;
-            }
-
-            // Clamp to frame
-            rect.x = std::max(0, rect.x);
-            rect.y = std::max(0, rect.y);
-            if (rect.x + rect.width > trackingFrame.cols) {
-                rect.width = trackingFrame.cols - rect.x;
-            }
-            if (rect.y + rect.height > trackingFrame.rows) {
-                rect.height = trackingFrame.rows - rect.y;
-            }
-
-            if (rect.width > 4 && rect.height > 4) {
-                m_pixelTemplate = trackingFrame(rect).clone();
-                m_pixelLockActive = true;
-                m_pixelVx = 0.0f;
-                m_pixelVy = 0.0f;
-                m_pixelCenterX = static_cast<float>(rect.x + rect.width / 2.0f);
-                m_pixelCenterY = static_cast<float>(rect.y + rect.height / 2.0f);
-                m_pixelLockRect = rect;
-
-                m_sharedLockedTarget.state = TrackingState::LOCKED;
-                int currentId = m_sharedLockedTarget.track_id;
-                if (currentId < 0 || currentId == 999) {
-                    currentId = m_tracker->getNextIdAndIncrement();
-                }
-                m_sharedLockedTarget.track_id = currentId;
-                m_sharedLockedTarget.class_id = -1;
-                m_sharedLockedTarget.className = "Pixel Target";
-                m_sharedLockedTarget.box = rect;
-                m_sharedLockedTarget.confidence = 1.0f;
-                m_sharedLockedTarget.lost_frames = 0;
-
-                cv::Point newCenter(rect.x + rect.width / 2, rect.y + rect.height / 2);
-                if (!m_sharedLockedTarget.trail.empty()) {
-                    m_sharedLockedTarget.trail.back() = newCenter;
-                } else {
-                    m_sharedLockedTarget.trail.push_back(newCenter);
-                }
-            }
-        }
-
-        // Update target lock states for non-pixel objects if pixelLock is inactive
-        if (!m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
-            bool found = false;
-            for (const auto& t : tracked) {
-                if (t.track_id == m_sharedLockedTarget.track_id) {
-                    m_sharedLockedTarget.box = t.box;
-                    m_sharedLockedTarget.className = t.className;
-                    m_sharedLockedTarget.confidence = t.confidence;
-                    m_sharedLockedTarget.trail = t.trail;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) m_sharedLockedTarget.state = TrackingState::LOST;
-            else        m_sharedLockedTarget.state = TrackingState::LOCKED;
-        }
-
-        // ── Audio: target lock state transitions ───────────────────────────
-        {
-            const TrackingState curState = m_sharedLockedTarget.state;
-            if (m_prevLockState != TrackingState::LOCKED && curState == TrackingState::LOCKED) {
-                m_audioEngine.playLockAcquired();
-            } else if (m_prevLockState == TrackingState::LOCKED && curState == TrackingState::LOST) {
-                m_audioEngine.playLockLost();
-            }
-            m_prevLockState = curState;
         }
 
         // Crop target zoom from rawFrame (or trackingFrame if disabled)
@@ -1426,7 +1044,6 @@ void Application::workerLoop() {
             zoomCrop.copyTo(m_sharedZoomFrame);
             m_sharedDetections       = detections;
             // m_sharedTrackedObjects is now updated by trackingWorkerLoop
-            m_sharedTargetHistory    = m_targetHistory;
             m_sharedMotionRegions    = motionRegions;
             m_sharedCameraFps        = currentFps;
             m_sharedCameraWidth      = rawFrame.cols;
@@ -1457,6 +1074,8 @@ void Application::trackingWorkerLoop() {
         SystemSettings settings;
         std::vector<Detection> detections;
         int detectorLag = 0;
+        uint64_t sessionMs = 0;
+        std::vector<WorkerMotionTrack> motionTracks;
 
         {
             std::unique_lock<std::mutex> lock(m_trackingMutex);
@@ -1467,9 +1086,11 @@ void Application::trackingWorkerLoop() {
             if (!m_running) break;
 
             m_trackingFrameCopy.copyTo(trackingFrame);
-            settings = m_trackingSettingsCopy;
-            detections = m_trackingDetectionsCopy;
-            detectorLag = m_trackingDetectorLag;
+            settings     = m_trackingSettingsCopy;
+            detections   = m_trackingDetectionsCopy;
+            detectorLag  = m_trackingDetectorLag;
+            sessionMs    = m_trackingSessionMs;
+            motionTracks = m_trackingMotionTracksCopy;
         }
 
         if (trackingFrame.empty()) {
@@ -1479,174 +1100,281 @@ void Application::trackingWorkerLoop() {
 
         // --- Tracking Logic (moved from workerLoop) ---
         std::vector<TrackedObject> tracked;
-        if (settings.enableTracking) {
-            // Update tracker
-            m_tracker->update(detections, settings, detectorLag);
-            
-            tracked = m_tracker->getTrackedObjects(settings.trackerMaxTrailLength);
-            updateTargetHistory(tracked, trackingFrame);
+        try {
+            // --- 1. Handle External Lock Commands ---
+            if (m_lockRequested.exchange(false)) {
+                m_sharedLockedTarget.track_id = m_requestedLockId.load();
+                m_sharedLockedTarget.state = TrackingState::LOCKED;
+                m_pixelLockActive = false;
+            }
+            if (m_releaseLockRequested.exchange(false)) {
+                m_sharedLockedTarget.state = TrackingState::SEARCHING;
+                m_sharedLockedTarget.track_id = -1;
+                m_pixelLockActive = false;
+            }
+            if (m_pixelLockRequested.exchange(false)) {
+                cv::Point pt; { std::lock_guard<std::mutex> lock(m_dataMutex); pt = m_pixelLockPoint; }
+                int ts = 60;
+                cv::Rect tr(std::max(0, pt.x - ts/2), std::max(0, pt.y - ts/2), ts, ts);
+                if (tr.x + tr.width > trackingFrame.cols) tr.width = trackingFrame.cols - tr.x;
+                if (tr.y + tr.height > trackingFrame.rows) tr.height = trackingFrame.rows - tr.y;
+                if (tr.width > 10 && tr.height > 10) {
+                    m_pixelTemplate = trackingFrame(tr).clone();
+                    m_pixelLockActive = true; m_pixelVx = 0.0f; m_pixelVy = 0.0f;
+                    m_pixelCenterX = static_cast<float>(pt.x); m_pixelCenterY = static_cast<float>(pt.y);
+                    m_pixelLockRect = tr;
+                    m_sharedLockedTarget.state = TrackingState::LOCKED;
+                    m_sharedLockedTarget.track_id = m_tracker->getNextIdAndIncrement();
+                    m_sharedLockedTarget.class_id = -1; m_sharedLockedTarget.className = "Pixel Target";
+                    m_sharedLockedTarget.box = tr; m_sharedLockedTarget.confidence = 1.0f;
+                    m_sharedLockedTarget.lost_frames = 0; m_sharedLockedTarget.trail.clear();
+                    m_sharedLockedTarget.trail.push_back(pt);
+                }
+            }
+            if (m_pixelLockRectUpdateRequested.exchange(false)) {
+                cv::Rect rect; { std::lock_guard<std::mutex> lock(m_dataMutex); rect = m_pixelLockRect; }
+                rect.x = std::max(0, rect.x); rect.y = std::max(0, rect.y);
+                if (rect.x + rect.width > trackingFrame.cols) rect.width = trackingFrame.cols - rect.x;
+                if (rect.y + rect.height > trackingFrame.rows) rect.height = trackingFrame.rows - rect.y;
+                if (rect.width > 4 && rect.height > 4) {
+                    m_pixelTemplate = trackingFrame(rect).clone();
+                    m_pixelLockActive = true; m_pixelVx = 0.0f; m_pixelVy = 0.0f;
+                    m_pixelCenterX = static_cast<float>(rect.x + rect.width / 2.0f);
+                    m_pixelCenterY = static_cast<float>(rect.y + rect.height / 2.0f);
+                    m_pixelLockRect = rect;
+                    m_sharedLockedTarget.state = TrackingState::LOCKED;
+                    if (m_sharedLockedTarget.track_id < 0) m_sharedLockedTarget.track_id = m_tracker->getNextIdAndIncrement();
+                    m_sharedLockedTarget.box = rect; m_sharedLockedTarget.confidence = 1.0f; m_sharedLockedTarget.lost_frames = 0;
+                }
+            }
 
-            // Update pixel target using template matching if active
-            if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
-                if (!m_pixelLockDragging.load()) {
-                    cv::Rect lastBox = m_sharedLockedTarget.box;
+            if (settings.enableTracking) {
+                // Update tracker
+                m_tracker->update(detections, settings, detectorLag);
+                
+                tracked = m_tracker->getTrackedObjects(settings.trackerMaxTrailLength);
+                updateTargetHistory(tracked, trackingFrame);
 
-                    // Predict next position using constant velocity motion model
-                    m_pixelCenterX += m_pixelVx;
-                    m_pixelCenterY += m_pixelVy;
+                // Update pixel target using template matching if active
+                if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+                    if (!m_pixelLockDragging.load()) {
+                        cv::Rect lastBox = m_sharedLockedTarget.box;
 
-                    cv::Rect predictedBox(
-                        static_cast<int>(std::round(m_pixelCenterX - lastBox.width / 2.0f)),
-                        static_cast<int>(std::round(m_pixelCenterY - lastBox.height / 2.0f)),
-                        lastBox.width,
-                        lastBox.height
-                    );
+                        // Predict next position using constant velocity motion model
+                        m_pixelCenterX += m_pixelVx;
+                        m_pixelCenterY += m_pixelVy;
 
-                    int pad = 80; // Larger search window to prevent tracking loss
-                    int rectW = predictedBox.width + pad * 2;
-                    int rectH = predictedBox.height + pad * 2;
-                    int rectX = predictedBox.x - pad;
-                    int rectY = predictedBox.y - pad;
+                        cv::Rect predictedBox(
+                            static_cast<int>(std::round(m_pixelCenterX - lastBox.width / 2.0f)),
+                            static_cast<int>(std::round(m_pixelCenterY - lastBox.height / 2.0f)),
+                            lastBox.width,
+                            lastBox.height
+                        );
 
-                    if (rectW > trackingFrame.cols) rectW = trackingFrame.cols;
-                    if (rectH > trackingFrame.rows) rectH = trackingFrame.rows;
+                        int pad = 80; // Larger search window to prevent tracking loss
+                        int rectW = predictedBox.width + pad * 2;
+                        int rectH = predictedBox.height + pad * 2;
+                        int rectX = predictedBox.x - pad;
+                        int rectY = predictedBox.y - pad;
 
-                    if (rectX < 0) rectX = 0;
-                    if (rectY < 0) rectY = 0;
-                    if (rectX + rectW > trackingFrame.cols) rectX = trackingFrame.cols - rectW;
-                    if (rectY + rectH > trackingFrame.rows) rectY = trackingFrame.rows - rectH;
+                        if (rectW > trackingFrame.cols) rectW = trackingFrame.cols;
+                        if (rectH > trackingFrame.rows) rectH = trackingFrame.rows;
 
-                    cv::Rect searchRect(rectX, rectY, rectW, rectH);
+                        if (rectX < 0) rectX = 0;
+                        if (rectY < 0) rectY = 0;
+                        if (rectX + rectW > trackingFrame.cols) rectX = trackingFrame.cols - rectW;
+                        if (rectY + rectH > trackingFrame.rows) rectY = trackingFrame.rows - rectH;
 
-                    if (searchRect.width >= m_pixelTemplate.cols && searchRect.height >= m_pixelTemplate.rows) {
-                        cv::Mat result;
-                        cv::matchTemplate(trackingFrame(searchRect), m_pixelTemplate, result, cv::TM_CCOEFF_NORMED);
+                        cv::Rect searchRect(rectX, rectY, rectW, rectH);
 
-                        double minVal, maxVal;
-                        cv::Point minLoc, maxLoc;
-                        cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
+                        if (searchRect.width >= m_pixelTemplate.cols && searchRect.height >= m_pixelTemplate.rows) {
+                            cv::Mat result;
+                            cv::matchTemplate(trackingFrame(searchRect), m_pixelTemplate, result, cv::TM_CCOEFF_NORMED);
 
-                        if (maxVal > 0.5) {
-                            // Sub-pixel peak interpolation (quadratic fit)
-                            double dx = 0.0, dy = 0.0;
-                            if (maxLoc.x > 0 && maxLoc.x < result.cols - 1) {
-                                float valL = result.at<float>(maxLoc.y, maxLoc.x - 1);
-                                float valR = result.at<float>(maxLoc.y, maxLoc.x + 1);
-                                float valC = static_cast<float>(maxVal);
-                                float denom = valL - 2.0f * valC + valR;
-                                if (std::abs(denom) > 1e-5f) dx = static_cast<double>((valL - valR) / (2.0f * denom));
-                            }
-                            if (maxLoc.y > 0 && maxLoc.y < result.rows - 1) {
-                                float valT = result.at<float>(maxLoc.y - 1, maxLoc.x);
-                                float valB = result.at<float>(maxLoc.y + 1, maxLoc.x);
-                                float valC = static_cast<float>(maxVal);
-                                float denom = valT - 2.0f * valC + valB;
-                                if (std::abs(denom) > 1e-5f) dy = static_cast<double>((valT - valB) / (2.0f * denom));
-                            }
+                            double minVal, maxVal;
+                            cv::Point minLoc, maxLoc;
+                            cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
 
-                            double new_center_x = searchRect.x + maxLoc.x + dx + m_pixelTemplate.cols / 2.0;
-                            double new_center_y = searchRect.y + maxLoc.y + dy + m_pixelTemplate.rows / 2.0;
+                            if (maxVal > 0.5) {
+                                // Sub-pixel peak interpolation (quadratic fit)
+                                double dx = 0.0, dy = 0.0;
+                                if (maxLoc.x > 0 && maxLoc.x < result.cols - 1) {
+                                    float valL = result.at<float>(maxLoc.y, maxLoc.x - 1);
+                                    float valR = result.at<float>(maxLoc.y, maxLoc.x + 1);
+                                    float valC = static_cast<float>(maxVal);
+                                    float denom = valL - 2.0f * valC + valR;
+                                    if (std::abs(denom) > 1e-5f) dx = static_cast<double>((valL - valR) / (2.0f * denom));
+                                }
+                                if (maxLoc.y > 0 && maxLoc.y < result.rows - 1) {
+                                    float valT = result.at<float>(maxLoc.y - 1, maxLoc.x);
+                                    float valB = result.at<float>(maxLoc.y + 1, maxLoc.x);
+                                    float valC = static_cast<float>(maxVal);
+                                    float denom = valT - 2.0f * valC + valB;
+                                    if (std::abs(denom) > 1e-5f) dy = static_cast<double>((valT - valB) / (2.0f * denom));
+                                }
 
-                            float alpha = settings.trackerVelocitySmoothing;
-                            m_pixelVx = alpha * static_cast<float>(new_center_x - (lastBox.x + lastBox.width / 2.0)) + (1.0f - alpha) * m_pixelVx;
-                            m_pixelVy = alpha * static_cast<float>(new_center_y - (lastBox.y + lastBox.height / 2.0)) + (1.0f - alpha) * m_pixelVy;
+                                double new_center_x = searchRect.x + maxLoc.x + dx + m_pixelTemplate.cols / 2.0;
+                                double new_center_y = searchRect.y + maxLoc.y + dy + m_pixelTemplate.rows / 2.0;
 
-                            m_pixelCenterX = static_cast<float>(new_center_x);
-                            m_pixelCenterY = static_cast<float>(new_center_y);
+                                float alpha = settings.trackerVelocitySmoothing;
+                                m_pixelVx = alpha * static_cast<float>(new_center_x - (lastBox.x + lastBox.width / 2.0)) + (1.0f - alpha) * m_pixelVx;
+                                m_pixelVy = alpha * static_cast<float>(new_center_y - (lastBox.y + lastBox.height / 2.0)) + (1.0f - alpha) * m_pixelVy;
 
-                            cv::Rect newBox(
-                                static_cast<int>(std::round(m_pixelCenterX - m_pixelTemplate.cols / 2.0f)),
-                                static_cast<int>(std::round(m_pixelCenterY - m_pixelTemplate.rows / 2.0f)),
-                                m_pixelTemplate.cols,
-                                m_pixelTemplate.rows
-                            );
+                                m_pixelCenterX = static_cast<float>(new_center_x);
+                                m_pixelCenterY = static_cast<float>(new_center_y);
 
-                            m_sharedLockedTarget.box = newBox;
-                            m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
-                            m_sharedLockedTarget.lost_frames = 0;
-                            m_sharedLockedTarget.state = TrackingState::LOCKED;
+                                cv::Rect newBox(
+                                    static_cast<int>(std::round(m_pixelCenterX - m_pixelTemplate.cols / 2.0f)),
+                                    static_cast<int>(std::round(m_pixelCenterY - m_pixelTemplate.rows / 2.0f)),
+                                    m_pixelTemplate.cols,
+                                    m_pixelTemplate.rows
+                                );
 
-                            cv::Point newCenter(newBox.x + newBox.width / 2, newBox.y + newBox.height / 2);
-                            m_sharedLockedTarget.trail.push_back(newCenter);
-                            if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(settings.trackerMaxTrailLength)) {
-                                m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
-                            }
+                                m_sharedLockedTarget.box = newBox;
+                                m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
+                                m_sharedLockedTarget.lost_frames = 0;
+                                m_sharedLockedTarget.state = TrackingState::LOCKED;
 
-                            if (maxVal > 0.85) {
-                                cv::Mat matchedPatch = trackingFrame(newBox);
-                                if (matchedPatch.size() == m_pixelTemplate.size() && matchedPatch.type() == m_pixelTemplate.type()) {
-                                    double beta = 0.05;
-                                    cv::addWeighted(m_pixelTemplate, 1.0 - beta, matchedPatch, beta, 0.0, m_pixelTemplate);
+                                cv::Point newCenter(newBox.x + newBox.width / 2, newBox.y + newBox.height / 2);
+                                m_sharedLockedTarget.trail.push_back(newCenter);
+                                if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(settings.trackerMaxTrailLength)) {
+                                    m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
+                                }
+
+                                if (maxVal > 0.85) {
+                                    cv::Mat matchedPatch = trackingFrame(newBox);
+                                    if (matchedPatch.size() == m_pixelTemplate.size() && matchedPatch.type() == m_pixelTemplate.type()) {
+                                        double beta = 0.05;
+                                        cv::addWeighted(m_pixelTemplate, 1.0 - beta, matchedPatch, beta, 0.0, m_pixelTemplate);
+                                    }
+                                }
+                            } else {
+                                m_sharedLockedTarget.lost_frames++;
+                                m_pixelVx *= settings.trackerDeadReckoningDamping;
+                                m_pixelVy *= settings.trackerDeadReckoningDamping;
+                                m_sharedLockedTarget.box = predictedBox;
+                                if (m_sharedLockedTarget.lost_frames > settings.trackerMaxLostFrames) {
+                                    m_sharedLockedTarget.state = TrackingState::LOST;
+                                    m_pixelLockActive = false;
+                                } else {
+                                    m_sharedLockedTarget.state = TrackingState::LOST;
                                 }
                             }
-                        } else {
-                            m_sharedLockedTarget.lost_frames++;
-                            m_pixelVx *= settings.trackerDeadReckoningDamping;
-                            m_pixelVy *= settings.trackerDeadReckoningDamping;
-                            m_sharedLockedTarget.box = predictedBox;
-                            if (m_sharedLockedTarget.lost_frames > settings.trackerMaxLostFrames) {
-                                m_sharedLockedTarget.state = TrackingState::LOST;
-                                m_pixelLockActive = false;
-                            } else {
-                                m_sharedLockedTarget.state = TrackingState::LOST;
+                        }
+                    }
+                }
+
+                // Update target lock states for non-pixel objects if pixelLock is inactive
+                if (!m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+                    bool found = false;
+                    for (const auto& t : tracked) {
+                        if (t.track_id == m_sharedLockedTarget.track_id) {
+                            m_sharedLockedTarget.box = t.box;
+                            m_sharedLockedTarget.className = t.className;
+                            m_sharedLockedTarget.confidence = t.confidence;
+                            m_sharedLockedTarget.trail = t.trail;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) m_sharedLockedTarget.state = TrackingState::LOST;
+                    else        m_sharedLockedTarget.state = TrackingState::LOCKED;
+                }
+
+                // ── Audio: target lock state transitions ───────────────────────────
+                {
+                    const TrackingState curState = m_sharedLockedTarget.state;
+                    if (m_prevLockState != TrackingState::LOCKED && curState == TrackingState::LOCKED) {
+                        m_audioEngine.playLockAcquired();
+                    } else if (m_prevLockState == TrackingState::LOCKED && curState == TrackingState::LOST) {
+                        m_audioEngine.playLockLost();
+                    }
+                    m_prevLockState = curState;
+                }
+
+                if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
+                    TrackedObject pixelObj;
+                    pixelObj.track_id = m_sharedLockedTarget.track_id;
+                    pixelObj.class_id = -1;
+                    pixelObj.className = m_sharedLockedTarget.className;
+                    pixelObj.box = m_sharedLockedTarget.box;
+                    pixelObj.confidence = m_sharedLockedTarget.confidence;
+                    pixelObj.lost_frames = m_sharedLockedTarget.lost_frames;
+                    pixelObj.is_active = (m_sharedLockedTarget.state == TrackingState::LOCKED);
+                    pixelObj.is_confirmed = true;
+                    pixelObj.trail = m_sharedLockedTarget.trail;
+                    tracked.push_back(pixelObj);
+                }
+
+                m_workerTrackCount.store(static_cast<int>(tracked.size()));
+
+                // Alarm Zone Checks
+                auto zones = m_roiManager->getROIs();
+                std::unordered_set<int> activeZoneIds;
+                for (const auto& z : zones) {
+                    if (z.active && z.function == ROIFunction::ALARM) {
+                        activeZoneIds.insert(z.id);
+                        std::unordered_set<int> currentTracksInZone;
+                        for (const auto& obj : tracked) {
+                            cv::Point center(obj.box.x + obj.box.width / 2, obj.box.y + obj.box.height / 2);
+                            if (z.rect.contains(center)) currentTracksInZone.insert(obj.track_id);
+                        }
+                        for (int tid : currentTracksInZone) {
+                            if (m_activeAlarms[z.id].find(tid) == m_activeAlarms[z.id].end()) {
+                                log(LogLevel::WARN, "ALARM: Object #" + std::to_string(tid) + " entered Alarm Zone '" + z.label + "'");
+                                m_audioEngine.playAlarmEntry();
                             }
                         }
+                        for (int tid : m_activeAlarms[z.id]) {
+                            if (currentTracksInZone.find(tid) == currentTracksInZone.end()) {
+                                log(LogLevel::INFO, "Object #" + std::to_string(tid) + " left Alarm Zone '" + z.label + "'");
+                                m_audioEngine.playAlarmExit();
+                            }
+                        }
+                        m_activeAlarms[z.id] = currentTracksInZone;
                     }
                 }
-            }
+                for (auto it = m_activeAlarms.begin(); it != m_activeAlarms.end(); ) {
+                    if (activeZoneIds.find(it->first) == activeZoneIds.end()) it = m_activeAlarms.erase(it);
+                    else ++it;
+                }
 
-            if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
-                TrackedObject pixelObj;
-                pixelObj.track_id = m_sharedLockedTarget.track_id;
-                pixelObj.class_id = -1;
-                pixelObj.className = m_sharedLockedTarget.className;
-                pixelObj.box = m_sharedLockedTarget.box;
-                pixelObj.confidence = m_sharedLockedTarget.confidence;
-                pixelObj.lost_frames = m_sharedLockedTarget.lost_frames;
-                pixelObj.is_active = (m_sharedLockedTarget.state == TrackingState::LOCKED);
-                pixelObj.is_confirmed = true;
-                pixelObj.trail = m_sharedLockedTarget.trail;
-                tracked.push_back(pixelObj);
-            }
-
-            m_workerTrackCount.store(static_cast<int>(tracked.size()));
-
-            // Alarm Zone Checks
-            auto zones = m_roiManager->getROIs();
-            std::unordered_set<int> activeZoneIds;
-            for (const auto& z : zones) {
-                if (z.active && z.function == ROIFunction::ALARM) {
-                    activeZoneIds.insert(z.id);
-                    std::unordered_set<int> currentTracksInZone;
-                    for (const auto& obj : tracked) {
-                        cv::Point center(obj.box.x + obj.box.width / 2, obj.box.y + obj.box.height / 2);
-                        if (z.rect.contains(center)) currentTracksInZone.insert(obj.track_id);
-                    }
-                    for (int tid : currentTracksInZone) {
-                        if (m_activeAlarms[z.id].find(tid) == m_activeAlarms[z.id].end()) {
-                            log(LogLevel::WARN, "ALARM: Object #" + std::to_string(tid) + " entered Alarm Zone '" + z.label + "'");
-                            m_audioEngine.playAlarmEntry();
+                // ── Data-Logging (Plan 03) ────────────────────────────────────
+                if (settings.dataLoggingEnabled && m_dataLogger->isOpen()) {
+                    std::vector<TrackedObject> logObjects = tracked;
+                    for (const auto& mtrack : motionTracks) {
+                        bool overlaps = false;
+                        for (const auto& obj : tracked) {
+                            if (!obj.is_active || !obj.is_confirmed) continue;
+                            cv::Rect inter = mtrack.box & obj.box;
+                            if (inter.area() > 0) {
+                                double ratio = (double)inter.area() / mtrack.box.area();
+                                if (ratio > 0.2) { overlaps = true; break; }
+                            }
+                        }
+                        if (!overlaps) {
+                            TrackedObject motionObj;
+                            motionObj.track_id = mtrack.id + 10000;
+                            motionObj.class_id = -99;
+                            motionObj.className = "Motion";
+                            motionObj.box = mtrack.box;
+                            motionObj.confidence = 1.0f;
+                            motionObj.is_active = true;
+                            motionObj.is_confirmed = true;
+                            logObjects.push_back(motionObj);
                         }
                     }
-                    for (int tid : m_activeAlarms[z.id]) {
-                        if (currentTracksInZone.find(tid) == currentTracksInZone.end()) {
-                            log(LogLevel::INFO, "Object #" + std::to_string(tid) + " left Alarm Zone '" + z.label + "'");
-                            m_audioEngine.playAlarmExit();
-                        }
-                    }
-                    m_activeAlarms[z.id] = currentTracksInZone;
+                    m_dataLogger->logFrame(static_cast<double>(sessionMs), logObjects, 0.0);
                 }
             }
-            for (auto it = m_activeAlarms.begin(); it != m_activeAlarms.end(); ) {
-                if (activeZoneIds.find(it->first) == activeZoneIds.end()) it = m_activeAlarms.erase(it);
-                else ++it;
-            }
+        } catch (const std::exception& e) {
+            log(LogLevel::ERR, std::string("Async tracking failed: ") + e.what());
         }
 
         {
             std::lock_guard<std::mutex> lock(m_dataMutex);
             m_sharedTrackedObjects = tracked;
-            m_sharedTargetHistory = m_targetHistory;
+            m_sharedTargetHistory = m_internalTargetHistory;
         }
 
         m_trackingBusy = false;
@@ -2430,10 +2158,18 @@ void Application::renderDevConsole() {
                 ImGui::SameLine();
                 settingsChanged |= ImGui::Checkbox("Heatmap##md", &m_settings.motionHeatmapOverlay);
 
-                if (m_settings.motionHeatmapOverlay) {
+        if (m_settings.motionHeatmapOverlay) {
                     ImGui::SetNextItemWidth(140);
                     settingsChanged |= ImGui::SliderFloat("Heatmap Decay##md", &m_settings.motionHeatmapDecay, 0.5f, 0.99f, "%.2f");
                     if (ImGui::IsItemHovered()) ImGui::SetTooltip("How fast the heatmap cools down.\n0.90 = medium persistence, 0.99 = high persistence.");
+
+                    ImGui::SetNextItemWidth(140);
+                    settingsChanged |= ImGui::SliderFloat("Heatmap Sensitivity##md", &m_settings.motionHeatmapSensitivity, 1.0f, 50.0f, "%.1f");
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Lower value = more sensitive to small movements.");
+
+                    ImGui::SetNextItemWidth(140);
+                    settingsChanged |= ImGui::SliderFloat("Heatmap Alpha##md", &m_settings.motionHeatmapAlpha, 0.0f, 1.0f, "%.2f");
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Overall transparency of the heatmap overlay.");
                 }
 
                 settingsChanged |= ImGui::Checkbox("Enable Sub Zooms##sz", &m_settings.subZoomsEnabled);
