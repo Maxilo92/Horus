@@ -6,6 +6,9 @@
 #include "imgui.h"
 #include "Common.hpp"
 
+// Default motion overlay color: orange-red, semi-transparent
+static constexpr ImU32 kDefaultMotionColor = IM_COL32(255, 89, 0, 165);
+
 class HUD {
 public:
     HUD();
@@ -16,6 +19,14 @@ public:
                 const TrackedTarget& lockedTarget,
                 const ViewportInfo& view,
                 const SystemSettings& settings);
+
+    // Draw motion detection overlay (Option C: fill + outline).
+    // Must be called before drawTrackedObject() so motion regions appear
+    // behind tracking bounding boxes.
+    void drawMotionOverlay(ImDrawList* drawList,
+                           const std::vector<cv::Rect>& regions,
+                           const ViewportInfo& view,
+                           const SystemSettings& settings);
 
 private:
     void drawTacticalOverlay(ImDrawList* drawList, const ViewportInfo& view,
@@ -30,7 +41,9 @@ private:
 
     ImU32 m_hudColor;
     ImU32 m_targetColor;
+    ImU32 m_motionColor;
     float m_startTime;
 };
 
 #endif // HUD_HPP
+

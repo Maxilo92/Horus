@@ -22,6 +22,8 @@
 #include "MultiTracker.hpp"
 #include "DataLogger.hpp"
 #include "ROIManager.hpp"
+#include "MotionDetector.hpp"
+#include "AudioEngine.hpp"
 #include "Common.hpp"
 
 // ---------------------------------------------------------------
@@ -84,6 +86,8 @@ private:
     std::unique_ptr<MultiTracker>    m_tracker;
     std::unique_ptr<DataLogger>      m_dataLogger;
     std::unique_ptr<ROIManager>      m_roiManager;
+    MotionDetector                   m_motionDetector;
+    AudioEngine                      m_audioEngine;
 
     std::string m_cameraAddress;
 
@@ -101,6 +105,7 @@ private:
     std::vector<TrackedObject> m_sharedTrackedObjects;
     TrackedTarget            m_sharedLockedTarget;
     SystemSettings           m_sharedSettings;
+    std::vector<cv::Rect>    m_sharedMotionRegions;   // Motion regions (worker → render)
     float                    m_sharedCameraFps = 0.0f;
     std::atomic<int>         m_sharedCameraWidth{0};
     std::atomic<int>         m_sharedCameraHeight{0};
@@ -120,6 +125,8 @@ private:
     cv::Rect                 m_pixelLockRect;
     float                    m_pixelVx = 0.0f;
     float                    m_pixelVy = 0.0f;
+    float                    m_pixelCenterX = 0.0f;
+    float                    m_pixelCenterY = 0.0f;
     bool                     m_newDataAvailable;
     float                    m_cameraFps = 0.0f;
     int                      m_cameraWidth = 0;
@@ -168,8 +175,9 @@ private:
     bool               m_cameraStatusOk = true;
 
     // Color arrays for ImGui::ColorEdit4 (RGBA [0,1])
-    float m_hudColorF[4]    = {0.0f, 0.784f, 0.392f, 0.863f};
-    float m_targetColorF[4] = {1.0f, 0.706f, 0.0f,  1.0f};
+    float m_hudColorF[4]           = {0.0f, 0.784f, 0.392f, 0.863f};
+    float m_targetColorF[4]        = {1.0f, 0.706f, 0.0f,  1.0f};
+    float m_motionOverlayColorF[4] = {1.0f, 0.35f,  0.0f,  0.65f}; // Default: orange-red
 
     // Worker-thread perf counters (set from worker, read in render)
     std::atomic<int>         m_workerDetectionCount{0};
@@ -208,10 +216,19 @@ private:
     // Active track-zone alarm states for transition warnings
     std::unordered_map<int, std::unordered_set<int>> m_activeAlarms;
 
+    // ---------------------------------------------------------------
+    // Audio feedback state
+    // ---------------------------------------------------------------
+    // Previous lock state for detecting LOCKED→LOST transitions
+    TrackingState m_prevLockState = TrackingState::SEARCHING;
+    // Previous confirmed tracked-object count for lock-acquired detection
+    bool          m_prevLockWasActive = false;
+
     // Feedback UI state
     bool m_showFeedbackWindow = false;
     char m_feedbackBuf[1024] = {0};
-    void saveFeedback(const std::string& feedback);
+    std::string m_feedbackStatus;
+    bool saveFeedback(const std::string& feedback);
 };
 
 #endif // APPLICATION_HPP

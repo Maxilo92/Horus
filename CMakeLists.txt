@@ -36,10 +36,12 @@ set(IMGUI_SRCS
 # Project Source Files (excluding main.cpp for tests)
 set(CORE_SRCS
     src/core/Application.cpp
+    src/core/AudioEngine.cpp
     src/core/DataLogger.cpp
     src/core/ROIManager.cpp
     src/vision/CameraModule.cpp
     src/vision/VideoRenderer.cpp
+    src/vision/MotionDetector.cpp
     src/ui/HUD.cpp
     src/tracking/MultiTracker.cpp
 )
@@ -70,11 +72,17 @@ target_include_directories(Tactileviewer PRIVATE
     ${GLEW_INCLUDE_DIRS}
 )
 
+target_compile_definitions(Tactileviewer PRIVATE
+    PROJECT_HORUS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 target_link_libraries(Tactileviewer 
     ${OpenCV_LIBS}
     OpenGL::GL
     ${GLFW_LIBRARIES}
     ${GLEW_LIBRARIES}
+    "-framework AudioToolbox"
+    "-framework CoreFoundation"
 )
 
 # --- TESTING ---
@@ -117,11 +125,17 @@ target_include_directories(unit_tests PRIVATE
     ${OpenCV_INCLUDE_DIRS}
 )
 
+target_compile_definitions(unit_tests PRIVATE
+    PROJECT_HORUS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 target_link_libraries(unit_tests 
     ${OpenCV_LIBS}
     OpenGL::GL
     ${GLFW_LIBRARIES}
     ${GLEW_LIBRARIES}
+    "-framework AudioToolbox"
+    "-framework CoreFoundation"
 )
 
 include(GoogleTest)

@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.11.0] - 2026-06-06
+
+### Added
+
+- **Motion Detection (Plan 10)**: Neues eigenständiges `MotionDetector`-Modul auf Basis von OpenCV MOG2 (Gaussian Mixture Background Subtraction). Erkennt Bewegung vollständig unabhängig vom YOLO-Detektor und Tracking-System — Personen und Objekte werden bereits erkannt bevor sie ein Tracking-Target besitzen.
+- **Mindestflächen-Filter**: Konturen unter der konfigurierbaren Schwelle (`motionMinArea`, Standard 50 px) werden automatisch verworfen. Schützt vor Rausch-Triggern.
+- **HUD Motion Overlay (Option C)**: Erkannte Bewegungsregionen werden im Camera View als semi-transparente Fill-Fläche + Kontur-Outline eingezeichnet. Z-Order unterhalb der Tracking-Bounding-Boxes.
+- **Vollständig konfigurierbar**: Neues Settings-Panel mit 9 Parametern (Sensitivity, Min Area, Blur Kernel, Overlay Alpha, Farbe, Schatten-Erkennung, Learning Rate, Overlay-Toggle, Reset-Button).
+- **Persistenz**: Alle Motion-Detection-Settings werden beim App-Start geladen und bei Änderungen automatisch in `~/.tactileviewer/settings.ini` gespeichert.
+- **Kamera-Hotswap-Reset**: Bei Kamerawechsel wird das Hintergrundmodell automatisch zurückgesetzt, um Phantomdetektionen durch den veralteten Hintergrund zu vermeiden.
+- **Plan-Dokument**: Neue Spezifikation unter `docs/plans/10_motion_detection.md`.
+
+### Changed
+
+- `Common.hpp`: `SystemSettings` um 10 neue Motion-Detection-Felder erweitert.
+- `Application.hpp`: `MotionDetector`-Member, `m_sharedMotionRegions`-Shared-State, `m_motionOverlayColorF` Color-Array.
+- `HUD.hpp`/`HUD.cpp`: Neue öffentliche Methode `drawMotionOverlay()` + `m_motionColor`-Initialisierung.
+- `CMakeLists.txt`: `MotionDetector.cpp` zu `CORE_SRCS` hinzugefügt.
+
+## [1.10.16] - 2026-06-06
+
+### Fixed
+
+- **Feedback wird jetzt zuverlässig gespeichert**: Der Speicherpfad wird robust auf den Projektordner aufgelöst, der Zielordner wird bei Bedarf angelegt und der Feedback-Text wird JSON-sicher escaped.
+
+### Changed
+
+- **Feedback-Formular verbessert**: Die Maske erklärt jetzt klarer, was eingetragen werden soll, bietet mehr Platz für längere Rückmeldungen und deaktiviert das Senden bei leerem Text.
+
+## [1.10.15] - 2026-06-05
+
+### Fixed
+
+- **Kamerabild bleibt jetzt in nativer Auflösung**: Der Worker skaliert das Livebild nicht mehr hart auf 1280x720 herunter. Die Anzeige und das Tracking nutzen jetzt das Originalbild der Kamera, wodurch Streckung bei abweichendem Seitenverhältnis verschwindet und keine Auflösung mehr verschenkt wird.
+
 ## [1.10.14] - 2026-06-05
 
 ### Added

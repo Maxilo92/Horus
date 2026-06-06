@@ -79,6 +79,30 @@ static std::string SerializePriorityClasses(const std::set<int>& classes) {
     return out.str();
 }
 
+static std::string EscapeJsonString(const std::string& value) {
+    std::ostringstream out;
+    for (char ch : value) {
+        switch (ch) {
+            case '\\': out << "\\\\"; break;
+            case '"': out << "\\\""; break;
+            case '\b': out << "\\b"; break;
+            case '\f': out << "\\f"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(ch) < 0x20) {
+                    out << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                        << static_cast<int>(static_cast<unsigned char>(ch)) << std::dec << std::setfill(' ');
+                } else {
+                    out << ch;
+                }
+                break;
+        }
+    }
+    return out.str();
+}
+
 static SystemSettings MakeStandardSettings() {
     SystemSettings settings;
     settings.hudColor = kDefaultHudColor;
@@ -190,6 +214,31 @@ bool Application::init(int argc, char** argv) {
 
     syncColorEditorsFromSettings();
 
+    // ── Audio Engine ──────────────────────────────────────────────────────
+    {
+        AudioEngine::Config audioCfg;
+        audioCfg.masterEnabled       = m_settings.audioEnabled;
+        audioCfg.masterVolume        = m_settings.audioMasterVolume;
+        audioCfg.motionEnabled       = m_settings.audioMotionEnabled;
+        audioCfg.motionFreqHz        = m_settings.audioMotionFreqHz;
+        audioCfg.motionDurationMs    = m_settings.audioMotionDurationMs;
+        audioCfg.motionCooldownSec   = m_settings.audioMotionCooldownSec;
+        audioCfg.alarmEntryEnabled   = m_settings.audioAlarmEntryEnabled;
+        audioCfg.alarmEntryFreqHz    = m_settings.audioAlarmEntryFreqHz;
+        audioCfg.alarmEntryDurMs     = m_settings.audioAlarmEntryDurMs;
+        audioCfg.alarmExitEnabled    = m_settings.audioAlarmExitEnabled;
+        audioCfg.alarmExitFreqHz     = m_settings.audioAlarmExitFreqHz;
+        audioCfg.alarmExitDurMs      = m_settings.audioAlarmExitDurMs;
+        audioCfg.lockAcquiredEnabled = m_settings.audioLockAcquiredEnabled;
+        audioCfg.lockAcquiredFreqHz  = m_settings.audioLockAcquiredFreqHz;
+        audioCfg.lockAcquiredDurMs   = m_settings.audioLockAcquiredDurMs;
+        audioCfg.lockLostEnabled     = m_settings.audioLockLostEnabled;
+        audioCfg.lockLostFreqHz      = m_settings.audioLockLostFreqHz;
+        audioCfg.lockLostDurMs       = m_settings.audioLockLostDurMs;
+        m_audioEngine.init(audioCfg);
+        log(LogLevel::INFO, "Audio engine initialised");
+    }
+
     log(LogLevel::INFO, "System initialized — starting worker thread");
 
     m_running = true;
@@ -225,10 +274,13 @@ bool Application::initImGui() {
 void Application::syncColorEditorsFromSettings() {
     ImU32 hudColor = (m_settings.hudColor != 0) ? m_settings.hudColor : kDefaultHudColor;
     ImU32 targetColor = (m_settings.targetColor != 0) ? m_settings.targetColor : kDefaultTargetColor;
+    ImU32 motionColor = (m_settings.motionOverlayColor != 0) ? m_settings.motionOverlayColor : kDefaultMotionColor;
     ImU32ToFloat4(hudColor, m_hudColorF);
     ImU32ToFloat4(targetColor, m_targetColorF);
-    m_settings.hudColor = hudColor;
-    m_settings.targetColor = targetColor;
+    ImU32ToFloat4(motionColor, m_motionOverlayColorF);
+    m_settings.hudColor          = hudColor;
+    m_settings.targetColor       = targetColor;
+    m_settings.motionOverlayColor = motionColor;
 }
 
 void Application::syncSettingsToSharedState() {
@@ -295,6 +347,15 @@ void Application::savePersistedSettings() const {
     out << "lowLightEnhancement=" << (m_settings.lowLightEnhancement ? 1 : 0) << '\n';
     out << "lowLightClipLimit=" << m_settings.lowLightClipLimit << '\n';
     out << "lowLightDenoiseKernel=" << m_settings.lowLightDenoiseKernel << '\n';
+    out << "motionDetectionEnabled=" << (m_settings.motionDetectionEnabled ? 1 : 0) << '\n';
+    out << "motionShowOverlay=" << (m_settings.motionShowOverlay ? 1 : 0) << '\n';
+    out << "motionSensitivity=" << m_settings.motionSensitivity << '\n';
+    out << "motionMinArea=" << m_settings.motionMinArea << '\n';
+    out << "motionBlurKernel=" << m_settings.motionBlurKernel << '\n';
+    out << "motionOverlayAlpha=" << m_settings.motionOverlayAlpha << '\n';
+    out << "motionOverlayColor=" << m_settings.motionOverlayColor << '\n';
+    out << "motionDetectShadows=" << (m_settings.motionDetectShadows ? 1 : 0) << '\n';
+    out << "motionLearningRate=" << m_settings.motionLearningRate << '\n';
 }
 
 void Application::loadPersistedSettings() {
@@ -367,6 +428,15 @@ void Application::loadPersistedSettings() {
             else if (key == "lowLightEnhancement") m_settings.lowLightEnhancement = ParseBoolSetting(value);
             else if (key == "lowLightClipLimit") m_settings.lowLightClipLimit = std::stof(value);
             else if (key == "lowLightDenoiseKernel") m_settings.lowLightDenoiseKernel = std::stoi(value);
+            else if (key == "motionDetectionEnabled") m_settings.motionDetectionEnabled = ParseBoolSetting(value);
+            else if (key == "motionShowOverlay") m_settings.motionShowOverlay = ParseBoolSetting(value);
+            else if (key == "motionSensitivity") m_settings.motionSensitivity = std::stof(value);
+            else if (key == "motionMinArea") m_settings.motionMinArea = std::stoi(value);
+            else if (key == "motionBlurKernel") m_settings.motionBlurKernel = std::stoi(value);
+            else if (key == "motionOverlayAlpha") m_settings.motionOverlayAlpha = std::stof(value);
+            else if (key == "motionOverlayColor") m_settings.motionOverlayColor = static_cast<uint32_t>(std::stoul(value));
+            else if (key == "motionDetectShadows") m_settings.motionDetectShadows = ParseBoolSetting(value);
+            else if (key == "motionLearningRate") m_settings.motionLearningRate = std::stoi(value);
         } catch (...) {
             std::cerr << "[WARN] Ignoring invalid settings entry: " << key << std::endl;
         }
@@ -504,6 +574,9 @@ void Application::workerLoop() {
             m_camera->close();  // release old
             bool ok = m_camera->open(newAddr, requestedW, requestedH);
 
+            // Reset motion background model: old scene is now invalid
+            m_motionDetector.reset();
+
             // Write result back (read from render thread for status display)
             {
                 std::lock_guard<std::mutex> lk(m_cameraChangeMutex);
@@ -536,16 +609,23 @@ void Application::workerLoop() {
         currentFps = 1.0f / std::chrono::duration<float>(now - lastTime).count();
         lastTime = now;
 
-        // Downscale raw frame for tracking and detection (standard HD = 1280x720)
-        if (rawFrame.cols != 1280 || rawFrame.rows != 720) {
-            cv::resize(rawFrame, trackingFrame, cv::Size(1280, 720));
-        } else {
-            rawFrame.copyTo(trackingFrame);
-        }
+        // Keep the original camera frame for display and tracking so we do not
+        // lose resolution or distort non-16:9 sources. The detector already
+        // performs its own internal letterbox resize.
+        rawFrame.copyTo(trackingFrame);
 
         // Apply low-light enhancement to tracking frame (HD) if enabled
         if (currentSettings.lowLightEnhancement && !trackingFrame.empty()) {
             ImageUtils::enhanceLowLight(trackingFrame, labFrame, labChannels, clahe, currentSettings.lowLightClipLimit, currentSettings.lowLightDenoiseKernel);
+        }
+
+        // ── Motion Detection (Plan 10) ──────────────────────────────────
+        // Runs before object detection, entirely independent of YOLO/tracker.
+        // Resets the background model on camera hot-swap.
+        std::vector<cv::Rect> motionRegions;
+        if (currentSettings.motionDetectionEnabled && !trackingFrame.empty()) {
+            m_motionDetector.process(trackingFrame, currentSettings);
+            motionRegions = m_motionDetector.getMotionRegions();
         }
 
         std::vector<Detection> detections;
@@ -586,21 +666,32 @@ void Application::workerLoop() {
                     cv::Rect lastBox = m_sharedLockedTarget.box;
 
                     // Predict next position using constant velocity motion model
-                    cv::Rect predictedBox = lastBox;
-                    predictedBox.x += static_cast<int>(std::round(m_pixelVx));
-                    predictedBox.y += static_cast<int>(std::round(m_pixelVy));
+                    m_pixelCenterX += m_pixelVx;
+                    m_pixelCenterY += m_pixelVy;
+
+                    cv::Rect predictedBox(
+                        static_cast<int>(std::round(m_pixelCenterX - lastBox.width / 2.0f)),
+                        static_cast<int>(std::round(m_pixelCenterY - lastBox.height / 2.0f)),
+                        lastBox.width,
+                        lastBox.height
+                    );
 
                     int pad = 80; // Larger search window to prevent tracking loss
-                    cv::Rect searchRect(predictedBox.x - pad, predictedBox.y - pad, predictedBox.width + pad * 2, predictedBox.height + pad * 2);
+                    int rectW = predictedBox.width + pad * 2;
+                    int rectH = predictedBox.height + pad * 2;
+                    int rectX = predictedBox.x - pad;
+                    int rectY = predictedBox.y - pad;
 
-                    searchRect.x = std::max(0, searchRect.x);
-                    searchRect.y = std::max(0, searchRect.y);
-                    if (searchRect.x + searchRect.width > trackingFrame.cols) {
-                        searchRect.width = trackingFrame.cols - searchRect.x;
-                    }
-                    if (searchRect.y + searchRect.height > trackingFrame.rows) {
-                        searchRect.height = trackingFrame.rows - searchRect.y;
-                    }
+                    // Ensure searchRect is within the frame, but doesn't shrink unless the frame itself is smaller than searchRect
+                    if (rectW > trackingFrame.cols) rectW = trackingFrame.cols;
+                    if (rectH > trackingFrame.rows) rectH = trackingFrame.rows;
+
+                    if (rectX < 0) rectX = 0;
+                    if (rectY < 0) rectY = 0;
+                    if (rectX + rectW > trackingFrame.cols) rectX = trackingFrame.cols - rectW;
+                    if (rectY + rectH > trackingFrame.rows) rectY = trackingFrame.rows - rectH;
+
+                    cv::Rect searchRect(rectX, rectY, rectW, rectH);
 
                     if (searchRect.width >= m_pixelTemplate.cols && searchRect.height >= m_pixelTemplate.rows) {
                         cv::Mat result;
@@ -611,22 +702,60 @@ void Application::workerLoop() {
                         cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
 
                         if (maxVal > 0.5) {
-                            cv::Point newTopLeft(searchRect.x + maxLoc.x, searchRect.y + maxLoc.y);
-                            cv::Rect newBox(newTopLeft, m_pixelTemplate.size());
+                            // Sub-pixel peak interpolation (quadratic fit)
+                            double dx = 0.0;
+                            double dy = 0.0;
+
+                            if (maxLoc.x > 0 && maxLoc.x < result.cols - 1) {
+                                float valL = result.at<float>(maxLoc.y, maxLoc.x - 1);
+                                float valR = result.at<float>(maxLoc.y, maxLoc.x + 1);
+                                float valC = static_cast<float>(maxVal);
+                                float denom = valL - 2.0f * valC + valR;
+                                if (std::abs(denom) > 1e-5f) {
+                                    dx = static_cast<double>((valL - valR) / (2.0f * denom));
+                                }
+                            }
+                            if (maxLoc.y > 0 && maxLoc.y < result.rows - 1) {
+                                float valT = result.at<float>(maxLoc.y - 1, maxLoc.x);
+                                float valB = result.at<float>(maxLoc.y + 1, maxLoc.x);
+                                float valC = static_cast<float>(maxVal);
+                                float denom = valT - 2.0f * valC + valB;
+                                if (std::abs(denom) > 1e-5f) {
+                                    dy = static_cast<double>((valT - valB) / (2.0f * denom));
+                                }
+                            }
+
+                            double subpx_x = maxLoc.x + dx;
+                            double subpx_y = maxLoc.y + dy;
+
+                            // Convert back to frame coordinates
+                            double new_center_x = searchRect.x + subpx_x + m_pixelTemplate.cols / 2.0;
+                            double new_center_y = searchRect.y + subpx_y + m_pixelTemplate.rows / 2.0;
 
                             // Calculate velocity based on actual displacement
-                            cv::Point lastCenter(lastBox.x + lastBox.width / 2, lastBox.y + lastBox.height / 2);
-                            cv::Point newCenter(newBox.x + newBox.width / 2, newBox.y + newBox.height / 2);
+                            double last_center_x = lastBox.x + lastBox.width / 2.0;
+                            double last_center_y = lastBox.y + lastBox.height / 2.0;
 
-                            float alpha = 0.5f;
-                            m_pixelVx = alpha * (newCenter.x - lastCenter.x) + (1.0f - alpha) * m_pixelVx;
-                            m_pixelVy = alpha * (newCenter.y - lastCenter.y) + (1.0f - alpha) * m_pixelVy;
+                            float alpha = currentSettings.trackerVelocitySmoothing;
+                            m_pixelVx = alpha * static_cast<float>(new_center_x - last_center_x) + (1.0f - alpha) * m_pixelVx;
+                            m_pixelVy = alpha * static_cast<float>(new_center_y - last_center_y) + (1.0f - alpha) * m_pixelVy;
+
+                            m_pixelCenterX = static_cast<float>(new_center_x);
+                            m_pixelCenterY = static_cast<float>(new_center_y);
+
+                            cv::Rect newBox(
+                                static_cast<int>(std::round(m_pixelCenterX - m_pixelTemplate.cols / 2.0f)),
+                                static_cast<int>(std::round(m_pixelCenterY - m_pixelTemplate.rows / 2.0f)),
+                                m_pixelTemplate.cols,
+                                m_pixelTemplate.rows
+                            );
 
                             m_sharedLockedTarget.box = newBox;
                             m_sharedLockedTarget.confidence = static_cast<float>(maxVal);
                             m_sharedLockedTarget.lost_frames = 0;
                             m_sharedLockedTarget.state = TrackingState::LOCKED;
 
+                            cv::Point newCenter(newBox.x + newBox.width / 2, newBox.y + newBox.height / 2);
                             m_sharedLockedTarget.trail.push_back(newCenter);
                             if (m_sharedLockedTarget.trail.size() > static_cast<size_t>(currentSettings.trackerMaxTrailLength)) {
                                 m_sharedLockedTarget.trail.erase(m_sharedLockedTarget.trail.begin());
@@ -643,8 +772,11 @@ void Application::workerLoop() {
                         } else {
                             m_sharedLockedTarget.lost_frames++;
                             // Decay velocity when target is missed
-                            m_pixelVx *= 0.8f;
-                            m_pixelVy *= 0.8f;
+                            m_pixelVx *= currentSettings.trackerDeadReckoningDamping;
+                            m_pixelVy *= currentSettings.trackerDeadReckoningDamping;
+
+                            // Apply dead reckoning - update box based on predicted position
+                            m_sharedLockedTarget.box = predictedBox;
 
                             if (m_sharedLockedTarget.lost_frames > currentSettings.trackerMaxLostFrames) {
                                 m_sharedLockedTarget.state = TrackingState::LOST;
@@ -801,6 +933,8 @@ void Application::workerLoop() {
                 m_pixelLockActive = true;
                 m_pixelVx = 0.0f;
                 m_pixelVy = 0.0f;
+                m_pixelCenterX = static_cast<float>(pt.x);
+                m_pixelCenterY = static_cast<float>(pt.y);
                 m_pixelLockRect = templateRect;
 
                 m_sharedLockedTarget.state = TrackingState::LOCKED;
@@ -838,6 +972,8 @@ void Application::workerLoop() {
                 m_pixelLockActive = true;
                 m_pixelVx = 0.0f;
                 m_pixelVy = 0.0f;
+                m_pixelCenterX = static_cast<float>(rect.x + rect.width / 2.0f);
+                m_pixelCenterY = static_cast<float>(rect.y + rect.height / 2.0f);
                 m_pixelLockRect = rect;
 
                 m_sharedLockedTarget.state = TrackingState::LOCKED;
@@ -948,6 +1084,7 @@ void Application::workerLoop() {
             zoomCrop.copyTo(m_sharedZoomFrame);
             m_sharedDetections       = detections;
             m_sharedTrackedObjects   = tracked;
+            m_sharedMotionRegions    = motionRegions;
             m_sharedCameraFps        = currentFps;
             m_sharedCameraWidth      = rawFrame.cols;
             m_sharedCameraHeight     = rawFrame.rows;
@@ -1438,6 +1575,77 @@ void Application::renderDevConsole() {
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(140);
                 settingsChanged |= ImGui::SliderInt("Noise Filter Kernel##ll", &m_settings.lowLightDenoiseKernel, 0, 9);
+            }
+
+            ImGui::Separator();
+
+            // ── Motion Detection (Plan 10) ───────────────────────────────
+            ImGui::TextDisabled("Motion Detection");
+            settingsChanged |= ImGui::Checkbox("Enable Motion Detection##md", &m_settings.motionDetectionEnabled);
+            if (m_settings.motionDetectionEnabled) {
+                ImGui::SameLine();
+                settingsChanged |= ImGui::Checkbox("Show Overlay##md", &m_settings.motionShowOverlay);
+
+                ImGui::SetNextItemWidth(220.0f);
+                if (ImGui::SliderFloat("Sensitivity##md", &m_settings.motionSensitivity, 5.0f, 100.0f, "%.1f")) {
+                    settingsChanged = true;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("MOG2 variance threshold.\nLower = more sensitive (detects subtler movement).\nHigher = only strong motion triggers detection.");
+
+                ImGui::SetNextItemWidth(220.0f);
+                if (ImGui::SliderInt("Min. Area (px)##md", &m_settings.motionMinArea, 1, 5000)) {
+                    settingsChanged = true;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Minimum contour area in pixels.\nRegions smaller than this are discarded (removes noise).");
+
+                ImGui::SetNextItemWidth(140.0f);
+                if (ImGui::SliderInt("Blur Kernel##md", &m_settings.motionBlurKernel, 1, 21)) {
+                    // Force odd
+                    if (m_settings.motionBlurKernel > 1 && m_settings.motionBlurKernel % 2 == 0)
+                        m_settings.motionBlurKernel += 1;
+                    settingsChanged = true;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Gaussian pre-blur kernel size (must be odd, 1 = disabled).\nHigher values suppress camera sensor noise.");
+
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(140.0f);
+                if (ImGui::SliderFloat("Fill Alpha##md", &m_settings.motionOverlayAlpha, 0.0f, 1.0f, "%.2f")) {
+                    settingsChanged = true;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Transparency of the motion region fill.\n0 = invisible fill (outline only), 1 = fully opaque.");
+
+                // Color picker for motion overlay
+                if (ImGui::ColorEdit4("Overlay Color##md", m_motionOverlayColorF,
+                                       ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar)) {
+                    m_settings.motionOverlayColor = IM_COL32(
+                        static_cast<int>(m_motionOverlayColorF[0] * 255.0f),
+                        static_cast<int>(m_motionOverlayColorF[1] * 255.0f),
+                        static_cast<int>(m_motionOverlayColorF[2] * 255.0f),
+                        static_cast<int>(m_motionOverlayColorF[3] * 255.0f));
+                    settingsChanged = true;
+                }
+
+                settingsChanged |= ImGui::Checkbox("Shadow Detection##md", &m_settings.motionDetectShadows);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Enables MOG2 shadow detection.\nReduces ghost detections from cast shadows.\nCosts ~15%% extra CPU.");
+
+                ImGui::SetNextItemWidth(140.0f);
+                if (ImGui::SliderInt("Learning Rate##md", &m_settings.motionLearningRate, -1, 100)) {
+                    settingsChanged = true;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("-1 = automatic (recommended).\n0 = frozen background model.\n100 = very fast adaptation (may miss slow movements).");
+
+                if (ImGui::Button("Reset Background##md")) {
+                    m_motionDetector.reset();
+                    log(LogLevel::INFO, "Motion detector background model reset.");
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Clears the MOG2 background model.\nUse after moving the camera or major scene changes.");
             }
 
             ImGui::Separator();
@@ -2198,23 +2406,25 @@ void Application::run() {
         }
 
         // Consume shared data
+        std::vector<cv::Rect> currentMotionRegions;
         {
             std::lock_guard<std::mutex> lock(m_dataMutex);
             if (m_newDataAvailable) {
                 m_sharedFrame.copyTo(currentFrame);
                 m_sharedZoomFrame.copyTo(currentZoomFrame);
-                m_detections       = m_sharedDetections;
-                m_trackedObjects   = m_sharedTrackedObjects;
-                m_lockedTarget     = m_sharedLockedTarget;
-                m_cameraFps        = m_sharedCameraFps;
-                m_cameraWidth      = m_sharedCameraWidth.load();
-                m_cameraHeight     = m_sharedCameraHeight.load();
-                m_trackingWidth    = m_sharedTrackingWidth.load();
-                m_trackingHeight   = m_sharedTrackingHeight.load();
-                m_zoomWidth        = m_sharedZoomWidth.load();
-                m_zoomHeight       = m_sharedZoomHeight.load();
+                m_detections         = m_sharedDetections;
+                m_trackedObjects     = m_sharedTrackedObjects;
+                currentMotionRegions = m_sharedMotionRegions;
+                m_lockedTarget       = m_sharedLockedTarget;
+                m_cameraFps          = m_sharedCameraFps;
+                m_cameraWidth        = m_sharedCameraWidth.load();
+                m_cameraHeight       = m_sharedCameraHeight.load();
+                m_trackingWidth      = m_sharedTrackingWidth.load();
+                m_trackingHeight     = m_sharedTrackingHeight.load();
+                m_zoomWidth          = m_sharedZoomWidth.load();
+                m_zoomHeight         = m_sharedZoomHeight.load();
                 m_renderer->updateTexture(currentFrame);
-                m_newDataAvailable = false;
+                m_newDataAvailable   = false;
             }
         }
 
@@ -2256,17 +2466,28 @@ void Application::run() {
             ImGui::OpenPopup("Feedback");
         }
         if (ImGui::BeginPopupModal("Feedback", &m_showFeedbackWindow, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("Enter your feedback:");
-            ImGui::InputTextMultiline("##feedback", m_feedbackBuf, IM_ARRAYSIZE(m_feedbackBuf), ImVec2(400, 150));
-            if (ImGui::Button("Submit")) {
-                saveFeedback(m_feedbackBuf);
-                m_showFeedbackWindow = false;
-                memset(m_feedbackBuf, 0, sizeof(m_feedbackBuf));
-                ImGui::CloseCurrentPopup();
+            ImGui::TextWrapped("Tell us what failed, what you expected, and how to reproduce it.");
+            ImGui::Spacing();
+            ImGui::InputTextMultiline("##feedback", m_feedbackBuf, IM_ARRAYSIZE(m_feedbackBuf), ImVec2(520, 220));
+            if (!m_feedbackStatus.empty()) {
+                ImGui::Spacing();
+                ImGui::TextWrapped("%s", m_feedbackStatus.c_str());
             }
+            const bool hasContent = std::strlen(m_feedbackBuf) > 0;
+            ImGui::BeginDisabled(!hasContent);
+            if (ImGui::Button("Submit")) {
+                if (saveFeedback(m_feedbackBuf)) {
+                    m_showFeedbackWindow = false;
+                    m_feedbackStatus.clear();
+                    memset(m_feedbackBuf, 0, sizeof(m_feedbackBuf));
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            ImGui::EndDisabled();
             ImGui::SameLine();
             if (ImGui::Button("Cancel")) {
                 m_showFeedbackWindow = false;
+                m_feedbackStatus.clear();
                 ImGui::CloseCurrentPopup();
             }
             ImGui::EndPopup();
@@ -2743,6 +2964,14 @@ void Application::run() {
             if (!m_roiEditMode) {
                 handleTargetLocking(view);
             }
+
+            // ── Motion Detection Overlay (Plan 10) ─────────────────────
+            // Drawn before tracked objects so motion regions appear behind
+            // tracking bounding boxes (lower z-order on same draw list).
+            if (m_settings.motionDetectionEnabled && m_settings.motionShowOverlay) {
+                m_hud->drawMotionOverlay(drawList, currentMotionRegions, view, m_settings);
+            }
+
             m_hud->render(drawList, static_cast<int>(avail.x), static_cast<int>(avail.y),
                           m_cameraFps, m_trackedObjects, m_lockedTarget, view, m_settings);
         }
@@ -2778,23 +3007,45 @@ glfwSwapBuffers(m_window);
 }
 }
 
-void Application::saveFeedback(const std::string& feedback) {
-auto now = std::chrono::system_clock::now();
-auto in_time_t = std::chrono::system_clock::to_time_t(now);
-std::stringstream ss;
-ss << "Project_Horus/feedback/feedback_" << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S") << ".json";
+bool Application::saveFeedback(const std::string& feedback) {
+    const auto now = std::chrono::system_clock::now();
+    const auto in_time_t = std::chrono::system_clock::to_time_t(now);
 
-std::ofstream file(ss.str());
-if (file.is_open()) {
+    std::filesystem::path feedbackDir = std::filesystem::path(PROJECT_HORUS_SOURCE_DIR) / "feedback";
+
+    std::error_code ec;
+    std::filesystem::create_directories(feedbackDir, ec);
+    if (ec) {
+        m_feedbackStatus = "Feedback konnte nicht gespeichert werden: Zielordner ist nicht verfügbar.";
+        log(LogLevel::ERR, m_feedbackStatus);
+        return false;
+    }
+
+    std::stringstream filename;
+    filename << "feedback_" << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S") << ".json";
+    const std::filesystem::path feedbackPath = feedbackDir / filename.str();
+
+    std::ofstream file(feedbackPath);
+    if (!file.is_open()) {
+        m_feedbackStatus = "Feedback konnte nicht gespeichert werden: Datei lässt sich nicht öffnen.";
+        log(LogLevel::ERR, m_feedbackStatus + " (" + feedbackPath.string() + ")");
+        return false;
+    }
+
     file << "{\n";
     file << "  \"timestamp\": \"" << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S") << "\",\n";
-    file << "  \"feedback\": \"" << feedback << "\"\n";
+    file << "  \"feedback\": \"" << EscapeJsonString(feedback) << "\"\n";
     file << "}\n";
-    file.close();
-    log(LogLevel::INFO, "Feedback saved to " + ss.str());
-} else {
-    log(LogLevel::ERR, "Failed to save feedback to " + ss.str());
-}
+
+    if (!file.good()) {
+        m_feedbackStatus = "Feedback konnte nicht vollständig geschrieben werden.";
+        log(LogLevel::ERR, m_feedbackStatus + " (" + feedbackPath.string() + ")");
+        return false;
+    }
+
+    m_feedbackStatus = "Feedback gespeichert.";
+    log(LogLevel::INFO, "Feedback saved to " + feedbackPath.string());
+    return true;
 }
 
 void Application::cleanup() {

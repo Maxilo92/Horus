@@ -27,6 +27,7 @@ static ImU32 ApplyBrightness(ImU32 col, float brightness) {
 HUD::HUD() {
     m_hudColor    = IM_COL32(0, 200, 100, 220);
     m_targetColor = IM_COL32(255, 180, 0, 255);
+    m_motionColor = kDefaultMotionColor;
     m_startTime   = GetTimeSeconds();
 }
 
@@ -228,5 +229,49 @@ void HUD::drawTrackedObject(ImDrawList* drawList, const TrackedObject& obj,
         drawList->AddRectFilled(tPos, ImVec2(tPos.x + tSize.x + 6.0f, tPos.y + tSize.y),
                                 IM_COL32(0, 0, 0, 160));
         drawList->AddText(ImVec2(tPos.x + 3.0f, tPos.y), boxColor, tag);
+    }
+}
+
+// ============================================================
+// Motion Overlay — Plan 10
+// Option C: semi-transparent fill + solid outline
+// ============================================================
+void HUD::drawMotionOverlay(ImDrawList* drawList,
+                             const std::vector<cv::Rect>& regions,
+                             const ViewportInfo& view,
+                             const SystemSettings& settings) {
+    if (!settings.motionShowOverlay || regions.empty()) return;
+
+    // Resolve color from settings; fall back to default orange-red
+    ImU32 baseColor = (settings.motionOverlayColor != 0)
+        ? settings.motionOverlayColor
+        : m_motionColor;
+
+    // Extract RGB channels from the base color (stored as RGBA ImU32)
+    const uint8_t r = static_cast<uint8_t>((baseColor >>  0) & 0xFF);
+    const uint8_t g = static_cast<uint8_t>((baseColor >>  8) & 0xFF);
+    const uint8_t b = static_cast<uint8_t>((baseColor >> 16) & 0xFF);
+
+    // Fill alpha from settings; outline is always opaque
+    const uint8_t fillAlpha    = static_cast<uint8_t>(
+        std::clamp(settings.motionOverlayAlpha, 0.0f, 1.0f) * 255.0f);
+    const ImU32 fillColor      = IM_COL32(r, g, b, fillAlpha);
+    const ImU32 outlineColor   = IM_COL32(r, g, b, 220);
+    constexpr float kLineWidth = 1.0f;
+
+    for (const cv::Rect& rect : regions) {
+        // Transform from frame-space to viewport-space
+        const float vx1 = view.pos_x + rect.x              * view.scale;
+        const float vy1 = view.pos_y + rect.y              * view.scale;
+        const float vx2 = view.pos_x + (rect.x + rect.width)  * view.scale;
+        const float vy2 = view.pos_y + (rect.y + rect.height) * view.scale;
+
+        // Fill (drawn first so outline is rendered on top)
+        if (fillAlpha > 0) {
+            drawList->AddRectFilled(ImVec2(vx1, vy1), ImVec2(vx2, vy2), fillColor, 0.0f);
+        }
+
+        // Outline
+        drawList->AddRect(ImVec2(vx1, vy1), ImVec2(vx2, vy2), outlineColor, 0.0f, 0, kLineWidth);
     }
 }

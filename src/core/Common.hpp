@@ -136,6 +136,60 @@ struct SystemSettings {
     // ----------------------------------------------------------------
     bool request4KCamera = true;  // Request 4K (3840x2160) from camera
     bool enable4KZoom    = true;  // Crop target zoom from high-resolution frame
+    float targetZoomMagnification = 1.0f; // 1.0 = neutral, >1.0 = stronger magnification in Target Zoom window
+
+    // ----------------------------------------------------------------
+    // Low-Light Enhancement Settings
+    // ----------------------------------------------------------------
+    bool  lowLightEnhancement   = false;  // Enable CLAHE contrast enhancement
+    float lowLightClipLimit     = 3.0f;   // CLAHE contrast limit
+    int   lowLightDenoiseKernel = 3;      // Gaussian blur kernel size for L channel (0 = disabled)
+
+    // ----------------------------------------------------------------
+    // Motion Detection Settings (Plan 10)
+    // ----------------------------------------------------------------
+    bool     motionDetectionEnabled  = false;  // Toggle motion detection pipeline
+    bool     motionShowOverlay       = true;   // Draw motion regions in HUD
+    float    motionSensitivity       = 30.0f;  // MOG2 varThreshold: lower = more sensitive [5–100]
+    int      motionMinArea           = 50;     // Minimum contour area in pixels to report [1–5000]
+    int      motionBlurKernel        = 5;      // Gaussian pre-blur kernel size (1 = disabled, must be odd) [1–21]
+    float    motionOverlayAlpha      = 0.35f;  // Fill transparency of motion overlay [0.0–1.0]
+    uint32_t motionOverlayColor      = 0;      // RGBA color of motion overlay (initialised in HUD)
+    bool     motionDetectShadows     = false;  // MOG2 shadow detection (reduces phantoms, costs ~15% perf)
+    int      motionLearningRate      = -1;     // MOG2 learning rate: -1 = auto, 0–100 maps to [0.0–1.0]
+
+    // ----------------------------------------------------------------
+    // Audio Feedback Settings
+    // ----------------------------------------------------------------
+    bool  audioEnabled             = true;
+    float audioMasterVolume        = 0.7f;   // [0.0 – 1.0]
+
+    // Motion alert
+    bool  audioMotionEnabled       = true;
+    float audioMotionFreqHz        = 880.0f;
+    float audioMotionDurationMs    = 80.0f;
+    float audioMotionCooldownSec   = 1.0f;   // Min. seconds between two motion beeps
+
+    // Alarm Zone entry
+    bool  audioAlarmEntryEnabled   = true;
+    float audioAlarmEntryFreqHz    = 1200.0f;
+    float audioAlarmEntryDurMs     = 120.0f;
+
+    // Alarm Zone exit
+    bool  audioAlarmExitEnabled    = true;
+    float audioAlarmExitFreqHz     = 440.0f;
+    float audioAlarmExitDurMs      = 80.0f;
+
+    // Target Lock acquired
+    bool  audioLockAcquiredEnabled = true;
+    float audioLockAcquiredFreqHz  = 1000.0f;
+    float audioLockAcquiredDurMs   = 150.0f;
+
+    // Target Lock lost
+    bool  audioLockLostEnabled     = true;
+    float audioLockLostFreqHz      = 300.0f;
+    float audioLockLostDurMs       = 200.0f;
 };
 
 #endif // COMMON_HPP
+
