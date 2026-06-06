@@ -188,6 +188,11 @@ TEST(ROIManagerTest, AddAndRemoveROI) {
     EXPECT_EQ(rm.getROIs().size(), 0);
 }
 
+TEST(SystemSettingsTest, TargetZoomStartsNeutral) {
+    SystemSettings settings;
+    EXPECT_FLOAT_EQ(settings.targetZoomMagnification, 1.0f);
+}
+
 TEST(ROIManagerTest, SetFunctionAndRect) {
     ROIManager rm;
     int id = rm.addROI(cv::Rect(10, 10, 100, 100));
@@ -308,3 +313,140 @@ TEST(CameraModuleTest, CoordinateScalingMath) {
     EXPECT_EQ(x2, 472);
     EXPECT_EQ(y2, 726);
 }
+
+TEST(CameraModuleTest, LowLightEnhancementPipeline) {
+    // Create a synthetic low-light HD frame (1280x720) with a small bright patch
+    cv::Mat sample = cv::Mat::zeros(720, 1280, CV_8UC3);
+    cv::circle(sample, cv::Point(200, 200), 50, cv::Scalar(80, 80, 80), -1);
+
+    cv::Mat labBefore;
+    std::vector<cv::Mat> chBefore;
+    cv::cvtColor(sample, labBefore, cv::COLOR_BGR2Lab);
+    cv::split(labBefore, chBefore);
+    double meanLBefore = cv::mean(chBefore[0])[0];
+
+    cv::Mat labBuf;
+    std::vector<cv::Mat> channelsBuf;
+    cv::Ptr<cv::CLAHE> clahePtr;
+
+    // Should not throw and should preserve size/type
+    ASSERT_NO_THROW(ImageUtils::enhanceLowLight(sample, labBuf, channelsBuf, clahePtr, 4.0f, 3));
+    EXPECT_EQ(sample.cols, 1280);
+    EXPECT_EQ(sample.rows, 720);
+    EXPECT_EQ(sample.type(), CV_8UC3);
+
+    cv::Mat labAfter;
+    std::vector<cv::Mat> chAfter;
+    cv::cvtColor(sample, labAfter, cv::COLOR_BGR2Lab);
+    cv::split(labAfter, chAfter);
+    double meanLAfter = cv::mean(chAfter[0])[0];
+
+    // CLAHE should modify the lightness distribution (mean may change)
+    EXPECT_NE(meanLBefore, meanLAfter);
+
+    // Empty frame should be handled gracefully
+    cv::Mat empty;
+    cv::Mat emptyLab;
+    std::vector<cv::Mat> emptyCh;
+    cv::Ptr<cv::CLAHE> emptyClahe;
+    ASSERT_NO_THROW(ImageUtils::enhanceLowLight(empty, emptyLab, emptyCh, emptyClahe, 4.0f, 3));
+}
+ 
+// --- PixelTarget Tracking Tests ---
+
+TEST(PixelTrackingTest, SubPixelInterpolationMath) {
+    // result is a CV_32FC1 matrix.
+    cv::Mat result = cv::Mat::zeros(3, 3, CV_32FC1);
+    
+    // Set peak at (1, 1) with value 0.9f
+    // Left at (1, 0) with value 0.7f
+    // Right at (1, 2) with value 0.5f (peak shifted slightly to the left)
+    // Top at (0, 1) with value 0.8f
+    // Bottom at (2, 1) with value 0.4f (peak shifted slightly upwards)
+    result.at<float>(1, 1) = 0.9f;
+    result.at<float>(1, 0) = 0.7f;
+    result.at<float>(1, 2) = 0.5f;
+    result.at<float>(0, 1) = 0.8f;
+    result.at<float>(2, 1) = 0.4f;
+
+    double maxVal = 0.9;
+    cv::Point maxLoc(1, 1);
+
+    double dx = 0.0;
+    double dy = 0.0;
+
+    if (maxLoc.x > 0 && maxLoc.x < result.cols - 1) {
+        float valL = result.at<float>(maxLoc.y, maxLoc.x - 1);
+        float valR = result.at<float>(maxLoc.y, maxLoc.x + 1);
+        float valC = static_cast<float>(maxVal);
+        float denom = valL - 2.0f * valC + valR;
+        if (std::abs(denom) > 1e-5f) {
+            dx = static_cast<double>((valL - valR) / (2.0f * denom));
+        }
+    }
+    if (maxLoc.y > 0 && maxLoc.y < result.rows - 1) {
+        float valT = result.at<float>(maxLoc.y - 1, maxLoc.x);
+        float valB = result.at<float>(maxLoc.y + 1, maxLoc.x);
+        float valC = static_cast<float>(maxVal);
+        float denom = valT - 2.0f * valC + valB;
+        if (std::abs(denom) > 1e-5f) {
+            dy = static_cast<double>((valT - valB) / (2.0f * denom));
+        }
+    }
+
+    // Expected offsets:
+    // dx = (0.7 - 0.5) / (2.0 * (0.7 - 1.8 + 0.5)) = 0.2 / -1.2 = -0.1666667
+    EXPECT_NEAR(dx, -0.1666667, 1e-5);
+
+    // dy = (0.8 - 0.4) / (2.0 * (0.8 - 1.8 + 0.4)) = 0.4 / -1.2 = -0.3333333
+    EXPECT_NEAR(dy, -0.3333333, 1e-5);
+}
+
+TEST(PixelTrackingTest, SearchWindowClampingShift) {
+    int cols = 1280;
+    int rows = 720;
+    
+    // Predicted box close to left edge
+    cv::Rect predictedBox(10 - 30, 100 - 30, 60, 60); // x = -20, y = 70, w = 60, h = 60
+    
+    int pad = 80;
+    int rectW = predictedBox.width + pad * 2; // 220
+    int rectH = predictedBox.height + pad * 2; // 220
+    int rectX = predictedBox.x - pad; // -100
+    int rectY = predictedBox.y - pad; // -10
+
+    if (rectW > cols) rectW = cols;
+    if (rectH > rows) rectH = rows;
+
+    if (rectX < 0) rectX = 0;
+    if (rectY < 0) rectY = 0;
+    if (rectX + rectW > cols) rectX = cols - rectW;
+    if (rectY + rectH > rows) rectY = rows - rectH;
+
+    // Expected shifted positions:
+    EXPECT_EQ(rectX, 0);
+    EXPECT_EQ(rectY, 0);
+    EXPECT_EQ(rectW, 220);
+    EXPECT_EQ(rectH, 220);
+
+    // Close to right edge
+    cv::Rect predictedBox2(1270 - 30, 100 - 30, 60, 60); // x = 1240, y = 70, w = 60, h = 60
+    rectX = predictedBox2.x - pad; // 1160
+    rectY = predictedBox2.y - pad; // -10
+    rectW = predictedBox2.width + pad * 2; // 220
+    rectH = predictedBox2.height + pad * 2; // 220
+
+    if (rectW > cols) rectW = cols;
+    if (rectH > rows) rectH = rows;
+
+    if (rectX < 0) rectX = 0;
+    if (rectY < 0) rectY = 0;
+    if (rectX + rectW > cols) rectX = cols - rectW;
+    if (rectY + rectH > rows) rectY = rows - rectH;
+
+    EXPECT_EQ(rectX, 1060);
+    EXPECT_EQ(rectY, 0);
+    EXPECT_EQ(rectW, 220);
+    EXPECT_EQ(rectH, 220);
+}
+

@@ -356,7 +356,27 @@ void Application::savePersistedSettings() const {
     out << "motionOverlayColor=" << m_settings.motionOverlayColor << '\n';
     out << "motionDetectShadows=" << (m_settings.motionDetectShadows ? 1 : 0) << '\n';
     out << "motionLearningRate=" << m_settings.motionLearningRate << '\n';
+    // Audio Feedback Settings
+    out << "audioEnabled=" << (m_settings.audioEnabled ? 1 : 0) << '\n';
+    out << "audioMasterVolume=" << m_settings.audioMasterVolume << '\n';
+    out << "audioMotionEnabled=" << (m_settings.audioMotionEnabled ? 1 : 0) << '\n';
+    out << "audioMotionFreqHz=" << m_settings.audioMotionFreqHz << '\n';
+    out << "audioMotionDurationMs=" << m_settings.audioMotionDurationMs << '\n';
+    out << "audioMotionCooldownSec=" << m_settings.audioMotionCooldownSec << '\n';
+    out << "audioAlarmEntryEnabled=" << (m_settings.audioAlarmEntryEnabled ? 1 : 0) << '\n';
+    out << "audioAlarmEntryFreqHz=" << m_settings.audioAlarmEntryFreqHz << '\n';
+    out << "audioAlarmEntryDurMs=" << m_settings.audioAlarmEntryDurMs << '\n';
+    out << "audioAlarmExitEnabled=" << (m_settings.audioAlarmExitEnabled ? 1 : 0) << '\n';
+    out << "audioAlarmExitFreqHz=" << m_settings.audioAlarmExitFreqHz << '\n';
+    out << "audioAlarmExitDurMs=" << m_settings.audioAlarmExitDurMs << '\n';
+    out << "audioLockAcquiredEnabled=" << (m_settings.audioLockAcquiredEnabled ? 1 : 0) << '\n';
+    out << "audioLockAcquiredFreqHz=" << m_settings.audioLockAcquiredFreqHz << '\n';
+    out << "audioLockAcquiredDurMs=" << m_settings.audioLockAcquiredDurMs << '\n';
+    out << "audioLockLostEnabled=" << (m_settings.audioLockLostEnabled ? 1 : 0) << '\n';
+    out << "audioLockLostFreqHz=" << m_settings.audioLockLostFreqHz << '\n';
+    out << "audioLockLostDurMs=" << m_settings.audioLockLostDurMs << '\n';
 }
+
 
 void Application::loadPersistedSettings() {
     m_settings = MakeStandardSettings();
@@ -437,6 +457,26 @@ void Application::loadPersistedSettings() {
             else if (key == "motionOverlayColor") m_settings.motionOverlayColor = static_cast<uint32_t>(std::stoul(value));
             else if (key == "motionDetectShadows") m_settings.motionDetectShadows = ParseBoolSetting(value);
             else if (key == "motionLearningRate") m_settings.motionLearningRate = std::stoi(value);
+            // Audio Feedback Settings
+            else if (key == "audioEnabled") m_settings.audioEnabled = ParseBoolSetting(value);
+            else if (key == "audioMasterVolume") m_settings.audioMasterVolume = std::stof(value);
+            else if (key == "audioMotionEnabled") m_settings.audioMotionEnabled = ParseBoolSetting(value);
+            else if (key == "audioMotionFreqHz") m_settings.audioMotionFreqHz = std::stof(value);
+            else if (key == "audioMotionDurationMs") m_settings.audioMotionDurationMs = std::stof(value);
+            else if (key == "audioMotionCooldownSec") m_settings.audioMotionCooldownSec = std::stof(value);
+            else if (key == "audioAlarmEntryEnabled") m_settings.audioAlarmEntryEnabled = ParseBoolSetting(value);
+            else if (key == "audioAlarmEntryFreqHz") m_settings.audioAlarmEntryFreqHz = std::stof(value);
+            else if (key == "audioAlarmEntryDurMs") m_settings.audioAlarmEntryDurMs = std::stof(value);
+            else if (key == "audioAlarmExitEnabled") m_settings.audioAlarmExitEnabled = ParseBoolSetting(value);
+            else if (key == "audioAlarmExitFreqHz") m_settings.audioAlarmExitFreqHz = std::stof(value);
+            else if (key == "audioAlarmExitDurMs") m_settings.audioAlarmExitDurMs = std::stof(value);
+            else if (key == "audioLockAcquiredEnabled") m_settings.audioLockAcquiredEnabled = ParseBoolSetting(value);
+            else if (key == "audioLockAcquiredFreqHz") m_settings.audioLockAcquiredFreqHz = std::stof(value);
+            else if (key == "audioLockAcquiredDurMs") m_settings.audioLockAcquiredDurMs = std::stof(value);
+            else if (key == "audioLockLostEnabled") m_settings.audioLockLostEnabled = ParseBoolSetting(value);
+            else if (key == "audioLockLostFreqHz") m_settings.audioLockLostFreqHz = std::stof(value);
+            else if (key == "audioLockLostDurMs") m_settings.audioLockLostDurMs = std::stof(value);
+
         } catch (...) {
             std::cerr << "[WARN] Ignoring invalid settings entry: " << key << std::endl;
         }
@@ -626,6 +666,12 @@ void Application::workerLoop() {
         if (currentSettings.motionDetectionEnabled && !trackingFrame.empty()) {
             m_motionDetector.process(trackingFrame, currentSettings);
             motionRegions = m_motionDetector.getMotionRegions();
+
+            // ── Audio: motion alert (rate-limited by cooldown) ─────────
+            if (!motionRegions.empty() && m_audioEngine.motionCooldownElapsed()) {
+                m_audioEngine.playMotionAlert();
+                m_audioEngine.recordMotionBeep();
+            }
         }
 
         std::vector<Detection> detections;
@@ -657,6 +703,7 @@ void Application::workerLoop() {
         if (currentSettings.enableTracking) {
             m_tracker->update(detections, currentSettings);
             tracked = m_tracker->getTrackedObjects(currentSettings.trackerMaxTrailLength);
+            updateTargetHistory(tracked, trackingFrame);
 
             // Update pixel target using template matching if active
             if (m_pixelLockActive && m_sharedLockedTarget.state != TrackingState::SEARCHING) {
@@ -833,6 +880,8 @@ void Application::workerLoop() {
                                 if (obj.track_id == tid) { clsName = obj.className; break; }
                             }
                             log(LogLevel::WARN, "ALARM: Object #" + std::to_string(tid) + " (" + clsName + ") entered Alarm Zone '" + z.label + "'");
+                            // ── Audio: alarm zone entry ──────────────────
+                            m_audioEngine.playAlarmEntry();
                         }
                     }
 
@@ -840,6 +889,8 @@ void Application::workerLoop() {
                     for (int tid : m_activeAlarms[z.id]) {
                         if (currentTracksInZone.find(tid) == currentTracksInZone.end()) {
                             log(LogLevel::INFO, "Object #" + std::to_string(tid) + " left Alarm Zone '" + z.label + "'");
+                            // ── Audio: alarm zone exit ───────────────────
+                            m_audioEngine.playAlarmExit();
                         }
                     }
 
@@ -1010,6 +1061,17 @@ void Application::workerLoop() {
             else        m_sharedLockedTarget.state = TrackingState::LOCKED;
         }
 
+        // ── Audio: target lock state transitions ───────────────────────────
+        {
+            const TrackingState curState = m_sharedLockedTarget.state;
+            if (m_prevLockState != TrackingState::LOCKED && curState == TrackingState::LOCKED) {
+                m_audioEngine.playLockAcquired();
+            } else if (m_prevLockState == TrackingState::LOCKED && curState == TrackingState::LOST) {
+                m_audioEngine.playLockLost();
+            }
+            m_prevLockState = curState;
+        }
+
         // Crop target zoom from rawFrame (or trackingFrame if disabled)
         if (m_sharedLockedTarget.state != TrackingState::SEARCHING && !rawFrame.empty()) {
             cv::Rect roi = m_sharedLockedTarget.box;
@@ -1084,6 +1146,7 @@ void Application::workerLoop() {
             zoomCrop.copyTo(m_sharedZoomFrame);
             m_sharedDetections       = detections;
             m_sharedTrackedObjects   = tracked;
+            m_sharedTargetHistory    = m_targetHistory;
             m_sharedMotionRegions    = motionRegions;
             m_sharedCameraFps        = currentFps;
             m_sharedCameraWidth      = rawFrame.cols;
@@ -1183,149 +1246,298 @@ void Application::renderDataPanel() {
         return lowered;
     };
 
-    std::vector<TrackedObject> visibleObjects;
-    visibleObjects.reserve(m_trackedObjects.size());
-
     const std::string filterText = toLowerCopy(m_dataPanelFilter);
-    for (const auto& obj : m_trackedObjects) {
-        if (filterText.empty()) {
-            visibleObjects.push_back(obj);
-            continue;
-        }
 
-        std::string stateText;
-        if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == obj.track_id) {
-            stateText = "locked";
-        } else if (obj.is_confirmed) {
-            stateText = "lock";
-        } else if (obj.lost_frames > 0) {
-            stateText = "lost";
-        } else {
-            stateText = "init";
-        }
+    if (ImGui::BeginTabBar("DataPanelTabs")) {
+        // --- TAB 1: Active Tracks ---
+        if (ImGui::BeginTabItem("Active Tracks")) {
+            std::vector<TrackedObject> visibleObjects;
+            visibleObjects.reserve(m_trackedObjects.size());
 
-        const std::string searchable = toLowerCopy(std::to_string(obj.track_id) + " " + obj.className + " " + stateText);
-        if (searchable.find(filterText) != std::string::npos) {
-            visibleObjects.push_back(obj);
-        }
-    }
-
-    auto stateRank = [&](const TrackedObject& obj) {
-        if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == obj.track_id) return 3;
-        if (obj.is_confirmed) return 2;
-        if (obj.lost_frames > 0) return 1;
-        return 0;
-    };
-
-    auto compareObjects = [&](const TrackedObject& lhs, const TrackedObject& rhs, int column, bool descending) {
-        auto less = [&](const auto& a, const auto& b) {
-            return descending ? b < a : a < b;
-        };
-
-        switch (column) {
-            case 0:
-                return less(lhs.track_id, rhs.track_id);
-            case 1:
-                return less(toLowerCopy(lhs.className), toLowerCopy(rhs.className));
-            case 2: {
-                float lhsCx = static_cast<float>(lhs.box.x) + lhs.box.width / 2.0f;
-                float lhsCy = static_cast<float>(lhs.box.y) + lhs.box.height / 2.0f;
-                float rhsCx = static_cast<float>(rhs.box.x) + rhs.box.width / 2.0f;
-                float rhsCy = static_cast<float>(rhs.box.y) + rhs.box.height / 2.0f;
-                if (lhsCx == rhsCx) return less(lhsCy, rhsCy);
-                return less(lhsCx, rhsCx);
-            }
-            case 3:
-                return less(lhs.confidence, rhs.confidence);
-            case 4:
-                return less(stateRank(lhs), stateRank(rhs));
-            default:
-                return less(lhs.track_id, rhs.track_id);
-        }
-    };
-
-    if (ImGui::BeginTable("Tracks", 5,
-            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-            ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable |
-            ImGuiTableFlags_Sortable)) {
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("ID",       ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultSort, 35.0f);
-        ImGui::TableSetupColumn("Class",    ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Pos (X,Y)",ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Conf",     ImGuiTableColumnFlags_WidthFixed, 50.0f);
-        ImGui::TableSetupColumn("State",    ImGuiTableColumnFlags_WidthFixed, 55.0f);
-        ImGui::TableHeadersRow();
-
-        std::vector<TrackedObject> sortedObjects = visibleObjects;
-        if (ImGuiTableSortSpecs* sortSpecs = ImGui::TableGetSortSpecs(); sortSpecs && sortSpecs->SpecsCount > 0) {
-            const ImGuiTableColumnSortSpecs& sortSpec = sortSpecs->Specs[0];
-            std::stable_sort(sortedObjects.begin(), sortedObjects.end(), [&](const TrackedObject& lhs, const TrackedObject& rhs) {
-                if (compareObjects(lhs, rhs, sortSpec.ColumnIndex, sortSpec.SortDirection == ImGuiSortDirection_Descending)) {
-                    return true;
+            for (const auto& obj : m_trackedObjects) {
+                if (filterText.empty()) {
+                    visibleObjects.push_back(obj);
+                    continue;
                 }
-                if (compareObjects(rhs, lhs, sortSpec.ColumnIndex, sortSpec.SortDirection == ImGuiSortDirection_Descending)) {
-                    return false;
-                }
-                return lhs.track_id < rhs.track_id;
-            });
-            sortSpecs->SpecsDirty = false;
-        }
 
-        for (const auto& obj : sortedObjects) {
-            ImGui::TableNextRow();
-            
-            bool isSelected = (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == obj.track_id);
-            
-            ImGui::TableSetColumnIndex(0);
-            char idLabel[32];
-            snprintf(idLabel, sizeof(idLabel), "%03d", obj.track_id);
-            if (ImGui::Selectable(idLabel, isSelected, ImGuiSelectableFlags_SpanAllColumns)) {
-                if (isSelected) {
-                    m_releaseLockRequested.store(true);
+                std::string stateText;
+                if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == obj.track_id) {
+                    stateText = "locked";
+                } else if (obj.is_confirmed) {
+                    stateText = "lock";
+                } else if (obj.lost_frames > 0) {
+                    stateText = "lost";
                 } else {
-                    m_requestedLockId.store(obj.track_id);
-                    m_lockRequested.store(true);
+                    stateText = "init";
+                }
+
+                const std::string searchable = toLowerCopy(std::to_string(obj.track_id) + " " + obj.className + " " + stateText);
+                if (searchable.find(filterText) != std::string::npos) {
+                    visibleObjects.push_back(obj);
                 }
             }
 
-            ImGui::TableSetColumnIndex(1);
-            ImGui::Text("%s", obj.className.c_str());
+            auto stateRank = [&](const TrackedObject& obj) {
+                if (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == obj.track_id) return 3;
+                if (obj.is_confirmed) return 2;
+                if (obj.lost_frames > 0) return 1;
+                return 0;
+            };
 
-            ImGui::TableSetColumnIndex(2);
-            float cx = static_cast<float>(obj.box.x) + obj.box.width  / 2.0f;
-            float cy = static_cast<float>(obj.box.y) + obj.box.height / 2.0f;
-            ImGui::Text("%.0f, %.0f", cx, cy);
+            auto compareObjects = [&](const TrackedObject& lhs, const TrackedObject& rhs, int column, bool descending) {
+                auto less = [&](const auto& a, const auto& b) {
+                    return descending ? b < a : a < b;
+                };
 
-            ImGui::TableSetColumnIndex(3);
-            ImVec4 confColor = (obj.confidence > 0.6f)
-                ? ImVec4(0.0f, 1.0f, 0.4f, 1.0f)
-                : (obj.confidence > 0.4f ? ImVec4(1.0f, 0.8f, 0.0f, 1.0f)
-                                         : ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
-            ImGui::TextColored(confColor, "%.2f", obj.confidence);
+                switch (column) {
+                    case 0:
+                        return less(lhs.track_id, rhs.track_id);
+                    case 1:
+                        return less(toLowerCopy(lhs.className), toLowerCopy(rhs.className));
+                    case 2: {
+                        float lhsCx = static_cast<float>(lhs.box.x) + lhs.box.width / 2.0f;
+                        float lhsCy = static_cast<float>(lhs.box.y) + lhs.box.height / 2.0f;
+                        float rhsCx = static_cast<float>(rhs.box.x) + rhs.box.width / 2.0f;
+                        float rhsCy = static_cast<float>(rhs.box.y) + rhs.box.height / 2.0f;
+                        if (lhsCx == rhsCx) return less(lhsCy, rhsCy);
+                        return less(lhsCx, rhsCx);
+                    }
+                    case 3:
+                        return less(lhs.confidence, rhs.confidence);
+                    case 4:
+                        return less(stateRank(lhs), stateRank(rhs));
+                    default:
+                        return less(lhs.track_id, rhs.track_id);
+                }
+            };
 
-            ImGui::TableSetColumnIndex(4);
-            if (isSelected)
-                ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "LOCKED");
-            else if (obj.is_confirmed)
-                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.5f, 1.0f), "LOCK");
-            else if (obj.lost_frames > 0)
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "LOST");
-            else
-                ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "INIT");
+            if (ImGui::BeginTable("Tracks", 5,
+                    ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                    ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable |
+                    ImGuiTableFlags_Sortable)) {
+                ImGui::TableSetupScrollFreeze(0, 1);
+                ImGui::TableSetupColumn("ID",       ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultSort, 35.0f);
+                ImGui::TableSetupColumn("Class",    ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Pos (X,Y)",ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Conf",     ImGuiTableColumnFlags_WidthFixed, 50.0f);
+                ImGui::TableSetupColumn("State",    ImGuiTableColumnFlags_WidthFixed, 55.0f);
+                ImGui::TableHeadersRow();
+
+                std::vector<TrackedObject> sortedObjects = visibleObjects;
+                if (ImGuiTableSortSpecs* sortSpecs = ImGui::TableGetSortSpecs(); sortSpecs && sortSpecs->SpecsCount > 0) {
+                    const ImGuiTableColumnSortSpecs& sortSpec = sortSpecs->Specs[0];
+                    std::stable_sort(sortedObjects.begin(), sortedObjects.end(), [&](const TrackedObject& lhs, const TrackedObject& rhs) {
+                        if (compareObjects(lhs, rhs, sortSpec.ColumnIndex, sortSpec.SortDirection == ImGuiSortDirection_Descending)) {
+                            return true;
+                        }
+                        if (compareObjects(rhs, lhs, sortSpec.ColumnIndex, sortSpec.SortDirection == ImGuiSortDirection_Descending)) {
+                            return false;
+                        }
+                        return lhs.track_id < rhs.track_id;
+                    });
+                    sortSpecs->SpecsDirty = false;
+                }
+
+                for (const auto& obj : sortedObjects) {
+                    ImGui::TableNextRow();
+                    
+                    bool isSelected = (m_lockedTarget.state != TrackingState::SEARCHING && m_lockedTarget.track_id == obj.track_id);
+                    
+                    ImGui::TableSetColumnIndex(0);
+                    char idLabel[32];
+                    snprintf(idLabel, sizeof(idLabel), "%03d", obj.track_id);
+                    if (ImGui::Selectable(idLabel, isSelected, ImGuiSelectableFlags_SpanAllColumns)) {
+                        if (isSelected) {
+                            m_releaseLockRequested.store(true);
+                            m_selectedAnalyzerTargetId = -1;
+                        } else {
+                            m_requestedLockId.store(obj.track_id);
+                            m_lockRequested.store(true);
+                            m_selectedAnalyzerTargetId = obj.track_id;
+                        }
+                    }
+
+                    char contextMenuId[64];
+                    snprintf(contextMenuId, sizeof(contextMenuId), "ActiveRowContextMenu##%d", obj.track_id);
+                    if (ImGui::BeginPopupContextItem(contextMenuId)) {
+                        if (ImGui::MenuItem("Export Target Data (JSON/PNG)")) {
+                            auto it = std::find_if(m_targetHistory.begin(), m_targetHistory.end(),
+                                                   [&](const UniqueTargetRecord& r) { return r.track_id == obj.track_id; });
+                            if (it != m_targetHistory.end()) {
+                                exportTarget(*it);
+                            } else {
+                                log(LogLevel::ERR, "Target record not found in history for export.");
+                            }
+                        }
+                        ImGui::EndPopup();
+                    }
+
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("%s", obj.className.c_str());
+
+                    ImGui::TableSetColumnIndex(2);
+                    float cx = static_cast<float>(obj.box.x) + obj.box.width  / 2.0f;
+                    float cy = static_cast<float>(obj.box.y) + obj.box.height / 2.0f;
+                    ImGui::Text("%.0f, %.0f", cx, cy);
+
+                    ImGui::TableSetColumnIndex(3);
+                    ImVec4 confColor = (obj.confidence > 0.6f)
+                        ? ImVec4(0.0f, 1.0f, 0.4f, 1.0f)
+                        : (obj.confidence > 0.4f ? ImVec4(1.0f, 0.8f, 0.0f, 1.0f)
+                                                 : ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
+                    ImGui::TextColored(confColor, "%.2f", obj.confidence);
+
+                    ImGui::TableSetColumnIndex(4);
+                    if (isSelected)
+                        ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "LOCKED");
+                    else if (obj.is_confirmed)
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.5f, 1.0f), "LOCK");
+                    else if (obj.lost_frames > 0)
+                        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "LOST");
+                    else
+                        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "INIT");
+                }
+                ImGui::EndTable();
+            }
+
+            if (m_lockedTarget.state != TrackingState::SEARCHING) {
+                ImGui::Separator();
+                if (ImGui::Button("Release Lock", ImVec2(-FLT_MIN, 0))) {
+                    m_releaseLockRequested.store(true);
+                }
+            }
+
+            ImGui::EndTabItem();
         }
-        ImGui::EndTable();
-    }
-    
-    if (m_lockedTarget.state != TrackingState::SEARCHING) {
-        ImGui::Separator();
-        if (ImGui::Button("Release Lock", ImVec2(-FLT_MIN, 0))) {
-            m_releaseLockRequested.store(true);
+
+        // --- TAB 2: Target History ---
+        if (ImGui::BeginTabItem("Target History")) {
+            std::vector<UniqueTargetRecord> visibleHistory;
+            visibleHistory.reserve(m_targetHistory.size());
+
+            for (const auto& record : m_targetHistory) {
+                std::string stateText = record.is_currently_active ? "active" : "lost";
+                if (filterText.empty()) {
+                    visibleHistory.push_back(record);
+                    continue;
+                }
+
+                const std::string searchable = toLowerCopy(std::to_string(record.track_id) + " " + record.className + " " + stateText);
+                if (searchable.find(filterText) != std::string::npos) {
+                    visibleHistory.push_back(record);
+                }
+            }
+
+            auto compareHistory = [&](const UniqueTargetRecord& lhs, const UniqueTargetRecord& rhs, int column, bool descending) {
+                auto less = [&](const auto& a, const auto& b) {
+                    return descending ? b < a : a < b;
+                };
+
+                switch (column) {
+                    case 0:
+                        return less(lhs.track_id, rhs.track_id);
+                    case 1:
+                        return less(toLowerCopy(lhs.className), toLowerCopy(rhs.className));
+                    case 2: {
+                        float lhsCx = static_cast<float>(lhs.last_box.x) + lhs.last_box.width / 2.0f;
+                        float lhsCy = static_cast<float>(lhs.last_box.y) + lhs.last_box.height / 2.0f;
+                        float rhsCx = static_cast<float>(rhs.last_box.x) + rhs.last_box.width / 2.0f;
+                        float rhsCy = static_cast<float>(rhs.last_box.y) + rhs.last_box.height / 2.0f;
+                        if (lhsCx == rhsCx) return less(lhsCy, rhsCy);
+                        return less(lhsCx, rhsCx);
+                    }
+                    case 3:
+                        return less(lhs.max_confidence, rhs.max_confidence);
+                    case 4:
+                        return less(lhs.is_currently_active ? 1 : 0, rhs.is_currently_active ? 1 : 0);
+                    default:
+                        return less(lhs.track_id, rhs.track_id);
+                }
+            };
+
+            if (ImGui::BeginTable("HistoryTable", 5,
+                    ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                    ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable |
+                    ImGuiTableFlags_Sortable)) {
+                ImGui::TableSetupScrollFreeze(0, 1);
+                ImGui::TableSetupColumn("ID",       ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultSort, 35.0f);
+                ImGui::TableSetupColumn("Class",    ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Pos (X,Y)",ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Max Conf", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+                ImGui::TableSetupColumn("State",    ImGuiTableColumnFlags_WidthFixed, 55.0f);
+                ImGui::TableHeadersRow();
+
+                std::vector<UniqueTargetRecord> sortedHistory = visibleHistory;
+                if (ImGuiTableSortSpecs* sortSpecs = ImGui::TableGetSortSpecs(); sortSpecs && sortSpecs->SpecsCount > 0) {
+                    const ImGuiTableColumnSortSpecs& sortSpec = sortSpecs->Specs[0];
+                    std::stable_sort(sortedHistory.begin(), sortedHistory.end(), [&](const UniqueTargetRecord& lhs, const UniqueTargetRecord& rhs) {
+                        if (compareHistory(lhs, rhs, sortSpec.ColumnIndex, sortSpec.SortDirection == ImGuiSortDirection_Descending)) {
+                            return true;
+                        }
+                        if (compareHistory(rhs, lhs, sortSpec.ColumnIndex, sortSpec.SortDirection == ImGuiSortDirection_Descending)) {
+                            return false;
+                        }
+                        return lhs.track_id < rhs.track_id;
+                    });
+                    sortSpecs->SpecsDirty = false;
+                }
+
+                for (const auto& record : sortedHistory) {
+                    ImGui::TableNextRow();
+                    
+                    bool isSelected = (m_selectedAnalyzerTargetId == record.track_id);
+                    
+                    ImGui::TableSetColumnIndex(0);
+                    char idLabel[32];
+                    snprintf(idLabel, sizeof(idLabel), "%03d", record.track_id);
+                    if (ImGui::Selectable(idLabel, isSelected, ImGuiSelectableFlags_SpanAllColumns)) {
+                        if (isSelected) {
+                            m_selectedAnalyzerTargetId = -1;
+                        } else {
+                            m_selectedAnalyzerTargetId = record.track_id;
+                        }
+                    }
+
+                    char contextMenuId[64];
+                    snprintf(contextMenuId, sizeof(contextMenuId), "HistoryRowContextMenu##%d", record.track_id);
+                    if (ImGui::BeginPopupContextItem(contextMenuId)) {
+                        if (ImGui::MenuItem("Export Target Data (JSON/PNG)")) {
+                            exportTarget(record);
+                        }
+                        ImGui::EndPopup();
+                    }
+
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("%s", record.className.c_str());
+
+                    ImGui::TableSetColumnIndex(2);
+                    float cx = static_cast<float>(record.last_box.x) + record.last_box.width  / 2.0f;
+                    float cy = static_cast<float>(record.last_box.y) + record.last_box.height / 2.0f;
+                    ImGui::Text("%.0f, %.0f", cx, cy);
+
+                    ImGui::TableSetColumnIndex(3);
+                    ImVec4 confColor = (record.max_confidence > 0.6f)
+                        ? ImVec4(0.0f, 1.0f, 0.4f, 1.0f)
+                        : (record.max_confidence > 0.4f ? ImVec4(1.0f, 0.8f, 0.0f, 1.0f)
+                                                         : ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
+                    ImGui::TextColored(confColor, "%.2f", record.max_confidence);
+
+                    ImGui::TableSetColumnIndex(4);
+                    if (record.is_currently_active)
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.5f, 1.0f), "ACTIVE");
+                    else
+                        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "LOST");
+                }
+                ImGui::EndTable();
+            }
+
+            ImGui::EndTabItem();
         }
+
+        ImGui::EndTabBar();
     }
-    
     ImGui::End();
 }
-
 // -----------------------------------------------------------------------
 // UI: Zoom Window
 // -----------------------------------------------------------------------
@@ -2369,14 +2581,139 @@ void Application::renderSettingsWindow() {
         changed |= ImGui::Checkbox("Log to File (not yet implemented)", &m_settings.logToFile);
     }
 
+    // ── Audio Feedback ──────────────────────────────────────────────────────
+    bool audioChanged = false;
+    if (ImGui::CollapsingHeader("Audio Feedback")) {
+        ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "ACOUSTIC ALERT SYSTEM");
+        ImGui::Separator();
+
+        audioChanged |= ImGui::Checkbox("Master Enable##aud", &m_settings.audioEnabled);
+        ImGui::BeginDisabled(!m_settings.audioEnabled);
+
+        audioChanged |= ImGui::SliderFloat("Master Volume##aud", &m_settings.audioMasterVolume, 0.0f, 1.0f, "%.2f");
+        if (ImGui::Button("TEST ALL##aud")) {
+            AudioEngine::Config previewCfg;
+            previewCfg.masterEnabled       = m_settings.audioEnabled;
+            previewCfg.masterVolume        = m_settings.audioMasterVolume;
+            previewCfg.motionEnabled       = m_settings.audioMotionEnabled;
+            previewCfg.motionFreqHz        = m_settings.audioMotionFreqHz;
+            previewCfg.motionDurationMs    = m_settings.audioMotionDurationMs;
+            previewCfg.motionCooldownSec   = m_settings.audioMotionCooldownSec;
+            previewCfg.alarmEntryEnabled   = m_settings.audioAlarmEntryEnabled;
+            previewCfg.alarmEntryFreqHz    = m_settings.audioAlarmEntryFreqHz;
+            previewCfg.alarmEntryDurMs     = m_settings.audioAlarmEntryDurMs;
+            previewCfg.alarmExitEnabled    = m_settings.audioAlarmExitEnabled;
+            previewCfg.alarmExitFreqHz     = m_settings.audioAlarmExitFreqHz;
+            previewCfg.alarmExitDurMs      = m_settings.audioAlarmExitDurMs;
+            previewCfg.lockAcquiredEnabled = m_settings.audioLockAcquiredEnabled;
+            previewCfg.lockAcquiredFreqHz  = m_settings.audioLockAcquiredFreqHz;
+            previewCfg.lockAcquiredDurMs   = m_settings.audioLockAcquiredDurMs;
+            previewCfg.lockLostEnabled     = m_settings.audioLockLostEnabled;
+            previewCfg.lockLostFreqHz      = m_settings.audioLockLostFreqHz;
+            previewCfg.lockLostDurMs       = m_settings.audioLockLostDurMs;
+            m_audioEngine.applyConfig(previewCfg);
+            m_audioEngine.playMotionAlert();
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(plays motion tone)");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "MOTION ALERT");
+        audioChanged |= ImGui::Checkbox("Enable##audm", &m_settings.audioMotionEnabled);
+        ImGui::BeginDisabled(!m_settings.audioMotionEnabled);
+        audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audm",  &m_settings.audioMotionFreqHz,     100.0f, 4000.0f, "%.0f Hz");
+        audioChanged |= ImGui::SliderFloat("Duration (ms)##audm",   &m_settings.audioMotionDurationMs,  20.0f,  500.0f, "%.0f ms");
+        audioChanged |= ImGui::SliderFloat("Cooldown (s)##audm",    &m_settings.audioMotionCooldownSec,  0.1f,   10.0f, "%.1f s");
+        if (ImGui::Button("TEST##audm")) {
+            m_audioEngine.playMotionAlert();
+        }
+        ImGui::EndDisabled();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.2f, 1.0f), "ALARM ZONE — ENTRY");
+        audioChanged |= ImGui::Checkbox("Enable##aude", &m_settings.audioAlarmEntryEnabled);
+        ImGui::BeginDisabled(!m_settings.audioAlarmEntryEnabled);
+        audioChanged |= ImGui::SliderFloat("Frequency (Hz)##aude", &m_settings.audioAlarmEntryFreqHz, 100.0f, 4000.0f, "%.0f Hz");
+        audioChanged |= ImGui::SliderFloat("Duration (ms)##aude",  &m_settings.audioAlarmEntryDurMs,   20.0f,  500.0f, "%.0f ms");
+        if (ImGui::Button("TEST##aude")) {
+            m_audioEngine.playAlarmEntry();
+        }
+        ImGui::EndDisabled();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.8f, 0.6f, 0.0f, 1.0f), "ALARM ZONE — EXIT");
+        audioChanged |= ImGui::Checkbox("Enable##audx", &m_settings.audioAlarmExitEnabled);
+        ImGui::BeginDisabled(!m_settings.audioAlarmExitEnabled);
+        audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audx", &m_settings.audioAlarmExitFreqHz, 100.0f, 4000.0f, "%.0f Hz");
+        audioChanged |= ImGui::SliderFloat("Duration (ms)##audx",  &m_settings.audioAlarmExitDurMs,   20.0f,  500.0f, "%.0f ms");
+        if (ImGui::Button("TEST##audx")) {
+            m_audioEngine.playAlarmExit();
+        }
+        ImGui::EndDisabled();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.6f, 1.0f), "TARGET LOCK — ACQUIRED");
+        audioChanged |= ImGui::Checkbox("Enable##audla", &m_settings.audioLockAcquiredEnabled);
+        ImGui::BeginDisabled(!m_settings.audioLockAcquiredEnabled);
+        audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audla", &m_settings.audioLockAcquiredFreqHz, 100.0f, 4000.0f, "%.0f Hz");
+        audioChanged |= ImGui::SliderFloat("Duration (ms)##audla",  &m_settings.audioLockAcquiredDurMs,   20.0f,  500.0f, "%.0f ms");
+        if (ImGui::Button("TEST##audla")) {
+            m_audioEngine.playLockAcquired();
+        }
+        ImGui::EndDisabled();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "TARGET LOCK — LOST");
+        audioChanged |= ImGui::Checkbox("Enable##audll", &m_settings.audioLockLostEnabled);
+        ImGui::BeginDisabled(!m_settings.audioLockLostEnabled);
+        audioChanged |= ImGui::SliderFloat("Frequency (Hz)##audll", &m_settings.audioLockLostFreqHz, 100.0f, 4000.0f, "%.0f Hz");
+        audioChanged |= ImGui::SliderFloat("Duration (ms)##audll",  &m_settings.audioLockLostDurMs,   20.0f,  500.0f, "%.0f ms");
+        if (ImGui::Button("TEST##audll")) {
+            m_audioEngine.playLockLost();
+        }
+        ImGui::EndDisabled();
+
+        ImGui::EndDisabled(); // master enable
+    }
+
     ImGui::Separator();
     if (ImGui::Button("Close", ImVec2(-1, 0)))
         m_showSettingsWindow = false;
 
-    if (changed) {
+    if (changed || audioChanged) {
         std::lock_guard<std::mutex> lock(m_dataMutex);
         m_sharedSettings = m_settings;
         savePersistedSettings();
+    }
+
+    // Apply audio engine config immediately when audio params change
+    // (runs on render thread; applyConfig is safe outside the worker hot-path)
+    if (audioChanged) {
+        AudioEngine::Config audioCfg;
+        audioCfg.masterEnabled       = m_settings.audioEnabled;
+        audioCfg.masterVolume        = m_settings.audioMasterVolume;
+        audioCfg.motionEnabled       = m_settings.audioMotionEnabled;
+        audioCfg.motionFreqHz        = m_settings.audioMotionFreqHz;
+        audioCfg.motionDurationMs    = m_settings.audioMotionDurationMs;
+        audioCfg.motionCooldownSec   = m_settings.audioMotionCooldownSec;
+        audioCfg.alarmEntryEnabled   = m_settings.audioAlarmEntryEnabled;
+        audioCfg.alarmEntryFreqHz    = m_settings.audioAlarmEntryFreqHz;
+        audioCfg.alarmEntryDurMs     = m_settings.audioAlarmEntryDurMs;
+        audioCfg.alarmExitEnabled    = m_settings.audioAlarmExitEnabled;
+        audioCfg.alarmExitFreqHz     = m_settings.audioAlarmExitFreqHz;
+        audioCfg.alarmExitDurMs      = m_settings.audioAlarmExitDurMs;
+        audioCfg.lockAcquiredEnabled = m_settings.audioLockAcquiredEnabled;
+        audioCfg.lockAcquiredFreqHz  = m_settings.audioLockAcquiredFreqHz;
+        audioCfg.lockAcquiredDurMs   = m_settings.audioLockAcquiredDurMs;
+        audioCfg.lockLostEnabled     = m_settings.audioLockLostEnabled;
+        audioCfg.lockLostFreqHz      = m_settings.audioLockLostFreqHz;
+        audioCfg.lockLostDurMs       = m_settings.audioLockLostDurMs;
+        m_audioEngine.applyConfig(audioCfg);
     }
 
     ImGui::End();
@@ -2414,6 +2751,7 @@ void Application::run() {
                 m_sharedZoomFrame.copyTo(currentZoomFrame);
                 m_detections         = m_sharedDetections;
                 m_trackedObjects     = m_sharedTrackedObjects;
+                m_targetHistory      = m_sharedTargetHistory;
                 currentMotionRegions = m_sharedMotionRegions;
                 m_lockedTarget       = m_sharedLockedTarget;
                 m_cameraFps          = m_sharedCameraFps;
@@ -2425,6 +2763,33 @@ void Application::run() {
                 m_zoomHeight         = m_sharedZoomHeight.load();
                 m_renderer->updateTexture(currentFrame);
                 m_newDataAvailable   = false;
+            }
+        }
+
+        // Texture generation/updates for target history
+        for (const auto& record : m_targetHistory) {
+            if (!record.cropped_image.empty()) {
+                auto& texInfo = m_targetTextures[record.track_id];
+                if (texInfo.texture_id == 0 || record.max_confidence > texInfo.max_confidence) {
+                    if (texInfo.texture_id == 0) {
+                        glGenTextures(1, &texInfo.texture_id);
+                    }
+                    glBindTexture(GL_TEXTURE_2D, texInfo.texture_id);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+                    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                    glPixelStorei(GL_UNPACK_ROW_LENGTH, record.cropped_image.step / record.cropped_image.elemSize());
+
+                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, record.cropped_image.cols, record.cropped_image.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, record.cropped_image.data);
+
+                    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+                    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+                    texInfo.max_confidence = record.max_confidence;
+                }
             }
         }
 
@@ -2989,6 +3354,9 @@ void Application::run() {
         // ── 5. Settings Window (floating) ────────────────────────────────
         renderSettingsWindow();
 
+        // ── 6. Target Analyzer Window (dockable/floating) ────────────────
+        renderTargetAnalyzer();
+
         // Render
         int display_w, display_h;
         glfwGetFramebufferSize(m_window, &display_w, &display_h);
@@ -3048,9 +3416,264 @@ bool Application::saveFeedback(const std::string& feedback) {
     return true;
 }
 
+void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTracks, const cv::Mat& currentFrame) {
+    if (currentFrame.empty()) return;
+
+    auto getTimestamp = []() {
+        auto now = std::chrono::system_clock::now();
+        auto in_time_t = std::chrono::system_clock::to_time_t(now);
+        struct tm buf;
+        #ifdef _WIN32
+        localtime_s(&buf, &in_time_t);
+        #else
+        localtime_r(&in_time_t, &buf);
+        #endif
+        char timeStr[64];
+        std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &buf);
+        return std::string(timeStr);
+    };
+
+    std::string timestamp = getTimestamp();
+
+    // Mark all existing history records as inactive first
+    for (auto& record : m_targetHistory) {
+        record.is_currently_active = false;
+    }
+
+    for (const auto& obj : activeTracks) {
+        // Find if already in history
+        auto it = std::find_if(m_targetHistory.begin(), m_targetHistory.end(),
+                               [&](const UniqueTargetRecord& r) { return r.track_id == obj.track_id; });
+
+        if (it == m_targetHistory.end()) {
+            // New target!
+            UniqueTargetRecord record;
+            record.track_id = obj.track_id;
+            record.class_id = obj.class_id;
+            record.className = obj.className;
+            record.max_confidence = obj.confidence;
+            record.first_seen_timestamp = timestamp;
+            record.last_seen_timestamp = timestamp;
+            record.first_box = obj.box;
+            record.last_box = obj.box;
+            record.trail = obj.trail;
+            record.is_currently_active = true;
+
+            // Crop image
+            cv::Rect roi = obj.box;
+            roi.x = std::max(0, roi.x);
+            roi.y = std::max(0, roi.y);
+            if (roi.x + roi.width > currentFrame.cols) roi.width = currentFrame.cols - roi.x;
+            if (roi.y + roi.height > currentFrame.rows) roi.height = currentFrame.rows - roi.y;
+            if (roi.width > 0 && roi.height > 0) {
+                record.cropped_image = currentFrame(roi).clone();
+            }
+            m_targetHistory.push_back(record);
+        } else {
+            // Existing target
+            it->last_seen_timestamp = timestamp;
+            it->last_box = obj.box;
+            it->trail = obj.trail;
+            it->is_currently_active = true;
+            if (obj.confidence > it->max_confidence) {
+                it->max_confidence = obj.confidence;
+                // Update crop image with better confidence one
+                cv::Rect roi = obj.box;
+                roi.x = std::max(0, roi.x);
+                roi.y = std::max(0, roi.y);
+                if (roi.x + roi.width > currentFrame.cols) roi.width = currentFrame.cols - roi.x;
+                if (roi.y + roi.height > currentFrame.rows) roi.height = currentFrame.rows - roi.y;
+                if (roi.width > 0 && roi.height > 0) {
+                    it->cropped_image = currentFrame(roi).clone();
+                }
+            }
+        }
+    }
+}
+
+bool Application::exportTarget(const UniqueTargetRecord& record) {
+    std::string baseDir = m_settings.dataLoggingOutputDir;
+    if (baseDir.empty()) {
+        baseDir = ".";
+    }
+
+    std::string idStr = std::to_string(record.track_id);
+    while (idStr.length() < 3) idStr = "0" + idStr;
+
+    std::string jsonPath = baseDir + "/target_" + idStr + "_details.json";
+    std::string imgPath = baseDir + "/target_" + idStr + "_visual.png";
+
+    // Write JSON file
+    std::ofstream file(jsonPath);
+    if (!file.is_open()) {
+        log(LogLevel::ERR, "Failed to open file for target export: " + jsonPath);
+        return false;
+    }
+
+    file << "{\n";
+    file << "  \"track_id\": " << record.track_id << ",\n";
+    file << "  \"class_id\": " << record.class_id << ",\n";
+    file << "  \"className\": \"" << record.className << "\",\n";
+    file << "  \"max_confidence\": " << record.max_confidence << ",\n";
+    file << "  \"first_seen\": \"" << record.first_seen_timestamp << "\",\n";
+    file << "  \"last_seen\": \"" << record.last_seen_timestamp << "\",\n";
+    file << "  \"first_box\": {\"x\": " << record.first_box.x << ", \"y\": " << record.first_box.y 
+         << ", \"w\": " << record.first_box.width << ", \"h\": " << record.first_box.height << "},\n";
+    file << "  \"last_box\": {\"x\": " << record.last_box.x << ", \"y\": " << record.last_box.y 
+         << ", \"w\": " << record.last_box.width << ", \"h\": " << record.last_box.height << "},\n";
+    file << "  \"trail\": [\n";
+    for (size_t i = 0; i < record.trail.size(); ++i) {
+        file << "    {\"x\": " << record.trail[i].x << ", \"y\": " << record.trail[i].y << "}";
+        if (i + 1 < record.trail.size()) file << ",";
+        file << "\n";
+    }
+    file << "  ]\n";
+    file << "}\n";
+    file.close();
+
+    // Write image
+    if (!record.cropped_image.empty()) {
+        if (cv::imwrite(imgPath, record.cropped_image)) {
+            log(LogLevel::INFO, "Exported target image to " + imgPath);
+        } else {
+            log(LogLevel::ERR, "Failed to write target image: " + imgPath);
+        }
+    }
+
+    log(LogLevel::INFO, "Exported target details to " + jsonPath);
+    return true;
+}
+
+void Application::renderTargetAnalyzer() {
+    ImGui::Begin("Target Analyzer");
+
+    if (m_selectedAnalyzerTargetId == -1) {
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No target selected for analysis.");
+        ImGui::Text("Click a target in the video feed or target list to analyze it.");
+        ImGui::End();
+        return;
+    }
+
+    // Find target in history
+    UniqueTargetRecord selectedRecord;
+    bool found = false;
+    for (const auto& record : m_targetHistory) {
+        if (record.track_id == m_selectedAnalyzerTargetId) {
+            selectedRecord = record;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.3f, 1.0f), "Target ID %d not found in system history.", m_selectedAnalyzerTargetId);
+        if (ImGui::Button("Clear Selection")) {
+            m_selectedAnalyzerTargetId = -1;
+        }
+        ImGui::End();
+        return;
+    }
+
+    // Render target detail card
+    ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "TARGET REPORT: ID %03d", selectedRecord.track_id);
+    ImGui::Separator();
+
+    // Render cropped image if available
+    uint32_t texID = 0;
+    auto texIt = m_targetTextures.find(selectedRecord.track_id);
+    if (texIt != m_targetTextures.end()) {
+        texID = texIt->second.texture_id;
+    }
+
+    if (texID != 0 && !selectedRecord.cropped_image.empty()) {
+        // Display cropped image centered
+        float imgAspect = static_cast<float>(selectedRecord.cropped_image.cols) / selectedRecord.cropped_image.rows;
+        float displayW = 200.0f;
+        float displayH = displayW / imgAspect;
+
+        // Centering
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - displayW) * 0.5f);
+        ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(texID)), ImVec2(displayW, displayH));
+        ImGui::Spacing();
+    } else {
+        ImGui::TextDisabled("No visual crop available.");
+    }
+
+    ImGui::Separator();
+
+    ImGui::Columns(2, "analyzer_details", false);
+    ImGui::SetColumnWidth(0, 120.0f);
+
+    ImGui::Text("Classification:");
+    ImGui::NextColumn();
+    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "%s (ID: %d)", selectedRecord.className.c_str(), selectedRecord.class_id);
+    ImGui::NextColumn();
+
+    ImGui::Text("Status:");
+    ImGui::NextColumn();
+    if (selectedRecord.is_currently_active) {
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.5f, 1.0f), "ACTIVE / IN VIEW");
+    } else {
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "LOST / ARCHIVED");
+    }
+    ImGui::NextColumn();
+
+    ImGui::Text("Max Confidence:");
+    ImGui::NextColumn();
+    ImGui::Text("%.2f", selectedRecord.max_confidence);
+    ImGui::NextColumn();
+
+    ImGui::Text("First Detected:");
+    ImGui::NextColumn();
+    ImGui::Text("%s", selectedRecord.first_seen_timestamp.c_str());
+    ImGui::NextColumn();
+
+    ImGui::Text("Last Detected:");
+    ImGui::NextColumn();
+    ImGui::Text("%s", selectedRecord.last_seen_timestamp.c_str());
+    ImGui::NextColumn();
+
+    ImGui::Text("Start Position:");
+    ImGui::NextColumn();
+    ImGui::Text("%d, %d (Size: %dx%d)", 
+                selectedRecord.first_box.x + selectedRecord.first_box.width / 2,
+                selectedRecord.first_box.y + selectedRecord.first_box.height / 2,
+                selectedRecord.first_box.width, selectedRecord.first_box.height);
+    ImGui::NextColumn();
+
+    ImGui::Text("End Position:");
+    ImGui::NextColumn();
+    ImGui::Text("%d, %d (Size: %dx%d)", 
+                selectedRecord.last_box.x + selectedRecord.last_box.width / 2,
+                selectedRecord.last_box.y + selectedRecord.last_box.height / 2,
+                selectedRecord.last_box.width, selectedRecord.last_box.height);
+    ImGui::Columns(1);
+
+    ImGui::Separator();
+
+    if (ImGui::Button("Export Target Details", ImVec2(-FLT_MIN, 0))) {
+        exportTarget(selectedRecord);
+    }
+
+    if (ImGui::Button("Deselect", ImVec2(-FLT_MIN, 0))) {
+        m_selectedAnalyzerTargetId = -1;
+    }
+
+    ImGui::End();
+}
+
 void Application::cleanup() {
     m_running = false;
     if (m_workerThread.joinable()) m_workerThread.join();
+
+    // Delete target history textures
+    for (auto& [id, texInfo] : m_targetTextures) {
+        if (texInfo.texture_id != 0) {
+            glDeleteTextures(1, &texInfo.texture_id);
+        }
+    }
+    m_targetTextures.clear();
+
     if (ImGui::GetCurrentContext()) {
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();

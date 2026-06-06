@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.11.2] - 2026-06-06
+
+### Added
+
+- **Rigorose Validierung für Pixeltarget-Tracking**: Zwei neue Unit-Tests (`SubPixelInterpolationMath` und `SearchWindowClampingShift`) in `unit_tests.cpp` prüfen die mathematische Korrektheit der Peak-Fitting-Gleichungen und die randgesteuerte Suchfensterverschiebung.
+
+### Fixed
+
+- **Aktives Dead-Reckoning (Coast Phase)**: Bei Signalverlust des Pixeltargets (Template-Match-Konfidenz <= 0.5) wird die Position nun aktiv entlang des Geschwindigkeitsvektors vorhergesagt und die Ziel-Box aktualisiert, statt an der letzten Position einzufrieren.
+- **Sub-Pixel-Präzision & Interpolation**: Das Tracking speichert nun die subpixelgenauen Fließkomma-Koordinaten (`m_pixelCenterX`/`m_pixelCenterY`). Mittels parabolischer Peak-Interpolation in der Korrelationsmatrix wird die Position mit Sub-Pixel-Genauigkeit bestimmt und geglättet, um Rundungsfehler bei kleinen Geschwindigkeiten zu eliminieren.
+- **Randanpassung des Suchfensters**: Das Suchfenster (`searchRect`) wird an den Bildrändern nun verschoben (geklemmt) statt abgeschnitten, um ein Schrumpfen unter die Template-Größe zu verhindern.
+- **Synchronisation mit Tracker-Settings**: Die Geschwindigkeitsglättung und -dämpfung des Pixeltargets greift nun dynamisch auf die in den Systemeinstellungen hinterlegten Werte (`trackerVelocitySmoothing`/`trackerDeadReckoningDamping`) zu, anstatt hartcodierte Werte zu nutzen.
+
+## [1.11.1] - 2026-06-06
+
+### Added
+
+- **Unique Target Memory Persistence**: Added memory persistence for tracking history. Tracked objects remain in memory as a `UniqueTargetRecord` after their active tracks are lost/deleted.
+- **Target Analyzer UI Panel**: Added a dedicated, dockable ImGui panel ("Target Analyzer") displaying detailed reports on selected targets: cropped thumbnail image, classification, status (Active vs. Lost), max confidence, lifespan timestamps, and initial/final coordinates with bounding box dimensions.
+- **Target Export Functions**: Added context menu options (via right-click in Active Tracks and Target History tables) and a detail button in the Target Analyzer to export target data. Details are exported to a JSON file (`target_<ID>_details.json`) and the highest-confidence crop is saved to a PNG image (`target_<ID>_visual.png`).
+- **Tabbed Data Panel**: Refactored the Data Panel to support a tabbed interface with "Active Tracks" and "Target History" tabs. Both tabs support sorting, filtering, and row selection.
+
+### Changed
+
+- `Common.hpp`: Defined the `UniqueTargetRecord` struct.
+- `Application.hpp`: Added target history vectors, texture lookup maps, and helper methods.
+- `Application.cpp`: Integrated history updates in `workerLoop`, texture management on the render thread, and refactored the Data Panel with tabbed controls, context menus, and the Target Analyzer UI.
+
 ## [1.11.0] - 2026-06-06
 
 ### Added

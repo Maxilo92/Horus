@@ -55,6 +55,21 @@ struct TrackedTarget {
     std::vector<cv::Point> trail;
 };
 
+// Target History: Eindeutige Targets zur Aufzeichnung und Analyse
+struct UniqueTargetRecord {
+    int track_id = -1;
+    int class_id = -1;
+    std::string className;
+    float max_confidence = 0.0f;
+    std::string first_seen_timestamp;
+    std::string last_seen_timestamp;
+    cv::Rect first_box;
+    cv::Rect last_box;
+    std::vector<cv::Point> trail;
+    cv::Mat cropped_image;
+    bool is_currently_active = false;
+};
+
 struct SystemSettings {
     // ----------------------------------------------------------------
     // Detector Settings

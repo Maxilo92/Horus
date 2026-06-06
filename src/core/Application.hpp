@@ -71,6 +71,9 @@ private:
     void renderZoomWindow(const cv::Mat& zoomFrame);
     void renderDevConsole();
     void renderSettingsWindow();
+    void renderTargetAnalyzer();
+    void updateTargetHistory(const std::vector<TrackedObject>& activeTracks, const cv::Mat& currentFrame);
+    bool exportTarget(const UniqueTargetRecord& record);
 
     GLFWwindow* m_window;
     int         m_width;
@@ -229,6 +232,16 @@ private:
     char m_feedbackBuf[1024] = {0};
     std::string m_feedbackStatus;
     bool saveFeedback(const std::string& feedback);
+
+    // Target History & Analyzer State
+    std::vector<UniqueTargetRecord> m_targetHistory;
+    std::vector<UniqueTargetRecord> m_sharedTargetHistory;
+    int m_selectedAnalyzerTargetId = -1;
+    struct TextureInfo {
+        uint32_t texture_id = 0;
+        float max_confidence = 0.0f;
+    };
+    std::unordered_map<int, TextureInfo> m_targetTextures;
 };
 
 #endif // APPLICATION_HPP

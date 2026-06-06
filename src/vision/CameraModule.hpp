@@ -16,9 +16,14 @@ public:
 
     int getWidth() const;
     int getHeight() const;
+    std::string getBackendName() const;
 
 private:
     cv::VideoCapture m_cap;
 };
+
+namespace ImageUtils {
+    void enhanceLowLight(cv::Mat& frame, cv::Mat& labMat, std::vector<cv::Mat>& channelsVec, cv::Ptr<cv::CLAHE>& claheObj, float clipLimit, int denoiseKernel);
+}
 
 #endif // CAMERA_MODULE_HPP
