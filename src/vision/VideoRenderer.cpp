@@ -26,7 +26,9 @@ void VideoRenderer::updateTexture(const cv::Mat& frame) {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.step / frame.elemSize());
 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame.cols, frame.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, frame.data);
+    GLenum format = (frame.channels() == 4) ? GL_BGRA : GL_BGR;
+    GLenum internalFormat = (frame.channels() == 4) ? GL_RGBA : GL_RGB;
+    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, frame.cols, frame.rows, 0, format, GL_UNSIGNED_BYTE, frame.data);
 
     // Restore default unpack alignment and row length to avoid affecting other uploads
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);

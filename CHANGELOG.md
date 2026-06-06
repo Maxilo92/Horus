@@ -1,6 +1,63 @@
 # Changelog
 
+## [1.12.4] - 2026-06-06
+
+### Added
+- **Sekunden-Intervall-Snapshots**: Während ein Ziel aktiv getrackt wird, wird jede Sekunde automatisch ein Snapshot erfasst und im `periodic_snapshots`-Buffer gespeichert. Dies stellt sicher, dass stets der optimale Moment für jedes der drei Keyframes verfügbar ist.
+- **Verbessertes Keyframe-Auswahlverfahren**: Beim Verlust eines Ziels wird aus dem Buffer automatisch das beste Discovery (erster Snap), Mid-Track (mittlerer Index) und Last-Seen (letzter Snap) Bild ausgewählt — keine manuellen oder zufälligen Aufnahmen mehr.
+- **Galerie-Navigation im Target Analyzer**: Interaktiver Vor/Zurück-Durchklick durch alle drei Keyframe-Meilensteine. Standard-Ansicht zeigt "Mid-Track (Best)" zuerst.
+- **Bild-Metadaten pro Milestone**: Jeder Keyframe zeigt Aufnahmezeitstempel, Begrenzungsrahmen (X/Y/W/H), Pixel-Fläche und Detektionswahrscheinlichkeit inkl. farbigem Fortschrittsbalken.
+- **Speicher-Optimierung**: Nach Finalisierung eines Ziels wird der `periodic_snapshots`-Buffer geleert und freigegeben — nur die 3 finalen Keyframes bleiben im Speicher.
+
+### Changed
+- `Common.hpp`: `TargetSnapshot`-Struktur (mit `image`, `timestamp`, `box`, `confidence`) ersetzt die alten `cv::Mat`-Felder. `UniqueTargetRecord` enthält nun `periodic_snapshots`-Buffer und `last_snapshot_time`.
+- `Application.cpp`: `updateTargetHistory` implementiert vollständige 1-Sekunden-Sampling-Logik und automatische Keyframe-Auswahl bei Target-Verlust. `renderTargetAnalyzer` vollständig überarbeitet mit Tab-Navigation und Metadaten-Anzeige.
+
+## [1.12.3] - 2026-06-06
+
+
+### Added
+- **Dediziertes Export-Verzeichnis**: Einführung der Einstellung `exportOutputDir` (Standard: `exports/`), um manuelle Exporte (Screenshots, Target-Details, Historie) sauber von den kontinuierlichen Log-Dateien zu trennen.
+- **Automatisierte Ordnererstellung**: Das Export-Verzeichnis wird nun bei Bedarf automatisch erstellt (`std::filesystem::create_directories`), was den Workflow beschleunigt und Fehler durch fehlende Zielordner eliminiert.
+- **Erweiterte UI-Konfiguration**: Das "Export & Logging" Panel im Data Panel wurde um ein Eingabefeld für das Export-Verzeichnis erweitert.
+
+### Changed
+- `Application.cpp`: `exportTarget`, `exportTargetHistory` und `takeScreenshot` nutzen nun das dedizierte Export-Verzeichnis.
+- Menü "Tools": "Open Data Directory" wurde zu "Open Export Directory" aktualisiert.
+
+## [1.12.2] - 2026-06-06
+
+### Added
+- **Global Screenshot Functionality**: Added "Take Screenshot" to a new "Tools" menu in the Main Menu Bar and as a button in the "Export & Logging" tab. Uses `glReadPixels` to capture the entire application window including all ImGui overlays.
+- **Full History Export**: Added "Export Entire History (JSON)" to save all tracked targets from the session to a single timestamped JSON file.
+- **New "Tools" and "View" Menus**: Expanded the Main Menu Bar with dedicated menus for file operations, window visibility, and analysis tools.
+- **Export & Logging Tab**: Moved and enhanced the data logging controls into the "Data Panel" for better accessibility as per the UI design specification.
+- **Open Data Directory**: Added a shortcut to open the current output directory in the system file explorer (supports Windows, macOS, and Linux).
+- **Keyboard Shortcuts**:
+  - `Space`: Toggle Data Logging Start/Stop.
+  - `PrintScreen`: Take a global screenshot.
+  - `C`: Toggle Settings Window.
+
+### Changed
+- `Application.hpp`: Added methods for screenshot and history export, and atomic flags for UI state.
+- `Application.cpp`: Implemented `exportTargetHistory`, `takeScreenshot`, and restructured the Main Menu Bar and Data Panel. Removed redundant logging controls from the Settings window.
+
 ## [1.12.1] - 2026-06-06
+
+### Added
+
+- **Interaktive Galerie im Target Analyzer**: Der Target Analyzer zeigt nun standardmäßig das beste Bild (Mid-Track / Best) zuerst. Der Benutzer kann über die Schaltflächen "< Prev", "Next >" oder Tabs ("Discovery", "Mid-Track (Best)", "Last Seen") durch die drei Meilensteine navigieren.
+- **Milestone Snapshot Metadaten**: Jedes Bild in der Galerie wird nun mit seinen spezifischen Metadaten angezeigt: Aufnahmezeitstempel, Begrenzungsrahmen (X, Y, Breite, Höhe), Pixel-Fläche und Detektionskonfidenz (inklusive visueller High-Contrast Fortschrittsbalken).
+
+### Changed
+
+- `Common.hpp`: Die drei Meilensteine im `UniqueTargetRecord` wurden auf `TargetSnapshot` Strukturen umgestellt, um die Metadaten direkt beim Bild zu speichern.
+- `Application.cpp`:
+  - `renderTargetAnalyzer` komplett überarbeitet für die interaktive Galerie und Metadaten-Anzeige.
+  - Snapshotting-Logik in `updateTargetHistory` und Bild-Export in `exportTarget` angepasst.
+- `tests/unit_tests.cpp`: Unit-Tests auf die neue Struktur angepasst.
+
+## [1.12.0] - 2026-06-06
 
 ### Added
 

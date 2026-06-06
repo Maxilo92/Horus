@@ -77,6 +77,8 @@ private:
     void renderTargetAnalyzer();
     void updateTargetHistory(const std::vector<TrackedObject>& activeTracks, const cv::Mat& currentFrame);
     bool exportTarget(const UniqueTargetRecord& record);
+    bool exportTargetHistory();
+    void takeScreenshot();
 
     GLFWwindow* m_window;
     int         m_width;
@@ -105,6 +107,7 @@ private:
 
     std::thread              m_workerThread;
     std::thread              m_detectorThread;
+    std::thread              m_trackingThread;
     std::atomic<bool>        m_running;
     
     // Asynchronous detector pipeline synchronization
@@ -117,8 +120,18 @@ private:
     SystemSettings           m_detectorSettingsCopy;
     std::vector<Detection>   m_detectorResults;
 
+    // Asynchronous tracking pipeline synchronization
+    std::mutex               m_trackingMutex;
+    std::condition_variable  m_trackingCv;
+    std::atomic<bool>        m_trackingBusy{false};
+    cv::Mat                  m_trackingFrameCopy;
+    SystemSettings           m_trackingSettingsCopy;
+    std::vector<Detection>   m_trackingDetectionsCopy;
+    int                      m_trackingDetectorLag = 0;
+
     std::mutex               m_dataMutex;
     cv::Mat                  m_sharedFrame;
+    cv::Mat                  m_sharedZoomFrame;
     cv::Mat                  m_sharedTrackingFrame;
     cv::Mat                  m_sharedHeatmapFrame;
     std::vector<Detection>   m_sharedDetections;
@@ -137,6 +150,7 @@ private:
     std::atomic<int>         m_requestedLockId;
     std::atomic<bool>        m_releaseLockRequested;
     std::atomic<int>         m_manualCaptureTargetId{-1};
+    std::atomic<bool>        m_screenshotRequested{false};
     std::atomic<bool>        m_pixelLockRequested{false};
     cv::Point                m_pixelLockPoint;
     bool                     m_pixelLockActive = false;
@@ -180,6 +194,10 @@ private:
 
     // UI state
     bool  m_showSettingsWindow = false;
+    bool  m_showDataPanel      = true;
+    bool  m_showZoomWindow     = true;
+    bool  m_showDevConsole     = false;
+    bool  m_showTargetAnalyzer = true;
     bool  m_autoScrollLog      = true;
     char  m_logFilter[128]     = {0};
     char  m_dataPanelFilter[128] = {0};
@@ -252,6 +270,7 @@ private:
     bool saveFeedback(const std::string& feedback);
 
     // Target History & Analyzer State
+    std::vector<UniqueTargetRecord> m_internalTargetHistory;
     std::vector<UniqueTargetRecord> m_targetHistory;
     std::vector<UniqueTargetRecord> m_sharedTargetHistory;
     int m_selectedAnalyzerTargetId = -1;
@@ -277,21 +296,6 @@ private:
         bool isLost = false;
     };
     SharedSubZoom m_sharedSubZooms[4];
-    SharedSubZoom m_subZooms[4]; // render-thread local copy
-    std::unique_ptr<VideoRenderer> m_subZoomRenderers[4];
-
-    struct WorkerMotionTrack {
-        int id;
-        cv::Rect box;
-        std::chrono::steady_clock::time_point lastSeen;
-        bool active = true;
-    };
-    std::vector<WorkerMotionTrack> m_workerMotionTracks;
-    int m_nextMotionId = 1;
-};
-
-#endif // APPLICATION_HPP
-dSubZoom m_sharedSubZooms[4];
     SharedSubZoom m_subZooms[4]; // render-thread local copy
     std::unique_ptr<VideoRenderer> m_subZoomRenderers[4];
 

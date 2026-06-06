@@ -141,137 +141,95 @@ AudioEngine::SoundBuffer AudioEngine::buildSound(Event type, float freqHz, float
 
         switch (type) {
             case Event::MOTION_ALERT: {
-                // Sonar Radar Ping: Downward frequency sweep from 1.5 * freqHz to 0.8 * freqHz
-                const float f_start = freqHz * 1.5f;
-                const float f_end   = freqHz * 0.8f;
-                const float phi = 2.0f * kPi * (f_start * t + (f_end - f_start) * t * t / (2.0f * durationSec));
+                // Sonar Radar Tick: Crisp high-frequency tick at freqHz with steep exponential decay
+                val = std::sin(2.0f * kPi * freqHz * t);
                 
-                // Add second harmonic (30% amplitude)
-                val = std::sin(phi) + 0.3f * std::sin(2.0f * phi);
-                val /= 1.3f; // Normalize
-
-                // Exponential decay envelope
-                constexpr float attackTime = 0.002f; // 2ms click avoidance
+                // Extremely fast decay (12ms decay time scale)
+                constexpr float attackTime = 0.001f; // 1ms fade-in to prevent initial pop
                 if (t < attackTime) {
                     env = t / attackTime;
                 } else {
-                    env = std::exp(-5.0f * (t - attackTime) / durationSec);
+                    env = std::exp(-15.0f * (t - attackTime) / durationSec);
                 }
                 break;
             }
             case Event::ALARM_ENTRY: {
-                // Threat Warning: Base frequency + tritone harmonic (1.414 * freqHz) modulated with 20 Hz tremolo
-                const float f1 = freqHz;
-                const float f2 = freqHz * 1.414f;
-                val = std::sin(2.0f * kPi * f1 * t) + 0.5f * std::sin(2.0f * kPi * f2 * t);
-                val /= 1.5f; // Normalize
-
-                // 20 Hz tremolo (amplitude oscillation between 0.4 and 1.0)
-                const float tremolo = 0.7f + 0.3f * std::sin(2.0f * kPi * 20.0f * t);
-                val *= tremolo;
-
-                // Linear attack/decay envelope (8ms)
-                const float fadeLenSec = std::min(durationSec / 4.0f, 0.008f);
-                if (t < fadeLenSec) {
-                    env = t / fadeLenSec;
-                } else if (t >= durationSec - fadeLenSec) {
-                    env = (durationSec - t) / fadeLenSec;
+                // Threat Warning: Rapid triple-tick warning (15ms tick pulse, 20ms gap)
+                constexpr float pulseDur = 0.015f;
+                constexpr float gapDur = 0.020f;
+                constexpr float cycle = pulseDur + gapDur;
+                
+                const float local_t = std::fmod(t, cycle);
+                if (local_t < pulseDur) {
+                    val = std::sin(2.0f * kPi * freqHz * local_t);
+                    env = std::exp(-8.0f * local_t / pulseDur);
+                    if (local_t < 0.001f) env *= local_t / 0.001f;
+                } else {
+                    val = 0.0f;
+                    env = 0.0f;
                 }
                 break;
             }
             case Event::ALARM_EXIT: {
-                // Descending clearance chime: frequency sweep from 1.2 * freqHz to 0.8 * freqHz with odd harmonics
-                const float f_start = freqHz * 1.2f;
-                const float f_end   = freqHz * 0.8f;
-                const float phi = 2.0f * kPi * (f_start * t + (f_end - f_start) * t * t / (2.0f * durationSec));
-
-                // Add odd harmonics (square-like mix for woodwind-like richness)
-                val = std::sin(phi) + 0.3f * std::sin(3.0f * phi) + 0.1f * std::sin(5.0f * phi);
-                val /= 1.4f; // Normalize
-
-                // Linear decay envelope: fully open for first 20%, then linear decay to 0
-                const float attackTime = 0.005f; // 5ms attack
+                // Clearance Pop: Single low-frequency muted status pop with extremely fast decay
+                val = std::sin(2.0f * kPi * freqHz * t);
+                
+                constexpr float attackTime = 0.002f;
                 if (t < attackTime) {
                     env = t / attackTime;
                 } else {
-                    const float holdTime = 0.2f * durationSec;
-                    if (t < holdTime) {
-                        env = 1.0f;
-                    } else {
-                        env = (durationSec - t) / (durationSec - holdTime);
-                    }
+                    env = std::exp(-12.0f * (t - attackTime) / durationSec);
                 }
                 break;
             }
             case Event::LOCK_ACQUIRED: {
-                // Double pip: bip-BIP
-                // Pip 1: 0% to 35% of duration, frequency 0.9 * freqHz
-                // Silent gap: 35% to 45% of duration
-                // Pip 2: 45% to 100% of duration, frequency sweeps 1.3 * freqHz to 1.5 * freqHz
-                const float t1_end = 0.35f * durationSec;
-                const float t2_start = 0.45f * durationSec;
-                
-                constexpr float clickFade = 0.005f; // 5ms fades for pips
+                // Lock Confirmation: High-tech double-tick ("tick-TOCK")
+                // Scaled relative to durationSec so duration slider controls speed
+                const float t1 = 0.010f * (durationSec / 0.045f);
+                const float gap = 0.015f * (durationSec / 0.045f);
+                const float t2 = 0.020f * (durationSec / 0.045f);
 
-                if (t < t1_end) {
-                    const float f1 = freqHz * 0.9f;
-                    const float phi = 2.0f * kPi * f1 * t;
-                    val = std::sin(phi) + 0.25f * std::sin(2.0f * phi);
-                    val /= 1.25f;
+                constexpr float attackTime = 0.001f;
 
-                    // Envelope for pip 1
-                    if (t < clickFade) {
-                        env = t / clickFade;
-                    } else if (t > t1_end - clickFade) {
-                        env = (t1_end - t) / clickFade;
-                    } else {
-                        env = 1.0f;
-                    }
-                } else if (t < t2_start) {
+                if (t < t1) {
+                    // Lower pitch first tick (20% lower than target frequency)
+                    val = std::sin(2.0f * kPi * (freqHz * 0.8f) * t);
+                    env = std::exp(-8.0f * t / t1);
+                    if (t < attackTime) env *= t / attackTime;
+                } else if (t < t1 + gap) {
                     val = 0.0f;
                     env = 0.0f;
                 } else {
-                    const float t_rel = t - t2_start;
-                    const float dur2 = durationSec - t2_start;
-                    const float f_start = freqHz * 1.3f;
-                    const float f_end = freqHz * 1.5f;
-                    const float phi = 2.0f * kPi * (f_start * t_rel + (f_end - f_start) * t_rel * t_rel / (2.0f * dur2));
-                    
-                    val = std::sin(phi) + 0.25f * std::sin(2.0f * phi);
-                    val /= 1.25f;
-
-                    // Envelope for pip 2
-                    if (t_rel < clickFade) {
-                        env = t_rel / clickFade;
-                    } else if (t > durationSec - clickFade) {
-                        env = (durationSec - t) / clickFade;
-                    } else {
-                        env = 1.0f;
-                    }
+                    // Higher pitch second tick (12% higher than target frequency)
+                    const float t_rel = t - (t1 + gap);
+                    val = std::sin(2.0f * kPi * (freqHz * 1.12f) * t_rel);
+                    env = std::exp(-8.0f * t_rel / t2);
+                    if (t_rel < attackTime) env *= t_rel / attackTime;
                 }
                 break;
             }
             case Event::LOCK_LOST: {
-                // Downward buzzing error chime: frequency sweep 1.0 * freqHz to 0.5 * freqHz with buzzing harmonics
-                const float f_start = freqHz;
-                const float f_end   = freqHz * 0.5f;
-                const float phi = 2.0f * kPi * (f_start * t + (f_end - f_start) * t * t / (2.0f * durationSec));
+                // Telemetry Loss: Descending double-pop failure warning
+                const float t1 = 0.020f * (durationSec / 0.065f);
+                const float gap = 0.025f * (durationSec / 0.065f);
+                const float t2 = 0.020f * (durationSec / 0.065f);
 
-                // Rich odd harmonics (simulating square-like warning buzz)
-                val = std::sin(phi) + 0.5f * std::sin(3.0f * phi) + 0.25f * std::sin(5.0f * phi) + 0.125f * std::sin(7.0f * phi);
-                val /= 1.875f; // Normalize
+                constexpr float attackTime = 0.001f;
 
-                // Linear decay envelope: starts decaying after 30% of the duration
-                const float attackTime = 0.005f; // 5ms attack
-                if (t < attackTime) {
-                    env = t / attackTime;
+                if (t < t1) {
+                    // First pop (30% higher pitch warning)
+                    val = std::sin(2.0f * kPi * (freqHz * 1.3f) * t);
+                    env = std::exp(-6.0f * t / t1);
+                    if (t < attackTime) env *= t / attackTime;
+                } else if (t < t1 + gap) {
+                    val = 0.0f;
+                    env = 0.0f;
                 } else {
-                    const float decayStart = 0.3f * durationSec;
-                    if (t < decayStart) {
-                        env = 1.0f;
-                    } else {
-                        env = (durationSec - t) / (durationSec - decayStart);
-                    }
+                    // Second pop (base pitch)
+                    const float t_rel = t - (t1 + gap);
+                    val = std::sin(2.0f * kPi * freqHz * t_rel);
+                    env = std::exp(-6.0f * t_rel / t2);
+                    if (t_rel < attackTime) env *= t_rel / attackTime;
                 }
                 break;
             }

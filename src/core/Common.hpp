@@ -75,7 +75,11 @@ struct UniqueTargetRecord {
     cv::Rect last_box;
     std::vector<cv::Point> trail;
     
-    // Key milestones images
+    // Key milestones snapshots (containing image, timestamp, box, confidence)
+    TargetSnapshot snapshot_first;
+    TargetSnapshot snapshot_mid;
+    TargetSnapshot snapshot_last;
+
     cv::Mat cropped_image_first;
     cv::Mat cropped_image_mid;
     cv::Mat cropped_image_last;
@@ -161,6 +165,7 @@ struct SystemSettings {
     int         dataLoggingFormat      = 0;    // 0=CSV, 1=JSON-Lines
     int         dataLoggingFreqFrames  = 1;    // Log every N frames (1 = every frame)
     std::string dataLoggingOutputDir   = "";   // "" = current working directory
+    std::string exportOutputDir        = "exports"; // Dedicated directory for manual exports
 
     // ----------------------------------------------------------------
     // ROI Settings (Plan 04)
@@ -233,6 +238,8 @@ struct SystemSettings {
     // ----------------------------------------------------------------
     bool  subZoomsEnabled             = true;
     bool  subZoomsUseSeparateWindows  = false;
+    int   subZoomPaddingPx            = 20;
+    float subZoomMagnification        = 1.0f;
 
     // ----------------------------------------------------------------
     // Remote Inference Settings (network GPU offloading)

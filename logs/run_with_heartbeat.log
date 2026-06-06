@@ -1,0 +1,23 @@
+=== Building Project Horus ===
+-- Configuring done (4.1s)
+-- Generating done (0.1s)
+-- Build files have been written to: /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build
+[  4%] Built target gtest
+[  9%] Built target gtest_main
+[ 11%] Building CXX object CMakeFiles/Tactileviewer.dir/src/core/Application.cpp.o
+[ 14%] Building CXX object CMakeFiles/unit_tests.dir/src/core/Application.cpp.o
+[ 16%] Linking CXX executable Tactileviewer.app/Contents/MacOS/Tactileviewer
+[ 19%] Linking CXX executable unit_tests
+[ 57%] Built target Tactileviewer
+[100%] Built target unit_tests
+=== Launching Project Horus ===
+[INFO] Application constructed
+[INFO] Opening camera: 3
+OpenCV: out device of bound (0-2): 3
+OpenCV: camera failed to properly initialize!
+[ WARN:0@0.515] global cap.cpp:480 open VIDEOIO(AVFOUNDATION): backend is generally available but can't be used to capture by index
+OpenCV: out device of bound (0-2): 3
+OpenCV: camera failed to properly initialize!
+[ WARN:0@0.568] global cap_ffmpeg_impl.hpp:1217 open VIDEOIO/FFMPEG: Failed list devices for backend avfoundation
+[ERR] Camera failed to open: 3
+[ERROR] Camera fail: 3

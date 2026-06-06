@@ -10,6 +10,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cstdlib>
+#include <ctime>
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
@@ -362,6 +363,7 @@ void Application::savePersistedSettings() const {
     out << "dataLoggingFormat=" << m_settings.dataLoggingFormat << '\n';
     out << "dataLoggingFreqFrames=" << m_settings.dataLoggingFreqFrames << '\n';
     out << "dataLoggingOutputDir=" << m_settings.dataLoggingOutputDir << '\n';
+    out << "exportOutputDir=" << m_settings.exportOutputDir << '\n';
     out << "showROIOverlay=" << (m_settings.showROIOverlay ? 1 : 0) << '\n';
     out << "request4KCamera=" << (m_settings.request4KCamera ? 1 : 0) << '\n';
     out << "enable4KZoom=" << (m_settings.enable4KZoom ? 1 : 0) << '\n';
@@ -382,6 +384,8 @@ void Application::savePersistedSettings() const {
     out << "motionLearningRate=" << m_settings.motionLearningRate << '\n';
     out << "subZoomsEnabled=" << (m_settings.subZoomsEnabled ? 1 : 0) << '\n';
     out << "subZoomsUseSeparateWindows=" << (m_settings.subZoomsUseSeparateWindows ? 1 : 0) << '\n';
+    out << "subZoomPaddingPx=" << m_settings.subZoomPaddingPx << '\n';
+    out << "subZoomMagnification=" << m_settings.subZoomMagnification << '\n';
     // Audio Feedback Settings
     out << "audioEnabled=" << (m_settings.audioEnabled ? 1 : 0) << '\n';
     out << "audioMasterVolume=" << m_settings.audioMasterVolume << '\n';
@@ -470,6 +474,7 @@ void Application::loadPersistedSettings() {
             else if (key == "dataLoggingFormat") m_settings.dataLoggingFormat = std::stoi(value);
             else if (key == "dataLoggingFreqFrames") m_settings.dataLoggingFreqFrames = std::stoi(value);
             else if (key == "dataLoggingOutputDir") m_settings.dataLoggingOutputDir = value;
+            else if (key == "exportOutputDir") m_settings.exportOutputDir = value;
             else if (key == "showROIOverlay") m_settings.showROIOverlay = ParseBoolSetting(value);
             else if (key == "request4KCamera") m_settings.request4KCamera = ParseBoolSetting(value);
             else if (key == "enable4KZoom") m_settings.enable4KZoom = ParseBoolSetting(value);
@@ -490,6 +495,8 @@ void Application::loadPersistedSettings() {
             else if (key == "motionLearningRate") m_settings.motionLearningRate = std::stoi(value);
             else if (key == "subZoomsEnabled") m_settings.subZoomsEnabled = ParseBoolSetting(value);
             else if (key == "subZoomsUseSeparateWindows") m_settings.subZoomsUseSeparateWindows = ParseBoolSetting(value);
+            else if (key == "subZoomPaddingPx") m_settings.subZoomPaddingPx = std::stoi(value);
+            else if (key == "subZoomMagnification") m_settings.subZoomMagnification = std::stof(value);
             // Audio Feedback Settings
             else if (key == "audioEnabled") m_settings.audioEnabled = ParseBoolSetting(value);
             else if (key == "audioMasterVolume") m_settings.audioMasterVolume = std::stof(value);
@@ -801,13 +808,29 @@ void Application::workerLoop() {
                             localSubZooms[i].box = trackIt->box;
                             localSubZooms[i].isLost = !trackIt->active;
                             
-                            // Crop the frame
-                            cv::Rect roi = trackIt->box;
-                            roi.x = std::max(0, roi.x);
-                            roi.y = std::max(0, roi.y);
-                            if (roi.x + roi.width > trackingFrame.cols) roi.width = trackingFrame.cols - roi.x;
-                            if (roi.y + roi.height > trackingFrame.rows) roi.height = trackingFrame.rows - roi.y;
-                            if (roi.width > 0 && roi.height > 0) {
+                            // Crop the frame with padding and magnification
+                            int pad = currentSettings.subZoomPaddingPx;
+                            float mag = std::max(1.0f, currentSettings.subZoomMagnification);
+                            
+                            int cx = trackIt->box.x + trackIt->box.width / 2;
+                            int cy = trackIt->box.y + trackIt->box.height / 2;
+                            
+                            int paddedW = trackIt->box.width + 2 * pad;
+                            int paddedH = trackIt->box.height + 2 * pad;
+                            
+                            int cropW = std::max(8, static_cast<int>(std::round(paddedW / mag)));
+                            int cropH = std::max(8, static_cast<int>(std::round(paddedH / mag)));
+                            
+                            int x1 = cx - cropW / 2;
+                            int y1 = cy - cropH / 2;
+                            
+                            int x1_clamped = std::max(0, x1);
+                            int y1_clamped = std::max(0, y1);
+                            int x2_clamped = std::min(trackingFrame.cols, x1 + cropW);
+                            int y2_clamped = std::min(trackingFrame.rows, y1 + cropH);
+                            
+                            if (x2_clamped > x1_clamped && y2_clamped > y1_clamped) {
+                                cv::Rect roi(x1_clamped, y1_clamped, x2_clamped - x1_clamped, y2_clamped - y1_clamped);
                                 trackingFrame(roi).copyTo(localSubZooms[i].frame);
                             }
                             
@@ -844,12 +867,28 @@ void Application::workerLoop() {
                         localSubZooms[freeSlotIdx].isLost = !track.active;
                         
                         // Crop
-                        cv::Rect roi = track.box;
-                        roi.x = std::max(0, roi.x);
-                        roi.y = std::max(0, roi.y);
-                        if (roi.x + roi.width > trackingFrame.cols) roi.width = trackingFrame.cols - roi.x;
-                        if (roi.y + roi.height > trackingFrame.rows) roi.height = trackingFrame.rows - roi.y;
-                        if (roi.width > 0 && roi.height > 0) {
+                        int pad = currentSettings.subZoomPaddingPx;
+                        float mag = std::max(1.0f, currentSettings.subZoomMagnification);
+                        
+                        int cx = track.box.x + track.box.width / 2;
+                        int cy = track.box.y + track.box.height / 2;
+                        
+                        int paddedW = track.box.width + 2 * pad;
+                        int paddedH = track.box.height + 2 * pad;
+                        
+                        int cropW = std::max(8, static_cast<int>(std::round(paddedW / mag)));
+                        int cropH = std::max(8, static_cast<int>(std::round(paddedH / mag)));
+                        
+                        int x1 = cx - cropW / 2;
+                        int y1 = cy - cropH / 2;
+                        
+                        int x1_clamped = std::max(0, x1);
+                        int y1_clamped = std::max(0, y1);
+                        int x2_clamped = std::min(trackingFrame.cols, x1 + cropW);
+                        int y2_clamped = std::min(trackingFrame.rows, y1 + cropH);
+                        
+                        if (x2_clamped > x1_clamped && y2_clamped > y1_clamped) {
+                            cv::Rect roi(x1_clamped, y1_clamped, x2_clamped - x1_clamped, y2_clamped - y1_clamped);
                             trackingFrame(roi).copyTo(localSubZooms[freeSlotIdx].frame);
                         }
                         
@@ -2041,6 +2080,93 @@ void Application::renderDataPanel() {
             ImGui::EndTabItem();
         }
 
+        // --- TAB 3: Export & Logging ---
+        if (ImGui::BeginTabItem("Export & Logging")) {
+            ImGui::TextDisabled("Session Data Recording");
+            ImGui::Spacing();
+
+            if (m_settings.dataLoggingEnabled) {
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.7f, 0.1f, 0.1f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.2f, 0.2f, 1.0f));
+                if (ImGui::Button("  STOP MISSION LOGGING  ", ImVec2(-1, 35))) {
+                    m_settings.dataLoggingEnabled = false;
+                }
+                ImGui::PopStyleColor(2);
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.1f, 0.5f, 0.1f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.1f, 0.7f, 0.1f, 1.0f));
+                if (ImGui::Button("  START MISSION LOGGING  ", ImVec2(-1, 35))) {
+                    m_settings.dataLoggingEnabled = true;
+                }
+                ImGui::PopStyleColor(2);
+            }
+
+            ImGui::Separator();
+            ImGui::Columns(2, "logsettings", false);
+            ImGui::SetColumnWidth(0, 120);
+
+            ImGui::Text("Format:"); ImGui::NextColumn();
+            static const char* kFmtNames[] = { "CSV (Table)", "JSON-Lines (Stream)" };
+            ImGui::SetNextItemWidth(-1);
+            ImGui::Combo("##logfmt", &m_settings.dataLoggingFormat, kFmtNames, IM_ARRAYSIZE(kFmtNames));
+            ImGui::NextColumn();
+
+            ImGui::Text("Frequency:"); ImGui::NextColumn();
+            ImGui::SetNextItemWidth(-1);
+            ImGui::SliderInt("##logfreq", &m_settings.dataLoggingFreqFrames, 1, 30, "%d frames");
+            ImGui::NextColumn();
+
+            ImGui::Text("Directory:"); ImGui::NextColumn();
+            static char s_logDirBuf[256] = {0};
+            if (s_logDirBuf[0] == '\0' && !m_settings.dataLoggingOutputDir.empty())
+                strncpy(s_logDirBuf, m_settings.dataLoggingOutputDir.c_str(), sizeof(s_logDirBuf)-1);
+            ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - 5);
+            if (ImGui::InputText("##logdir", s_logDirBuf, sizeof(s_logDirBuf))) {
+                m_settings.dataLoggingOutputDir = s_logDirBuf;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("...##opendir_log", ImVec2(ImGui::GetFrameHeight(), 0))) {
+                 log(LogLevel::INFO, "Logging directory set to: " + m_settings.dataLoggingOutputDir);
+            }
+            ImGui::NextColumn();
+
+            ImGui::Text("Export Dir:"); ImGui::NextColumn();
+            static char s_exportDirBuf[256] = {0};
+            if (s_exportDirBuf[0] == '\0' && !m_settings.exportOutputDir.empty())
+                strncpy(s_exportDirBuf, m_settings.exportOutputDir.c_str(), sizeof(s_exportDirBuf)-1);
+            ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - 5);
+            if (ImGui::InputText("##exportdir", s_exportDirBuf, sizeof(s_exportDirBuf))) {
+                m_settings.exportOutputDir = s_exportDirBuf;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("...##opendir_exp", ImVec2(ImGui::GetFrameHeight(), 0))) {
+                 log(LogLevel::INFO, "Export directory set to: " + m_settings.exportOutputDir);
+            }
+            ImGui::NextColumn();
+
+            ImGui::Columns(1);
+            ImGui::Separator();
+
+            if (m_dataLogger->isOpen()) {
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "LIVE PATH: %s", m_dataLogger->getCurrentPath().c_str());
+                ImGui::Text("RECORDS: %llu  |  SIZE: %.2f MB", 
+                            (unsigned long long)m_dataLogger->getRowsWritten(),
+                            (float)m_dataLogger->getBytesWritten() / (1024.0f * 1024.0f));
+            } else {
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "STATUS: IDLE (No active log file)");
+            }
+
+            ImGui::Separator();
+            if (ImGui::Button("Export Target History (JSON)", ImVec2(-1, 0))) {
+                exportTargetHistory();
+            }
+            if (ImGui::Button("Take Screenshot (PNG)", ImVec2(-1, 0))) {
+                m_screenshotRequested = true;
+            }
+
+            ImGui::EndTabItem();
+        }
+
         ImGui::EndTabBar();
     }
     ImGui::End();
@@ -2314,6 +2440,11 @@ void Application::renderDevConsole() {
                 if (m_settings.subZoomsEnabled) {
                     ImGui::SameLine();
                     settingsChanged |= ImGui::Checkbox("Use Separate Windows##sz", &m_settings.subZoomsUseSeparateWindows);
+                    
+                    ImGui::SetNextItemWidth(220.0f);
+                    settingsChanged |= ImGui::SliderInt("Sub Zoom Padding (px)##sz", &m_settings.subZoomPaddingPx, 0, 100);
+                    ImGui::SetNextItemWidth(220.0f);
+                    settingsChanged |= ImGui::SliderFloat("Sub Zoom Magnification##sz", &m_settings.subZoomMagnification, 1.0f, 4.0f, "%.1fx");
                 }
 
                 ImGui::SetNextItemWidth(220.0f);
@@ -2821,79 +2952,6 @@ void Application::renderDevConsole() {
                 ImGui::SetScrollHereY(1.0f);
 
             ImGui::EndChild();
-            ImGui::EndTabItem();
-        }
-
-        // ── TAB: Logging ───────────────────────────────────────────────
-        if (ImGui::BeginTabItem("Logging")) {
-            // Start / Stop button
-            bool logActive = m_settings.dataLoggingEnabled;
-            if (logActive) {
-                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.7f, 0.1f, 0.1f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.2f, 0.2f, 1.0f));
-                if (ImGui::Button("  STOP Logging  ", ImVec2(-1, 0))) {
-                    m_settings.dataLoggingEnabled = false;
-                    settingsChanged = true;
-                }
-                ImGui::PopStyleColor(2);
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.1f, 0.55f, 0.1f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f, 0.75f, 0.15f, 1.0f));
-                if (ImGui::Button("  START Logging  ", ImVec2(-1, 0))) {
-                    m_settings.dataLoggingEnabled = true;
-                    settingsChanged = true;
-                }
-                ImGui::PopStyleColor(2);
-            }
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Output Format");
-
-            bool fmtDisabled = m_settings.dataLoggingEnabled;
-            if (fmtDisabled) ImGui::BeginDisabled();
-            static const char* kFmtNames[] = { "CSV", "JSON-Lines (.jsonl)" };
-            ImGui::SetNextItemWidth(-1);
-            settingsChanged |= ImGui::Combo("##logfmt", &m_settings.dataLoggingFormat,
-                                            kFmtNames, IM_ARRAYSIZE(kFmtNames));
-            if (ImGui::IsItemHovered() && !fmtDisabled)
-                ImGui::SetTooltip("CSV: one row per tracked object per frame.\n"
-                                  "JSON-Lines: one JSON object per line (streamable).");
-            if (fmtDisabled) ImGui::EndDisabled();
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Frequency");
-            ImGui::SetNextItemWidth(-1);
-            settingsChanged |= ImGui::SliderInt("Log every N frames##lfreq",
-                &m_settings.dataLoggingFreqFrames, 1, 30);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("1 = log every frame. Higher = lower I/O overhead.");
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Output Directory");
-            static char s_logDirBuf[256] = {0};
-            // Sync buffer on first render
-            if (s_logDirBuf[0] == '\0' && !m_settings.dataLoggingOutputDir.empty())
-                strncpy(s_logDirBuf, m_settings.dataLoggingOutputDir.c_str(), sizeof(s_logDirBuf)-1);
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::InputText("##logdir", s_logDirBuf, sizeof(s_logDirBuf))) {
-                m_settings.dataLoggingOutputDir = s_logDirBuf;
-                settingsChanged = true;
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Leave empty to write into the current working directory.");
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Session Status");
-            if (m_dataLogger->isOpen()) {
-                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.5f, 1.0f), "RECORDING");
-                ImGui::Text("File : %s", m_dataLogger->getCurrentPath().c_str());
-                ImGui::Text("Rows : %" PRIu64, m_dataLogger->getRowsWritten());
-                uint64_t kb = m_dataLogger->getBytesWritten() / 1024;
-                ImGui::Text("Size : %" PRIu64 " KB", kb);
-            } else {
-                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "IDLE");
-            }
-
             ImGui::EndTabItem();
         }
 
@@ -3410,9 +3468,9 @@ void Application::run() {
 
         for (const auto& record : m_targetHistory) {
             auto& texInfo = m_targetTextures[record.track_id];
-            updateGLTexture(record.cropped_image_first, texInfo.texture_id_first, texInfo.texture_version_first, record.cropped_image_first_version);
-            updateGLTexture(record.cropped_image_mid, texInfo.texture_id_mid, texInfo.texture_version_mid, record.cropped_image_mid_version);
-            updateGLTexture(record.cropped_image_last, texInfo.texture_id_last, texInfo.texture_version_last, record.cropped_image_last_version);
+            updateGLTexture(record.snapshot_first.image, texInfo.texture_id_first, texInfo.texture_version_first, record.cropped_image_first_version);
+            updateGLTexture(record.snapshot_mid.image, texInfo.texture_id_mid, texInfo.texture_version_mid, record.cropped_image_mid_version);
+            updateGLTexture(record.snapshot_last.image, texInfo.texture_id_last, texInfo.texture_version_last, record.cropped_image_last_version);
             texInfo.max_confidence = record.max_confidence;
         }
 
@@ -3421,6 +3479,48 @@ void Application::run() {
         ImGui::NewFrame();
 
         if (ImGui::BeginMainMenuBar()) {
+            if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("Save Profile (Settings)")) {
+                    savePersistedSettings();
+                    log(LogLevel::INFO, "Settings saved to disk");
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Quit", "Alt+F4")) {
+                    glfwSetWindowShouldClose(m_window, true);
+                }
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("View")) {
+                ImGui::MenuItem("Settings Window", nullptr, &m_showSettingsWindow);
+                ImGui::MenuItem("Dev Console", nullptr, &m_showDevConsole);
+                ImGui::MenuItem("Target Analyzer", nullptr, &m_showTargetAnalyzer);
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("Tools")) {
+                if (ImGui::MenuItem("Take Screenshot", "PrintScreen")) {
+                    m_screenshotRequested = true;
+                }
+                if (ImGui::MenuItem("Export Entire History (JSON)")) {
+                    exportTargetHistory();
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Open Export Directory")) {
+                    std::string dir = m_settings.exportOutputDir.empty() ? "." : m_settings.exportOutputDir;
+                    #ifdef _WIN32
+                    std::string cmd = "explorer " + dir;
+                    #elif __APPLE__
+                    std::string cmd = "open " + dir;
+                    #else
+                    std::string cmd = "xdg-open " + dir;
+                    #endif
+                    system(cmd.c_str());
+                    log(LogLevel::INFO, "Opening directory: " + dir);
+                }
+                ImGui::EndMenu();
+            }
+
             if (ImGui::BeginMenu("Settings")) {
                 if (ImGui::MenuItem("Open Settings Window", nullptr, m_showSettingsWindow)) {
                     m_showSettingsWindow = !m_showSettingsWindow;
@@ -4261,19 +4361,31 @@ void Application::run() {
         }
 
         // ── 2. Data Panel ────────────────────────────────────────────────
-        renderDataPanel();
+        if (m_showDataPanel) renderDataPanel();
 
         // ── 3. Zoom Window ───────────────────────────────────────────────
-        renderZoomWindow(currentZoomFrame);
+        if (m_showZoomWindow) renderZoomWindow(currentZoomFrame);
 
         // ── 4. Dev Console ───────────────────────────────────────────────
-        renderDevConsole();
+        if (m_showDevConsole) renderDevConsole();
 
         // ── 5. Settings Window (floating) ────────────────────────────────
-        renderSettingsWindow();
+        if (m_showSettingsWindow) renderSettingsWindow();
 
         // ── 6. Target Analyzer Window (dockable/floating) ────────────────
-        renderTargetAnalyzer();
+        if (m_showTargetAnalyzer) renderTargetAnalyzer();
+
+        // Keyboard Shortcuts
+        if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
+            m_settings.dataLoggingEnabled = !m_settings.dataLoggingEnabled;
+            log(LogLevel::INFO, m_settings.dataLoggingEnabled ? "Data logging STARTED via shortcut" : "Data logging STOPPED via shortcut");
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_PrintScreen)) {
+            m_screenshotRequested = true;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_C)) {
+            m_showSettingsWindow = !m_showSettingsWindow; // Calibration/Settings
+        }
 
         // Render
         int display_w, display_h;
@@ -4287,6 +4399,10 @@ if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
     ImGui::UpdatePlatformWindows();
     ImGui::RenderPlatformWindowsDefault();
     glfwMakeContextCurrent(backup);
+}
+
+if (m_screenshotRequested.exchange(false)) {
+    takeScreenshot();
 }
 
 glfwSwapBuffers(m_window);
@@ -4357,7 +4473,7 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
 
     // Mark all existing history records as inactive first, but keep track of previously active IDs
     std::vector<int> previouslyActiveIds;
-    for (auto& record : m_targetHistory) {
+    for (auto& record : m_internalTargetHistory) {
         if (record.is_currently_active) {
             previouslyActiveIds.push_back(record.track_id);
         }
@@ -4366,10 +4482,10 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
 
     for (const auto& obj : activeTracks) {
         // Find if already in history
-        auto it = std::find_if(m_targetHistory.begin(), m_targetHistory.end(),
+        auto it = std::find_if(m_internalTargetHistory.begin(), m_internalTargetHistory.end(),
                                [&](const UniqueTargetRecord& r) { return r.track_id == obj.track_id; });
 
-        if (it == m_targetHistory.end()) {
+        if (it == m_internalTargetHistory.end()) {
             // New target!
             UniqueTargetRecord record;
             record.track_id = obj.track_id;
@@ -4391,16 +4507,18 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             if (roi.y + roi.height > currentFrame.rows) roi.height = currentFrame.rows - roi.y;
             if (roi.width > 0 && roi.height > 0) {
                 cv::Mat crop = currentFrame(roi).clone();
-                record.cropped_image_first = crop;
-                record.cropped_image_mid = crop;
-                record.cropped_image_last = crop;
-
-                // Add the very first snapshot
+                
                 TargetSnapshot snap;
                 snap.image = crop;
                 snap.timestamp = timestamp;
                 snap.box = obj.box;
                 snap.confidence = obj.confidence;
+
+                record.snapshot_first = snap;
+                record.snapshot_mid = snap;
+                record.snapshot_last = snap;
+
+                // Add the very first snapshot
                 record.periodic_snapshots.push_back(snap);
             }
             record.last_snapshot_time = std::chrono::steady_clock::now();
@@ -4408,7 +4526,7 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
             record.cropped_image_mid_version = 1;
             record.cropped_image_last_version = 1;
 
-            m_targetHistory.push_back(record);
+            m_internalTargetHistory.push_back(record);
         } else {
             // Existing target
             it->last_seen_timestamp = timestamp;
@@ -4437,11 +4555,11 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                     it->periodic_snapshots.push_back(snap);
                     it->last_snapshot_time = now;
 
-                    it->cropped_image_last = snap.image;
+                    it->snapshot_last = snap;
                     it->cropped_image_last_version++;
 
                     int midIdx = it->periodic_snapshots.size() / 2;
-                    it->cropped_image_mid = it->periodic_snapshots[midIdx].image;
+                    it->snapshot_mid = it->periodic_snapshots[midIdx];
                     it->cropped_image_mid_version++;
                 }
             }
@@ -4454,8 +4572,13 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
                 if (roi.x + roi.width > currentFrame.cols) roi.width = currentFrame.cols - roi.x;
                 if (roi.y + roi.height > currentFrame.rows) roi.height = currentFrame.rows - roi.y;
                 if (roi.width > 0 && roi.height > 0) {
-                    cv::Mat manualCrop = currentFrame(roi).clone();
-                    it->cropped_image_mid = manualCrop;
+                    TargetSnapshot snap;
+                    snap.image = currentFrame(roi).clone();
+                    snap.timestamp = timestamp;
+                    snap.box = obj.box;
+                    snap.confidence = obj.confidence;
+                    
+                    it->snapshot_mid = snap;
                     it->cropped_image_mid_version++;
                     log(LogLevel::INFO, "Manual snapshot updated for Target ID " + std::to_string(obj.track_id));
                 }
@@ -4464,18 +4587,18 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
     }
 
     // Check for targets that transitioned to lost (archived)
-    for (auto& record : m_targetHistory) {
+    for (auto& record : m_internalTargetHistory) {
         if (!record.is_currently_active && std::find(previouslyActiveIds.begin(), previouslyActiveIds.end(), record.track_id) != previouslyActiveIds.end()) {
             // Target was just lost! Finalize visual chronology from periodic_snapshots
             if (!record.periodic_snapshots.empty()) {
-                record.cropped_image_first = record.periodic_snapshots.front().image;
+                record.snapshot_first = record.periodic_snapshots.front();
                 record.cropped_image_first_version++;
 
                 int midIdx = record.periodic_snapshots.size() / 2;
-                record.cropped_image_mid = record.periodic_snapshots[midIdx].image;
+                record.snapshot_mid = record.periodic_snapshots[midIdx];
                 record.cropped_image_mid_version++;
 
-                record.cropped_image_last = record.periodic_snapshots.back().image;
+                record.snapshot_last = record.periodic_snapshots.back();
                 record.cropped_image_last_version++;
 
                 // Discard all periodic snapshots to free memory (keeping only the 3 final keyframe crops)
@@ -4489,10 +4612,13 @@ void Application::updateTargetHistory(const std::vector<TrackedObject>& activeTr
 }
 
 bool Application::exportTarget(const UniqueTargetRecord& record) {
-    std::string baseDir = m_settings.dataLoggingOutputDir;
+    std::string baseDir = m_settings.exportOutputDir;
     if (baseDir.empty()) {
         baseDir = ".";
     }
+
+    std::error_code ec;
+    std::filesystem::create_directories(baseDir, ec);
 
     std::string idStr = std::to_string(record.track_id);
     while (idStr.length() < 3) idStr = "0" + idStr;
@@ -4541,12 +4667,105 @@ bool Application::exportTarget(const UniqueTargetRecord& record) {
         }
     };
 
-    writeKeyframe(imgPathFirst, record.cropped_image_first, "discovery");
-    writeKeyframe(imgPathMid, record.cropped_image_mid, "midtrack");
-    writeKeyframe(imgPathLast, record.cropped_image_last, "lastseen");
+    writeKeyframe(imgPathFirst, record.snapshot_first.image, "discovery");
+    writeKeyframe(imgPathMid, record.snapshot_mid.image, "midtrack");
+    writeKeyframe(imgPathLast, record.snapshot_last.image, "lastseen");
 
     log(LogLevel::INFO, "Exported target details to " + jsonPath);
     return true;
+}
+
+bool Application::exportTargetHistory() {
+    std::string baseDir = m_settings.exportOutputDir;
+    if (baseDir.empty()) {
+        baseDir = ".";
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(baseDir, ec);
+
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+    struct tm buf;
+    #ifdef _WIN32
+    localtime_s(&buf, &in_time_t);
+    #else
+    localtime_r(&in_time_t, &buf);
+    #endif
+    char timebuf[64];
+    std::strftime(timebuf, sizeof(timebuf), "%Y%m%d_%H%M%S", &buf);
+
+    std::string jsonPath = baseDir + "/horus_history_" + timebuf + ".json";
+
+    std::ofstream file(jsonPath);
+    if (!file.is_open()) {
+        log(LogLevel::ERR, "Failed to open file for history export: " + jsonPath);
+        return false;
+    }
+
+    file << "{\n";
+    file << "  \"export_time\": \"" << timebuf << "\",\n";
+    file << "  \"targets\": [\n";
+    for (size_t i = 0; i < m_targetHistory.size(); ++i) {
+        const auto& record = m_targetHistory[i];
+        file << "    {\n";
+        file << "      \"track_id\": " << record.track_id << ",\n";
+        file << "      \"class_id\": " << record.class_id << ",\n";
+        file << "      \"className\": \"" << record.className << "\",\n";
+        file << "      \"max_confidence\": " << record.max_confidence << ",\n";
+        file << "      \"first_seen\": \"" << record.first_seen_timestamp << "\",\n";
+        file << "      \"last_seen\": \"" << record.last_seen_timestamp << "\",\n";
+        file << "      \"trail_len\": " << record.trail.size() << "\n";
+        file << "    }";
+        if (i + 1 < m_targetHistory.size()) file << ",";
+        file << "\n";
+    }
+    file << "  ]\n";
+    file << "}\n";
+    file.close();
+
+    log(LogLevel::INFO, "Exported full target history (" + std::to_string(m_targetHistory.size()) + " entries) to " + jsonPath);
+    return true;
+}
+
+void Application::takeScreenshot() {
+    int display_w, display_h;
+    glfwGetFramebufferSize(m_window, &display_w, &display_h);
+
+    // Read pixels from back buffer
+    std::vector<uint8_t> pixels(3 * display_w * display_h);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, display_w, display_h, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+
+    // Flip vertically (OpenGL 0,0 is bottom-left, OpenCV is top-left)
+    cv::Mat flipped(display_h, display_w, CV_8UC3, pixels.data());
+    cv::Mat screenshot;
+    cv::flip(flipped, screenshot, 0);
+    cv::cvtColor(screenshot, screenshot, cv::COLOR_RGB2BGR);
+
+    std::string baseDir = m_settings.exportOutputDir;
+    if (baseDir.empty()) baseDir = ".";
+
+    std::error_code ec;
+    std::filesystem::create_directories(baseDir, ec);
+
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+    struct tm buf;
+    #ifdef _WIN32
+    localtime_s(&buf, &in_time_t);
+    #else
+    localtime_r(&in_time_t, &buf);
+    #endif
+    char timebuf[64];
+    std::strftime(timebuf, sizeof(timebuf), "%Y%m%d_%H%M%S", &buf);
+
+    std::string path = baseDir + "/horus_screenshot_" + timebuf + ".png";
+    if (cv::imwrite(path, screenshot)) {
+        log(LogLevel::INFO, "Screenshot saved to " + path);
+    } else {
+        log(LogLevel::ERR, "Failed to save screenshot: " + path);
+    }
 }
 
 void Application::renderTargetAnalyzer() {
@@ -4579,13 +4798,29 @@ void Application::renderTargetAnalyzer() {
         return;
     }
 
-    // Render target detail card
+    // Manage active gallery snapshot selection
+    static int lastSelectedTargetId = -1;
+    static int activeSnapshotIdx = 1; // 0 = Discovery, 1 = Mid-Track (Best), 2 = Last Seen
+    if (m_selectedAnalyzerTargetId != lastSelectedTargetId) {
+        lastSelectedTargetId = m_selectedAnalyzerTargetId;
+        activeSnapshotIdx = 1; // Default to Mid-Track (Best image first)
+    }
+
+    // Render target detail card header
     ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "TARGET REPORT: ID %03d", selectedRecord.track_id);
+    ImGui::SameLine();
+    ImGui::TextDisabled("| Class: %s (ID: %d)", selectedRecord.className.c_str(), selectedRecord.class_id);
     ImGui::Separator();
 
-    // Render visual chronology
-    ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.9f, 1.0f), "VISUAL CHRONOLOGY (KEYFRAMES)");
+    // Visual Chronology Gallery
+    ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.9f, 1.0f), "VISUAL GALLERY (KEYFRAMES)");
     ImGui::Spacing();
+
+    // Resolve active snapshot textures and label
+    TargetSnapshot activeSnap;
+    uint32_t activeTexID = 0;
+    const char* snapLabel = "";
+    ImVec4 badgeColor;
 
     uint32_t texFirst = 0, texMid = 0, texLast = 0;
     auto texIt = m_targetTextures.find(selectedRecord.track_id);
@@ -4595,41 +4830,129 @@ void Application::renderTargetAnalyzer() {
         texLast = texIt->second.texture_id_last;
     }
 
-    ImGui::Columns(3, "visual_history_cols", false);
-    
-    // Set a clean column width
-    float colW = ImGui::GetColumnWidth() - 10.0f;
-    float displayW = std::clamp(colW, 40.0f, 150.0f);
+    if (activeSnapshotIdx == 0) {
+        activeSnap = selectedRecord.snapshot_first;
+        activeTexID = texFirst;
+        snapLabel = "DISCOVERY (FIRST DETECTED)";
+        badgeColor = ImVec4(0.0f, 0.7f, 1.0f, 1.0f); // Cyan
+    } else if (activeSnapshotIdx == 1) {
+        activeSnap = selectedRecord.snapshot_mid;
+        activeTexID = texMid;
+        snapLabel = "MID-TRACK (BEST REPRESENTATIVE)";
+        badgeColor = ImVec4(0.0f, 1.0f, 0.5f, 1.0f); // Green
+    } else {
+        activeSnap = selectedRecord.snapshot_last;
+        activeTexID = texLast;
+        snapLabel = "LAST SEEN (SIGNAL END)";
+        badgeColor = ImVec4(1.0f, 0.4f, 0.4f, 1.0f); // Red
+    }
 
-    auto renderSnapshotColumn = [&](const char* label, uint32_t texID, const cv::Mat& img) {
-        ImGui::Text("%s", label);
-        if (texID != 0 && !img.empty()) {
-            float imgAspect = static_cast<float>(img.cols) / img.rows;
-            float displayH = displayW / imgAspect;
-            ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(texID)), ImVec2(displayW, displayH));
-        } else {
-            ImGui::TextDisabled("[N/A]");
+    // Gallery navigation controls
+    if (ImGui::Button("< Prev")) {
+        activeSnapshotIdx = (activeSnapshotIdx - 1 + 3) % 3;
+    }
+    ImGui::SameLine();
+
+    // Quick select buttons (tabs)
+    auto drawTabButton = [&](const char* name, int idx) {
+        bool selected = (activeSnapshotIdx == idx);
+        if (selected) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
         }
-        ImGui::NextColumn();
+        if (ImGui::Button(name)) {
+            activeSnapshotIdx = idx;
+        }
+        if (selected) {
+            ImGui::PopStyleColor();
+        }
+        ImGui::SameLine();
     };
 
-    renderSnapshotColumn("1. Discovery", texFirst, selectedRecord.cropped_image_first);
-    renderSnapshotColumn("2. Mid-Track", texMid, selectedRecord.cropped_image_mid);
-    renderSnapshotColumn("3. Last Seen", texLast, selectedRecord.cropped_image_last);
+    drawTabButton("Discovery", 0);
+    drawTabButton("Mid-Track (Best)", 1);
+    drawTabButton("Last Seen", 2);
 
-    ImGui::Columns(1);
+    if (ImGui::Button("Next >")) {
+        activeSnapshotIdx = (activeSnapshotIdx + 1) % 3;
+    }
+
     ImGui::Spacing();
+
+    // Render active keyframe image
+    if (activeTexID != 0 && !activeSnap.image.empty()) {
+        float imgAspect = static_cast<float>(activeSnap.image.cols) / activeSnap.image.rows;
+        float displayW = 220.0f;
+        float displayH = displayW / imgAspect;
+
+        // Display image centered in window
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - displayW) * 0.5f);
+        ImGui::Image(reinterpret_cast<void*>(static_cast<intptr_t>(activeTexID)), ImVec2(displayW, displayH));
+        ImGui::Spacing();
+    } else {
+        ImGui::TextDisabled("No visual crop available for this milestone.");
+    }
+
     ImGui::Separator();
 
-    ImGui::Columns(2, "analyzer_details", false);
-    ImGui::SetColumnWidth(0, 120.0f);
+    // Snapshot Milestone Metadata
+    ImGui::TextColored(badgeColor, "[MILESTONE: %s]", snapLabel);
+    ImGui::Spacing();
 
-    ImGui::Text("Classification:");
+    ImGui::Columns(2, "snapshot_metadata", false);
+    ImGui::SetColumnWidth(0, 110.0f);
+
+    ImGui::Text("Capture Time:");
     ImGui::NextColumn();
-    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "%s (ID: %d)", selectedRecord.className.c_str(), selectedRecord.class_id);
+    if (!activeSnap.timestamp.empty()) {
+        ImGui::Text("%s", activeSnap.timestamp.c_str());
+    } else {
+        ImGui::TextDisabled("[N/A]");
+    }
     ImGui::NextColumn();
 
-    ImGui::Text("Status:");
+    ImGui::Text("Location Box:");
+    ImGui::NextColumn();
+    if (activeSnap.box.width > 0 && activeSnap.box.height > 0) {
+        ImGui::Text("[%d, %d, %d, %d]", activeSnap.box.x, activeSnap.box.y, activeSnap.box.width, activeSnap.box.height);
+        ImGui::TextDisabled("Area: %d px", activeSnap.box.width * activeSnap.box.height);
+    } else {
+        ImGui::TextDisabled("[N/A]");
+    }
+    ImGui::NextColumn();
+
+    ImGui::Text("Confidence:");
+    ImGui::NextColumn();
+    if (activeSnap.confidence > 0.0f) {
+        ImGui::Text("%.2f", activeSnap.confidence);
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, badgeColor);
+        ImGui::ProgressBar(activeSnap.confidence, ImVec2(100, 12), "");
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::TextDisabled("[N/A]");
+    }
+    ImGui::Columns(1);
+
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // General Target Lifetime Metadata
+    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "Target Lifetime Metadata:");
+    
+    ImGui::Columns(2, "target_lifetime_metadata", false);
+    ImGui::SetColumnWidth(0, 110.0f);
+
+    ImGui::Text("Target ID:");
+    ImGui::NextColumn();
+    ImGui::Text("%d", selectedRecord.track_id);
+    ImGui::NextColumn();
+
+    ImGui::Text("Class Type:");
+    ImGui::NextColumn();
+    ImGui::Text("%s (ID: %d)", selectedRecord.className.c_str(), selectedRecord.class_id);
+    ImGui::NextColumn();
+
+    ImGui::Text("Current Status:");
     ImGui::NextColumn();
     if (selectedRecord.is_currently_active) {
         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.5f, 1.0f), "ACTIVE / IN VIEW");
@@ -4638,35 +4961,14 @@ void Application::renderTargetAnalyzer() {
     }
     ImGui::NextColumn();
 
-    ImGui::Text("Max Confidence:");
-    ImGui::NextColumn();
-    ImGui::Text("%.2f", selectedRecord.max_confidence);
-    ImGui::NextColumn();
-
-    ImGui::Text("First Detected:");
+    ImGui::Text("First Seen:");
     ImGui::NextColumn();
     ImGui::Text("%s", selectedRecord.first_seen_timestamp.c_str());
     ImGui::NextColumn();
 
-    ImGui::Text("Last Detected:");
+    ImGui::Text("Last Seen:");
     ImGui::NextColumn();
     ImGui::Text("%s", selectedRecord.last_seen_timestamp.c_str());
-    ImGui::NextColumn();
-
-    ImGui::Text("Start Position:");
-    ImGui::NextColumn();
-    ImGui::Text("%d, %d (Size: %dx%d)", 
-                selectedRecord.first_box.x + selectedRecord.first_box.width / 2,
-                selectedRecord.first_box.y + selectedRecord.first_box.height / 2,
-                selectedRecord.first_box.width, selectedRecord.first_box.height);
-    ImGui::NextColumn();
-
-    ImGui::Text("End Position:");
-    ImGui::NextColumn();
-    ImGui::Text("%d, %d (Size: %dx%d)", 
-                selectedRecord.last_box.x + selectedRecord.last_box.width / 2,
-                selectedRecord.last_box.y + selectedRecord.last_box.height / 2,
-                selectedRecord.last_box.width, selectedRecord.last_box.height);
     ImGui::Columns(1);
 
     ImGui::Separator();
@@ -4691,14 +4993,19 @@ void Application::renderTargetAnalyzer() {
 
 void Application::cleanup() {
     m_running = false;
-    
-    // Wake up detector thread to let it terminate
+
+    // Wake up threads to let them terminate
     {
         std::lock_guard<std::mutex> lk(m_detectorMutex);
         m_detectorCv.notify_all();
     }
-    
+    {
+        std::lock_guard<std::mutex> lk(m_trackingMutex);
+        m_trackingCv.notify_all();
+    }
+
     if (m_detectorThread.joinable()) m_detectorThread.join();
+    if (m_trackingThread.joinable()) m_trackingThread.join();
     if (m_workerThread.joinable()) m_workerThread.join();
 
     curl_global_cleanup();

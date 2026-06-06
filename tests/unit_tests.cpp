@@ -588,16 +588,16 @@ TEST(AudioEngineTest, ConfigInitAndSynthesis) {
 // --- TargetHistory Tests ---
 TEST(TargetHistoryTest, VisualChronologySnapshottingAndFinalizing) {
     UniqueTargetRecord record;
-    EXPECT_TRUE(record.cropped_image_first.empty());
-    EXPECT_TRUE(record.cropped_image_mid.empty());
-    EXPECT_TRUE(record.cropped_image_last.empty());
+    EXPECT_TRUE(record.snapshot_first.image.empty());
+    EXPECT_TRUE(record.snapshot_mid.image.empty());
+    EXPECT_TRUE(record.snapshot_last.image.empty());
 
     cv::Mat mockFrame = cv::Mat::ones(100, 100, CV_8UC3);
 
     record.track_id = 42;
-    record.cropped_image_first = mockFrame.clone();
-    record.cropped_image_mid = mockFrame.clone();
-    record.cropped_image_last = mockFrame.clone();
+    record.snapshot_first.image = mockFrame.clone();
+    record.snapshot_mid.image = mockFrame.clone();
+    record.snapshot_last.image = mockFrame.clone();
     record.cropped_image_first_version = 1;
     record.cropped_image_mid_version = 1;
     record.cropped_image_last_version = 1;
@@ -620,23 +620,23 @@ TEST(TargetHistoryTest, VisualChronologySnapshottingAndFinalizing) {
     record.periodic_snapshots.push_back(snap2);
 
     if (!record.periodic_snapshots.empty()) {
-        record.cropped_image_first = record.periodic_snapshots.front().image;
+        record.snapshot_first = record.periodic_snapshots.front();
         record.cropped_image_first_version++;
 
         int midIdx = record.periodic_snapshots.size() / 2;
-        record.cropped_image_mid = record.periodic_snapshots[midIdx].image;
+        record.snapshot_mid = record.periodic_snapshots[midIdx];
         record.cropped_image_mid_version++;
 
-        record.cropped_image_last = record.periodic_snapshots.back().image;
+        record.snapshot_last = record.periodic_snapshots.back();
         record.cropped_image_last_version++;
 
         record.periodic_snapshots.clear();
     }
 
     EXPECT_EQ(record.periodic_snapshots.size(), 0);
-    EXPECT_FALSE(record.cropped_image_first.empty());
-    EXPECT_FALSE(record.cropped_image_mid.empty());
-    EXPECT_FALSE(record.cropped_image_last.empty());
+    EXPECT_FALSE(record.snapshot_first.image.empty());
+    EXPECT_FALSE(record.snapshot_mid.image.empty());
+    EXPECT_FALSE(record.snapshot_last.image.empty());
     EXPECT_EQ(record.cropped_image_first_version, 2);
     EXPECT_EQ(record.cropped_image_mid_version, 2);
     EXPECT_EQ(record.cropped_image_last_version, 2);

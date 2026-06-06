@@ -1,0 +1,6 @@
+[INFO] Application constructed
+[INFO] Opening camera: 0
+[INFO] Camera opened successfully
+[INFO] Loading model: assets/models/yolov8n.onnx
+[INFO] Detector initialized
+[INFO] System initialized — starting worker thread

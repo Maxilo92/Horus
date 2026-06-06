@@ -31,6 +31,9 @@ void MotionDetector::reset() {
     m_fgMask.release();
     m_cleanMask.release();
     m_blurred.release();
+    m_prevGray.release();
+    m_heatmapFlowAcc.release();
+    m_coloredHeatmap.release();
 }
 
 void MotionDetector::applyMorphCleanup(int blurKernel) {
@@ -105,6 +108,62 @@ bool MotionDetector::process(const cv::Mat& frame, const SystemSettings& setting
         if (bbox.width > 0 && bbox.height > 0) {
             m_regions.push_back(bbox);
         }
+    }
+
+    // --- Step 5: Motion Heatmap (Optical Flow) ---
+    if (settings.motionHeatmapOverlay) {
+        // Performance optimization: downscale frame for Farneback
+        const float downscale = 0.25f; // 1/4 resolution
+        cv::Mat smallGray;
+        cv::cvtColor(frame, smallGray, cv::COLOR_BGR2GRAY);
+        cv::resize(smallGray, smallGray, cv::Size(), downscale, downscale, cv::INTER_LINEAR);
+
+        if (m_prevGray.empty() || m_prevGray.size() != smallGray.size()) {
+            smallGray.copyTo(m_prevGray);
+            m_heatmapFlowAcc = cv::Mat::zeros(smallGray.size(), CV_32FC1);
+        } else {
+            // Compute dense optical flow (Farneback)
+            cv::calcOpticalFlowFarneback(m_prevGray, smallGray, m_flow, 0.5, 3, 15, 3, 5, 1.2, 0);
+
+            // Compute magnitude of flow vectors
+            cv::Mat flow_xy[2];
+            cv::split(m_flow, flow_xy);
+            cv::cartToPolar(flow_xy[0], flow_xy[1], m_mag, m_mag8u, false);
+
+            // Accumulate with decay
+            float decay = std::clamp(settings.motionHeatmapDecay, 0.0f, 1.0f);
+            m_heatmapFlowAcc = m_heatmapFlowAcc * decay + m_mag;
+
+            // Normalize and colorize
+            // Normalize so that a velocity of ~10px/frame is "max" red (adjustable)
+            double maxVel = 10.0; 
+            m_heatmapFlowAcc.convertTo(m_mag8u, CV_8UC1, 255.0 / maxVel);
+            
+            cv::applyColorMap(m_mag8u, m_colorMap, cv::COLORMAP_JET);
+
+            // Create BGRA with transparency
+            // Color map is BGR. We want BGRA.
+            // Alpha channel = magnitude (0 speed -> alpha 0, high speed -> alpha 255)
+            // But we want it to be visible even for slower speeds, so we scale alpha.
+            cv::Mat bgra_channels[4];
+            cv::split(m_colorMap, bgra_channels);
+            
+            // Use mag8u as alpha, but maybe cap it or scale it
+            // mag8u is already 0..255. Let's use it directly.
+            bgra_channels[3] = m_mag8u; 
+            
+            cv::Mat smallHeatmap;
+            cv::merge(bgra_channels, 4, smallHeatmap);
+
+            // Upscale back to original frame size
+            cv::resize(smallHeatmap, m_coloredHeatmap, frame.size(), 0, 0, cv::INTER_LINEAR);
+
+            smallGray.copyTo(m_prevGray);
+        }
+    } else {
+        m_coloredHeatmap.release();
+        m_prevGray.release();
+        m_heatmapFlowAcc.release();
     }
 
     return !m_regions.empty();

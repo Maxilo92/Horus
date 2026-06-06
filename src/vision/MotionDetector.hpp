@@ -33,6 +33,10 @@ public:
     // Valid until the next call to process().
     const cv::Mat& getMask() const { return m_cleanMask; }
 
+    // Colored 4-channel BGRA heatmap image. 
+    // Areas with no motion are transparent (Alpha=0).
+    const cv::Mat& getHeatmapImage() const { return m_coloredHeatmap; }
+
     // Reset the background model (e.g. on camera change).
     // The subtractor will re-learn the background over the next few frames.
     void reset();
@@ -48,6 +52,15 @@ private:
     cv::Mat              m_fgMask;       // Raw foreground mask from MOG2
     cv::Mat              m_cleanMask;    // After morphological opening
     cv::Mat              m_morphKernel;  // Structuring element (pre-built)
+
+    // Heatmap / Optical Flow buffers
+    cv::Mat              m_prevGray;         // Previous frame for Farneback
+    cv::Mat              m_heatmapFlowAcc;   // Float accumulator for velocity magnitude
+    cv::Mat              m_coloredHeatmap;   // Output: 4-channel BGRA colored heatmap
+    cv::Mat              m_flow;             // Raw flow vectors (reused)
+    cv::Mat              m_mag;              // Raw magnitude (reused)
+    cv::Mat              m_mag8u;            // Normalized magnitude (reused)
+    cv::Mat              m_colorMap;         // BGR color map (reused)
 
     std::vector<cv::Rect>              m_regions;   // Output: filtered bounding boxes
     std::vector<std::vector<cv::Point>> m_contours; // Reused across frames

@@ -1,0 +1,19 @@
+=== Building Project Horus ===
+-- Configuring done (4.0s)
+-- Generating done (0.1s)
+-- Build files have been written to: /Users/maximilian/Documents/Code/Tactileviewer/Project_Horus/build
+[  4%] Built target gtest
+[  9%] Built target gtest_main
+[ 52%] Built target Tactileviewer
+[100%] Built target unit_tests
+=== Launching Project Horus ===
+[INFO] Application constructed
+[INFO] Opening camera: 1
+[INFO] Camera opened successfully (backend=AVFOUNDATION)
+[INFO] Camera resolution requested=1280x720, actual=1920x1080
+[INFO] Loading model: ../assets/models/yolov8s.onnx
+[INFO] Detector initialized
+[INFO] Audio engine initialised
+[INFO] System initialized — starting threads
+[INFO] Detector thread started
+[INFO] Detector thread stopping
