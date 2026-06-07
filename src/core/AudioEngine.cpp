@@ -12,7 +12,6 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
-#include <memory>
 #include <fstream>
 #include <atomic>
 #include <cstdio>
@@ -141,39 +140,43 @@ AudioEngine::SoundBuffer AudioEngine::buildSound(Event type, float freqHz, float
 
         switch (type) {
             case Event::MOTION_ALERT: {
-                // Sonar Radar Tick: Crisp high-frequency tick at freqHz with steep exponential decay
+                // Sonar Ping: Gaussian-enveloped sine — sounds clean and musical at any
+                // repetition rate; much less fatiguing than a hard-edged burst.
+                // The bell peaks at 30% of the duration and fades naturally.
+                const float center = durationSec * 0.30f;
+                const float sigma  = durationSec * 0.13f;
                 val = std::sin(2.0f * kPi * freqHz * t);
-                
-                // Extremely fast decay (12ms decay time scale)
-                constexpr float attackTime = 0.001f; // 1ms fade-in to prevent initial pop
-                if (t < attackTime) {
-                    env = t / attackTime;
-                } else {
-                    env = std::exp(-15.0f * (t - attackTime) / durationSec);
-                }
+                env = std::exp(-0.5f * ((t - center) / sigma) * ((t - center) / sigma));
                 break;
             }
             case Event::ALARM_ENTRY: {
-                // Threat Warning: Rapid triple-tick warning (15ms tick pulse, 20ms gap)
-                constexpr float pulseDur = 0.015f;
-                constexpr float gapDur = 0.020f;
-                constexpr float cycle = pulseDur + gapDur;
-                
-                const float local_t = std::fmod(t, cycle);
-                if (local_t < pulseDur) {
-                    val = std::sin(2.0f * kPi * freqHz * local_t);
-                    env = std::exp(-8.0f * local_t / pulseDur);
-                    if (local_t < 0.001f) env *= local_t / 0.001f;
+                // Threat Warning: Alternating two-tone alarm with added octave harmonic.
+                // High tone / lower-fifth alternation every 25 ms — far more alarming
+                // than single-frequency ticks, and impossible to miss.
+                constexpr float halfCycle = 0.025f;
+                const float phase = std::fmod(t, halfCycle * 2.0f);
+                const float localFreq = (phase < halfCycle) ? freqHz : (freqHz * 0.667f);
+
+                // Sine fundamental + octave overtone for richer alarm character
+                val  = std::sin(2.0f * kPi * localFreq * t);
+                val += 0.28f * std::sin(2.0f * kPi * localFreq * 2.0f * t);
+                val /= 1.28f; // keep within [-1, 1]
+
+                // Fast 5 ms attack, flat sustain, 10 ms release
+                constexpr float attackTime  = 0.005f;
+                const float     releaseStart = durationSec - 0.010f;
+                if (t < attackTime) {
+                    env = t / attackTime;
+                } else if (t > releaseStart) {
+                    env = (durationSec - t) / 0.010f;
                 } else {
-                    val = 0.0f;
-                    env = 0.0f;
+                    env = 1.0f;
                 }
                 break;
             }
             case Event::ALARM_EXIT: {
-                // Clearance Pop: Single low-frequency muted status pop with extremely fast decay
+                // Clearance Pop: Single low-frequency muted status pop with fast decay
                 val = std::sin(2.0f * kPi * freqHz * t);
-                
                 constexpr float attackTime = 0.002f;
                 if (t < attackTime) {
                     env = t / attackTime;
@@ -192,7 +195,6 @@ AudioEngine::SoundBuffer AudioEngine::buildSound(Event type, float freqHz, float
                 constexpr float attackTime = 0.001f;
 
                 if (t < t1) {
-                    // Lower pitch first tick (20% lower than target frequency)
                     val = std::sin(2.0f * kPi * (freqHz * 0.8f) * t);
                     env = std::exp(-8.0f * t / t1);
                     if (t < attackTime) env *= t / attackTime;
@@ -200,7 +202,6 @@ AudioEngine::SoundBuffer AudioEngine::buildSound(Event type, float freqHz, float
                     val = 0.0f;
                     env = 0.0f;
                 } else {
-                    // Higher pitch second tick (12% higher than target frequency)
                     const float t_rel = t - (t1 + gap);
                     val = std::sin(2.0f * kPi * (freqHz * 1.12f) * t_rel);
                     env = std::exp(-8.0f * t_rel / t2);
@@ -209,27 +210,73 @@ AudioEngine::SoundBuffer AudioEngine::buildSound(Event type, float freqHz, float
                 break;
             }
             case Event::LOCK_LOST: {
-                // Telemetry Loss: Descending double-pop failure warning
-                const float t1 = 0.020f * (durationSec / 0.065f);
-                const float gap = 0.025f * (durationSec / 0.065f);
-                const float t2 = 0.020f * (durationSec / 0.065f);
+                // Telemetry Loss: Descending frequency chirp — sweeps from 1.6× to 0.5×
+                // freqHz so the pitch drop is unmistakable.
+                const float freqStart = freqHz * 1.6f;
+                const float freqEnd   = freqHz * 0.5f;
+
+                val = std::sin(2.0f * kPi * (freqStart * t +
+                      (freqEnd - freqStart) * t * t / (2.0f * durationSec)));
+                val += 0.18f * std::sin(2.0f * kPi * (freqStart * 1.5f * t +
+                       (freqEnd - freqStart) * 1.5f * t * t / (2.0f * durationSec)));
+                val /= 1.18f;
+
+                constexpr float attackTime = 0.002f;
+                if (t < attackTime) {
+                    env = t / attackTime;
+                } else {
+                    env = std::exp(-1.8f * t / durationSec);
+                    const float releaseStart = durationSec - 0.015f;
+                    if (t > releaseStart)
+                        env *= (durationSec - t) / 0.015f;
+                }
+                break;
+            }
+            case Event::LOCK_PULSE: {
+                // Targeting ping: crisp electronic beep with a 3rd-harmonic partial that
+                // gives a slightly metallic "radar" character.  Very fast decay so rapid
+                // repetition stays clean and non-fatiguing.
+                val  = std::sin(2.0f * kPi * freqHz * t);
+                val += 0.15f * std::sin(2.0f * kPi * freqHz * 3.0f * t);
+                val /= 1.15f;
 
                 constexpr float attackTime = 0.001f;
-
-                if (t < t1) {
-                    // First pop (30% higher pitch warning)
-                    val = std::sin(2.0f * kPi * (freqHz * 1.3f) * t);
-                    env = std::exp(-6.0f * t / t1);
-                    if (t < attackTime) env *= t / attackTime;
-                } else if (t < t1 + gap) {
-                    val = 0.0f;
-                    env = 0.0f;
+                if (t < attackTime) {
+                    env = t / attackTime;
                 } else {
-                    // Second pop (base pitch)
-                    const float t_rel = t - (t1 + gap);
-                    val = std::sin(2.0f * kPi * freqHz * t_rel);
-                    env = std::exp(-6.0f * t_rel / t2);
-                    if (t_rel < attackTime) env *= t_rel / attackTime;
+                    env = std::exp(-20.0f * (t - attackTime) / durationSec);
+                }
+                break;
+            }
+            case Event::LOCK_SOLUTION: {
+                // "Target ready" confirmation: ascending frequency sweep into a held tone.
+                // The first 35% of the duration sweeps from 0.75× to 1.0× freqHz;
+                // the remainder sustains at freqHz with a slow fade.
+                const float sweepEnd = durationSec * 0.35f;
+                const float f0 = freqHz * 0.75f;
+                const float f1 = freqHz;
+
+                float phase;
+                if (t <= sweepEnd) {
+                    // Phase-correct integration of linear frequency ramp
+                    phase = 2.0f * kPi * (f0 * t + (f1 - f0) * t * t / (2.0f * sweepEnd));
+                } else {
+                    float phaseAtEnd = 2.0f * kPi * (f0 * sweepEnd + (f1 - f0) * sweepEnd / 2.0f);
+                    phase = phaseAtEnd + 2.0f * kPi * f1 * (t - sweepEnd);
+                }
+                val = std::sin(phase);
+                // Octave partial for a fuller, warmer tone
+                val += 0.18f * std::sin(phase * 2.0f);
+                val /= 1.18f;
+
+                constexpr float attackTime = 0.008f;
+                const float releaseStart   = durationSec - 0.06f;
+                if (t < attackTime) {
+                    env = t / attackTime;
+                } else if (t > releaseStart) {
+                    env = (durationSec - t) / 0.06f;
+                } else {
+                    env = std::exp(-0.7f * (t - attackTime) / durationSec);
                 }
                 break;
             }
@@ -307,13 +354,19 @@ AudioEngine::~AudioEngine() {
 void AudioEngine::init(const Config& cfg) {
     m_cfg = cfg;
     applyConfig(cfg);
+    m_lockPulseThread = std::thread(&AudioEngine::lockPulseWorker, this);
     m_initialised = true;
 }
 
 void AudioEngine::applyConfig(const Config& cfg) {
+    // Pause the pulse thread during rebuild to avoid reading a half-disposed buffer
+    const bool wasPulsing = m_lockPulseActive.load();
+    if (wasPulsing) {
+        m_lockPulseActive.store(false);
+        m_lockPulseCv.notify_all();
+    }
+
     m_cfg = cfg;
-    // Amplitude is baked into the PCM at synthesis time; master switch zeroes
-    // the volume so we regenerate all sounds.
     const float vol = cfg.masterEnabled ? cfg.masterVolume : 0.0f;
 
     m_motionSound.dispose();
@@ -321,12 +374,21 @@ void AudioEngine::applyConfig(const Config& cfg) {
     m_alarmExitSound.dispose();
     m_lockAcquiredSound.dispose();
     m_lockLostSound.dispose();
+    m_lockPulseSound.dispose();
+    m_lockSolutionSound.dispose();
 
-    m_motionSound       = buildSound(Event::MOTION_ALERT,   cfg.motionFreqHz,       cfg.motionDurationMs,    vol);
-    m_alarmEntrySound   = buildSound(Event::ALARM_ENTRY,    cfg.alarmEntryFreqHz,   cfg.alarmEntryDurMs,     vol);
-    m_alarmExitSound    = buildSound(Event::ALARM_EXIT,     cfg.alarmExitFreqHz,    cfg.alarmExitDurMs,      vol);
-    m_lockAcquiredSound = buildSound(Event::LOCK_ACQUIRED,  cfg.lockAcquiredFreqHz, cfg.lockAcquiredDurMs,   vol);
-    m_lockLostSound     = buildSound(Event::LOCK_LOST,      cfg.lockLostFreqHz,     cfg.lockLostDurMs,       vol);
+    m_motionSound       = buildSound(Event::MOTION_ALERT,   cfg.motionFreqHz,            cfg.motionDurationMs,      vol);
+    m_alarmEntrySound   = buildSound(Event::ALARM_ENTRY,    cfg.alarmEntryFreqHz,        cfg.alarmEntryDurMs,       vol);
+    m_alarmExitSound    = buildSound(Event::ALARM_EXIT,     cfg.alarmExitFreqHz,         cfg.alarmExitDurMs,        vol);
+    m_lockAcquiredSound = buildSound(Event::LOCK_ACQUIRED,  cfg.lockAcquiredFreqHz,      cfg.lockAcquiredDurMs,     vol);
+    m_lockLostSound     = buildSound(Event::LOCK_LOST,      cfg.lockLostFreqHz,          cfg.lockLostDurMs,         vol);
+    m_lockPulseSound    = buildSound(Event::LOCK_PULSE,     cfg.lockPulseFreqHz,         cfg.lockPulseDurMs,        vol);
+    m_lockSolutionSound = buildSound(Event::LOCK_SOLUTION,  cfg.lockPulseSolutionFreqHz, cfg.lockPulseSolutionDurMs, vol);
+
+    if (wasPulsing && cfg.lockPulseEnabled) {
+        m_lockPulseActive.store(true);
+        m_lockPulseCv.notify_all();
+    }
 }
 
 void AudioEngine::playEvent(Event e) {
@@ -353,6 +415,14 @@ void AudioEngine::playEvent(Event e) {
             if (m_cfg.lockLostEnabled && m_lockLostSound.valid)
                 AudioServicesPlaySystemSound(m_lockLostSound.soundID);
             break;
+        case Event::LOCK_PULSE:
+            if (m_lockPulseSound.valid)
+                AudioServicesPlaySystemSound(m_lockPulseSound.soundID);
+            break;
+        case Event::LOCK_SOLUTION:
+            if (m_lockSolutionSound.valid)
+                AudioServicesPlaySystemSound(m_lockSolutionSound.soundID);
+            break;
     }
 }
 
@@ -366,11 +436,96 @@ void AudioEngine::recordMotionBeep() {
     m_lastMotionBeep = std::chrono::steady_clock::now();
 }
 
+void AudioEngine::startLockPulse(float lockStrength) {
+    if (!m_cfg.lockPulseEnabled || !m_cfg.masterEnabled) return;
+    m_lockStrength.store(std::max(0.0f, std::min(lockStrength, 1.0f)));
+    m_solutionFired.store(false);
+    m_lockPulseActive.store(true);
+    m_lockPulseCv.notify_all();
+}
+
+void AudioEngine::updateLockStrength(float lockStrength) {
+    m_lockStrength.store(std::max(0.0f, std::min(lockStrength, 1.0f)));
+}
+
+void AudioEngine::stopLockPulse() {
+    m_lockPulseActive.store(false);
+    m_solutionFired.store(false);
+    m_lockPulseCv.notify_all();
+}
+
+void AudioEngine::startLockPulseTest() {
+    if (!m_cfg.masterEnabled || !m_cfg.lockPulseEnabled) return;
+    if (m_testRunning.exchange(true)) return; // already running
+
+    // Detach a ramp thread: 0 → 1 over ~3 s, hold 600 ms for solution tone, then stop.
+    std::thread([this]() {
+        startLockPulse(0.0f);
+        constexpr int   kSteps   = 60;
+        constexpr int   kTotalMs = 3000;
+        constexpr int   kStepMs  = kTotalMs / kSteps;
+        for (int i = 0; i <= kSteps; ++i) {
+            if (m_lockPulseStop.load()) break;
+            updateLockStrength(static_cast<float>(i) / kSteps);
+            std::this_thread::sleep_for(std::chrono::milliseconds(kStepMs));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(700));
+        stopLockPulse();
+        m_testRunning.store(false);
+    }).detach();
+}
+
+void AudioEngine::lockPulseWorker() {
+    while (!m_lockPulseStop.load()) {
+        // Wait until the pulse is started or the engine shuts down
+        {
+            std::unique_lock<std::mutex> lock(m_lockPulseMutex);
+            m_lockPulseCv.wait(lock, [this]() {
+                return m_lockPulseActive.load() || m_lockPulseStop.load();
+            });
+        }
+        if (m_lockPulseStop.load()) break;
+
+        // Active pulse loop
+        while (m_lockPulseActive.load()) {
+            const float strength = m_lockStrength.load();
+
+            // On first crossing of the solution threshold, fire the "ready" tone once
+            if (strength >= m_cfg.lockPulseSolutionThresh) {
+                if (!m_solutionFired.exchange(true))
+                    playEvent(Event::LOCK_SOLUTION);
+            } else {
+                m_solutionFired.store(false);
+            }
+
+            // Fire the regular pulse beep
+            playEvent(Event::LOCK_PULSE);
+
+            // Interval decreases as lock strength increases
+            const float t01     = std::max(0.0f, std::min(strength, 1.0f));
+            const float interval = m_cfg.lockPulseMaxIntervalMs -
+                                   (m_cfg.lockPulseMaxIntervalMs - m_cfg.lockPulseMinIntervalMs) * t01;
+
+            std::unique_lock<std::mutex> lock(m_lockPulseMutex);
+            m_lockPulseCv.wait_for(lock,
+                std::chrono::milliseconds(static_cast<int>(interval)),
+                [this]() { return !m_lockPulseActive.load() || m_lockPulseStop.load(); });
+        }
+    }
+}
+
 void AudioEngine::shutdown() {
+    m_lockPulseStop.store(true);
+    m_lockPulseActive.store(false);
+    m_lockPulseCv.notify_all();
+    if (m_lockPulseThread.joinable()) m_lockPulseThread.join();
+
     m_motionSound.dispose();
     m_alarmEntrySound.dispose();
     m_alarmExitSound.dispose();
     m_lockAcquiredSound.dispose();
     m_lockLostSound.dispose();
+    m_lockPulseSound.dispose();
+    m_lockSolutionSound.dispose();
     m_initialised = false;
 }

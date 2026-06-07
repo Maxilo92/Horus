@@ -41,6 +41,13 @@ struct TrackedObject {
     bool  is_active;          // False = Dead Reckoning / verlorener Track
     bool  is_confirmed;       // True wenn Track verlässlich bestätigt wurde
 
+    float vx = 0.0f;          // Pixel velocity X (Kalman-estimated)
+    float vy = 0.0f;          // Pixel velocity Y (Kalman-estimated)
+
+    // Face Recognition (Plan 11)
+    int         face_id   = -1;
+    std::string face_name = "";
+
     // Centroid-History für Trail-Rendering
     std::vector<cv::Point> trail;
 };
@@ -75,6 +82,10 @@ struct UniqueTargetRecord {
     cv::Rect first_box;
     cv::Rect last_box;
     std::vector<cv::Point> trail;
+
+    // Face Recognition (Plan 11)
+    int         face_id   = -1;
+    std::string face_name = "";
     
     // Key milestones snapshots (containing image, timestamp, box, confidence)
     TargetSnapshot snapshot_first;
@@ -95,46 +106,50 @@ struct UniqueTargetRecord {
     std::vector<TargetSnapshot> periodic_snapshots;
     std::chrono::steady_clock::time_point last_snapshot_time;
 
-    // Selection index for the gallery (-1 = auto/best confidence)
-    int selected_snapshot_index = -1;
-    bool show_full_gallery = false;
+    // Manual selection sync from UI to worker (-1 = auto)
+    int snapshot_mid_manual_idx = -1;
+
+    // Adaptive decimation state
+    int current_snapshot_interval_ms = 500;
+    int gallery_version = 0;
 };
 
 struct SystemSettings {
     // ----------------------------------------------------------------
     // Detector Settings
     // ----------------------------------------------------------------
-    float detectorConfThreshold  = 0.15f;
-    float detectorScoreThreshold = 0.15f;
+    int   detectorModel          = 0;    // 0=yolov8s (precision), 1=yolov8n (speed)
+    float detectorConfThreshold  = 0.30f; // Increased from 0.15 for fewer false positives
+    float detectorScoreThreshold = 0.30f; // Increased from 0.15
     float detectorNmsThreshold   = 0.45f;
 
     // Priority-Class-Filter
     // COCO IDs: 0=person, 1=bicycle, 2=car, 3=motorcycle, 5=bus, 7=truck
     bool filterByPriorityClasses = true;
-    std::set<int> priorityClasses = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 14, 15, 16, 24, 25, 26, 28, 39, 41, 56, 62, 63, 67, 74};
+    std::set<int> priorityClasses = {0, 1, 2, 3, 5, 7}; // Reduced to core classes by default
 
     // ----------------------------------------------------------------
     // Multi-Tracker Settings
     // ----------------------------------------------------------------
-    int   trackerMaxLostFrames    = 30;
-    float trackerMinMatchIOU      = 0.25f;
+    int   trackerMaxLostFrames    = 25;       // Slightly reduced to clean up ghosts faster
+    float trackerMinMatchIOU      = 0.20f;    // Slightly lower IOU requirement for 4K jitter
     int   trackerMaxTrailLength   = 30;
     bool  showTrails              = true;
-    float trackerMinMatchScore    = 0.15f;   // Greedy-Matching minimum combined score
-    float trackerMaxCenterDistPx  = 200.0f;  // Max center distance for matching
+    float trackerMinMatchScore    = 0.25f;    // Increased from 0.15
+    float trackerMaxCenterDistPx  = 500.0f;   // Increased from 200 for 4K
     int   trackerConfirmFrames    = 2;        // Frames until a track is confirmed
 
     // ----------------------------------------------------------------
     // Tracking Re-acquisition Settings (Plan 11)
     // ----------------------------------------------------------------
-    bool  trackerReacquisitionEnabled = true;   // Enable ROI-based re-scanning for lost targets
-    float trackerReacquisitionZoom    = 2.0f;   // ROI size multiplier relative to predicted box
-    bool  trackerUseMotionFallback    = true;   // Use motion detections as fallback for lost tracks
-    float trackerReacquisitionMaxDist = 1.5f;   // Distance multiplier for lost tracks during matching
+    bool  trackerReacquisitionEnabled = true;   
+    float trackerReacquisitionZoom    = 1.8f;   // Slightly tighter ROI
+    bool  trackerUseMotionFallback    = true;   
+    float trackerReacquisitionMaxDist = 1.6f;   // Larger search area for lost tracks
 
     // Single-Tracker Settings (Target-Lock Feature)
-    float trackerVelocitySmoothing    = 0.6f;
-    float trackerDeadReckoningDamping = 0.9f;
+    float trackerVelocitySmoothing    = 0.4f;    // Smoother velocity estimation
+    float trackerDeadReckoningDamping = 0.85f;   // More aggressive damping
 
     // ----------------------------------------------------------------
     // HUD Settings
@@ -151,6 +166,7 @@ struct SystemSettings {
     float hudBrightness      = 1.0f;    // Global HUD brightness multiplier [0.2 – 1.0]
     float crosshairScale     = 1.0f;    // Scale multiplier for crosshair size
     float boxLineWidth       = 1.5f;    // Bounding box line width
+    float trailLineWidth     = 1.5f;    // Trail line width
 
     // RGBA color channels stored separately for ImGui::ColorEdit4 compatibility
     // uint32_t is binary-compatible with ImU32 (= unsigned int in imgui)
@@ -216,6 +232,9 @@ struct SystemSettings {
     bool     motionDetectShadows     = false;  // MOG2 shadow detection (reduces phantoms, costs ~15% perf)
     int      motionLearningRate      = -1;     // MOG2 learning rate: -1 = auto, 0–100 maps to [0.0–1.0]
 
+    // Duration in seconds to hold motion tracks after the movement stops
+    float    motionTrackHoldDuration = 2.0f; 
+
     // ----------------------------------------------------------------
     // Audio Feedback Settings
     // ----------------------------------------------------------------
@@ -248,6 +267,16 @@ struct SystemSettings {
     float audioLockLostFreqHz      = 300.0f;
     float audioLockLostDurMs       = 200.0f;
 
+    // Lock Pulse — continuous targeting beep, rate driven by lock confidence
+    bool  audioLockPulseEnabled        = true;
+    float audioLockPulseFreqHz         = 920.0f;
+    float audioLockPulseDurMs          = 45.0f;
+    float audioLockPulseMinIntervalMs  = 110.0f;
+    float audioLockPulseMaxIntervalMs  = 750.0f;
+    float audioLockPulseSolutionThresh = 0.82f;
+    float audioLockPulseSolutionFreqHz = 1400.0f;
+    float audioLockPulseSolutionDurMs  = 450.0f;
+
     // ----------------------------------------------------------------
     // Sub Zooms Settings
     // ----------------------------------------------------------------
@@ -262,6 +291,32 @@ struct SystemSettings {
     bool        remoteInferenceEnabled = false;
     std::string remoteInferenceIp      = "127.0.0.1";
     int         remoteInferencePort    = 8000;
+
+    // ----------------------------------------------------------------
+    // Face Recognition Settings (Plan 11)
+    // ----------------------------------------------------------------
+    bool  faceRecognitionEnabled   = true;
+    float faceRecognitionThreshold = 0.36f; // Cosine similarity threshold for SFace
+
+    // ----------------------------------------------------------------
+    // Debug & Performance Settings
+    // ----------------------------------------------------------------
+    bool debugShowRawDetections  = false; // Draw YOLO boxes before tracker filtering
+    bool debugShowKalmanVectors   = false; // Draw predicted velocity vectors
+    bool debugFreezeVision        = false; // Pause vision processing for inspection
+    bool debugPerformanceGraphs   = true;  // Show micro-benchmarking graphs in DevConsole
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Logging
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum class LogLevel { VERBOSE = 0, INFO = 1, WARN = 2, ERR = 3 };
+
+struct ConsoleEntry {
+    LogLevel    level;
+    std::string message;
+    float       timestamp = 0.0f;  // seconds since app start
 };
 
 #endif // COMMON_HPP

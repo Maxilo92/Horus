@@ -13,8 +13,12 @@
 // ---------------------------------------------------------------------------
 
 #include <AudioToolbox/AudioToolbox.h>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 class AudioEngine {
@@ -28,14 +32,14 @@ public:
 
         // Motion Detection alert
         bool  motionEnabled          = true;
-        float motionFreqHz           = 880.0f;
-        float motionDurationMs       = 80.0f;
+        float motionFreqHz           = 660.0f;  // Lower = less piercing at high repetition rates
+        float motionDurationMs       = 100.0f;  // Slightly longer for the Gaussian bell to breathe
         float motionCooldownSec      = 1.0f;   // Min. seconds between two motion beeps
 
         // Alarm Zone entry
         bool  alarmEntryEnabled      = true;
-        float alarmEntryFreqHz       = 1200.0f;
-        float alarmEntryDurMs        = 120.0f;
+        float alarmEntryFreqHz       = 1100.0f; // Root frequency; the alternating fifth does the heavy lifting
+        float alarmEntryDurMs        = 200.0f;  // Long enough for 4 tone-switches to register
 
         // Alarm Zone exit
         bool  alarmExitEnabled       = true;
@@ -49,8 +53,18 @@ public:
 
         // Target Lock lost
         bool  lockLostEnabled        = true;
-        float lockLostFreqHz         = 300.0f;
-        float lockLostDurMs          = 200.0f;
+        float lockLostFreqHz         = 420.0f;  // Higher start = chirp sweeps through a wider, more dramatic range
+        float lockLostDurMs          = 220.0f;  // Longer sweep = the descent reads clearly
+
+        // Lock Pulse — continuous targeting tone that speeds up with lock confidence
+        bool  lockPulseEnabled         = true;
+        float lockPulseFreqHz          = 920.0f;  // Beep pitch
+        float lockPulseDurMs           = 45.0f;   // Each beep duration
+        float lockPulseMinIntervalMs   = 110.0f;  // Interval at full lock (fastest)
+        float lockPulseMaxIntervalMs   = 750.0f;  // Interval at weak lock (slowest)
+        float lockPulseSolutionThresh  = 0.82f;   // Lock strength above this → solution tone
+        float lockPulseSolutionFreqHz  = 1400.0f; // "System ready" confirmation pitch
+        float lockPulseSolutionDurMs   = 450.0f;  // Duration of the solution tone
     };
 
     // Sound event identifiers
@@ -59,7 +73,9 @@ public:
         ALARM_ENTRY,
         ALARM_EXIT,
         LOCK_ACQUIRED,
-        LOCK_LOST
+        LOCK_LOST,
+        LOCK_PULSE,     // Short beep fired repeatedly while a target is locked
+        LOCK_SOLUTION   // One-shot "target ready" tone at full lock confidence
     };
 
     AudioEngine();
@@ -84,6 +100,16 @@ public:
     void playAlarmExit()    { playEvent(Event::ALARM_EXIT);    }
     void playLockAcquired() { playEvent(Event::LOCK_ACQUIRED); }
     void playLockLost()     { playEvent(Event::LOCK_LOST);     }
+
+    // ── Lock Pulse API ──────────────────────────────────────────────────────
+    // lockStrength in [0.0, 1.0]; drives the pulse interval and solution detection.
+    void startLockPulse(float lockStrength);
+    void updateLockStrength(float lockStrength);
+    void stopLockPulse();
+
+    // Runs a self-contained test: slow pulse → accelerating → solution tone → stop.
+    // Fire-and-forget; safe to call from the UI thread.
+    void startLockPulseTest();
 
     // Returns true if enough time has passed since the last motion beep.
     bool motionCooldownElapsed();
@@ -110,12 +136,26 @@ private:
     // Synthesises a custom waveform based on the event type and registers it as a SystemSoundID.
     static SoundBuffer buildSound(Event type, float freqHz, float durationMs, float volume);
 
+    void lockPulseWorker();
+
     Config      m_cfg;
     SoundBuffer m_motionSound;
     SoundBuffer m_alarmEntrySound;
     SoundBuffer m_alarmExitSound;
     SoundBuffer m_lockAcquiredSound;
     SoundBuffer m_lockLostSound;
+    SoundBuffer m_lockPulseSound;
+    SoundBuffer m_lockSolutionSound;
+
+    // Lock pulse thread state
+    std::thread               m_lockPulseThread;
+    std::atomic<bool>         m_lockPulseActive{false};
+    std::atomic<bool>         m_lockPulseStop{false};
+    std::atomic<float>        m_lockStrength{0.0f};
+    std::atomic<bool>         m_solutionFired{false};
+    std::atomic<bool>         m_testRunning{false};
+    std::mutex                m_lockPulseMutex;
+    std::condition_variable   m_lockPulseCv;
 
     std::chrono::steady_clock::time_point m_lastMotionBeep;
     bool m_initialised = false;
