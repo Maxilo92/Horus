@@ -40,13 +40,29 @@ set(IMGUI_SRCS
 set(CORE_SRCS
     src/core/Application.cpp
     src/core/AudioEngine.cpp
+    src/core/AudioCapture.cpp
     src/core/DataLogger.cpp
     src/core/ROIManager.cpp
     src/vision/CameraModule.cpp
     src/vision/VideoRenderer.cpp
     src/vision/MotionDetector.cpp
+    src/vision/FaceRecognizer.cpp
+    src/vision/VisionSystem.cpp
     src/ui/HUD.cpp
+    src/ui/UIManager.cpp
+    src/ui/UIManager_Settings.cpp
+    src/ui/UIManager_Panels.cpp
+    src/ui/UIManager_CameraView.cpp
+    src/ui/UIManager_DevConsole.cpp
+    src/ui/UIManager_SettingsWindow.cpp
+    src/ui/UIManager_Export.cpp
+    src/ui/UIManager_Analyzer.cpp
+    src/ui/DevConsolePanel.cpp
+    src/ui/AnalyzerPanel.cpp
+    src/ui/AudioVisualizerPanel.cpp
+    src/ui/ReplayPanel.cpp
     src/tracking/MultiTracker.cpp
+    src/tracking/TrackingSystem.cpp
 )
 
 # Resources for macOS Bundle
@@ -54,6 +70,8 @@ set(RESOURCE_FILES
     assets/models/yolov8s.onnx
     assets/models/yolov8n.onnx
     assets/models/coco.txt
+    assets/models/face_detection_yunet_2023mar.onnx
+    assets/models/face_recognition_sface_2021dec.onnx
 )
 
 add_executable(Tactileviewer MACOSX_BUNDLE src/core/main.cpp ${CORE_SRCS} ${IMGUI_SRCS} ${RESOURCE_FILES})
@@ -89,6 +107,7 @@ target_link_libraries(Tactileviewer
     ${CURL_LIBRARIES}
     "-framework AudioToolbox"
     "-framework CoreFoundation"
+    "-framework CoreAudio"
 )
 
 # --- TESTING ---
@@ -103,6 +122,7 @@ FetchContent_Declare(
   GIT_TAG        v1.14.0
 )
 FetchContent_MakeAvailable(googletest)
+include(GoogleTest)
 
 # We add gtest-all.cc directly to the test executable to avoid any ABI mismatches
 # between the pre-built library and the test object.
@@ -114,12 +134,40 @@ add_executable(unit_tests
     ${IMGUI_SRCS}
 )
 
+add_executable(integration_tests 
+    tests/integration_tests.cpp
+    ${googletest_SOURCE_DIR}/googletest/src/gtest-all.cc
+    ${googletest_SOURCE_DIR}/googletest/src/gtest_main.cc
+    ${CORE_SRCS}
+    ${IMGUI_SRCS}
+)
+
 target_include_directories(unit_tests BEFORE PRIVATE 
     ${googletest_SOURCE_DIR}/googletest/include
     ${googletest_SOURCE_DIR}/googletest
 )
 
+target_include_directories(integration_tests BEFORE PRIVATE 
+    ${googletest_SOURCE_DIR}/googletest/include
+    ${googletest_SOURCE_DIR}/googletest
+)
+
 target_include_directories(unit_tests PRIVATE 
+    src
+    src/core
+    src/vision
+    src/tracking
+    src/ui
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+    ${GLFW_INCLUDE_DIRS}
+    ${GLEW_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
+    ${CURL_INCLUDE_DIRS}
+)
+
+target_include_directories(integration_tests PRIVATE 
+    src
     src/core
     src/vision
     src/tracking
@@ -136,15 +184,35 @@ target_compile_definitions(unit_tests PRIVATE
     PROJECT_HORUS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-target_link_libraries(unit_tests 
-    ${OpenCV_LIBS}
-    OpenGL::GL
-    ${GLFW_LIBRARIES}
-    ${GLEW_LIBRARIES}
-    ${CURL_LIBRARIES}
-    "-framework AudioToolbox"
-    "-framework CoreFoundation"
+target_compile_definitions(integration_tests PRIVATE
+    PROJECT_HORUS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-include(GoogleTest)
+target_link_libraries(unit_tests PRIVATE 
+    ${OpenCV_LIBS} 
+    ${CURL_LIBRARIES}
+    ${GLEW_LIBRARIES}
+    ${GLFW_LIBRARIES}
+    OpenGL::GL
+    ${CMAKE_DL_LIBS}
+    "-framework AudioToolbox"
+    "-framework CoreFoundation"
+    "-framework CoreAudio"
+)
+
+target_link_libraries(integration_tests PRIVATE 
+    ${OpenCV_LIBS} 
+    ${CURL_LIBRARIES}
+    ${GLEW_LIBRARIES}
+    ${GLFW_LIBRARIES}
+    OpenGL::GL
+    ${CMAKE_DL_LIBS}
+    "-framework AudioToolbox"
+    "-framework CoreFoundation"
+    "-framework CoreAudio"
+)
+
+add_test(NAME unit_tests COMMAND unit_tests)
+add_test(NAME integration_tests COMMAND integration_tests)
+
 gtest_discover_tests(unit_tests DISCOVERY_TIMEOUT 30)
