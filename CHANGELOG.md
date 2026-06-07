@@ -1,5 +1,118 @@
 # Changelog
 
+## [1.16.6] - 2026-06-07
+
+### Fixed
+- **Camera Selection Persistence**: Resolved an issue where the selected camera source was not re-selected on application restart. The `Application` core now correctly prioritizes the persisted camera address from `settings.ini` over default values when no command-line argument is provided.
+- **Missing Settings Persistence**: Added persistence for `trailLineWidth` and `motionTrackHoldDuration`, ensuring these parameters are correctly saved to and loaded from `settings.ini`.
+
+### Added
+- **Motion Detection Settings Tab**: Introduced a dedicated "Motion Detection" tab in the Settings window, providing centralized control over the motion analysis engine, including sensitivity, object area filtering, track hold duration, and heatmap visualization parameters.
+- **Enhanced UI Controls**: Added sliders for `trailLineWidth` and `motionTrackHoldDuration` to both the Settings window and the Developer Console for improved real-time tuning.
+
+## [1.16.5] - 2026-06-07
+
+### Fixed
+- **Image Distortion in AnalyzerPanel**: Implemented dynamic aspect ratio calculation for gallery thumbnails and single-view images in the Target Analyzer. Images are now rendered using their actual dimensions from the underlying `cv::Mat` data, eliminating vertical and horizontal stretching.
+- **Improved Single View Layout**: Added intelligent height limiting and horizontal centering for snapshots in the single view, ensuring a clean UI and preventing excessive scrolling while maintaining correct image proportions.
+
+## [1.16.4] - 2026-06-07
+
+### Fixed
+- **Coordinate Mapping Precision**: Resolved a discrepancy between raw detection data and displayed boxes by ensuring matrix contiguity after YOLOv8 output transposition in `ObjectDetector`. Added robust handling for models using normalized (0..1) coordinate formats.
+- **Real-Time Tracking Synchronization**: Implemented Kalman-filter lag compensation in `MultiTracker`. Tracked boxes are now advanced by the estimated velocity to account for detector latency, eliminating the "trailing box" effect on moving objects.
+- **Memory Safety in Detector**: Fixed a potential buffer overflow/misread in `ObjectDetector` by correctly utilizing `step1()` for row strides in non-contiguous transposed matrices.
+
+## [1.16.3] - 2026-06-07
+
+### Added
+- **4K-Optimized Matching Radius**: Implemented resolution-aware search radii in `MultiTracker`. The matching algorithm now adaptively expands based on object size and 4K frame dimensions (3840x2160), preventing track breakage during high-speed motion or detector lag.
+
+### Fixed
+- **Ghost Drift Suppression**: Eliminated the self-reinforcing measurement extrapolation loop. Kalman correction now uses raw detections, preventing stationary objects (like parked cars) from "wandering away."
+- **Stationary Anti-Wobble**: Increased stationary movement threshold to 15px (4K) and implemented a 95% prediction trust model for non-moving objects. This provides "Rock-Solid" stability for surveillance scenarios.
+- **False Positive Filtering**: Raised default detector confidence and score thresholds to 0.30 and refined priority class filters. This eliminates "ghost boxes" in the sky/clouds shown in user reports.
+- **Enhanced Duplicate Prevention**: Expanded the matching window to include tracks lost for up to 20 frames, preventing sequential ID spawning when signals are intermittent.
+- **Resolution-Aware Scoring**: Updated the hybrid matching score to use linear distance decay and introduced a "size consistency" factor to ensure objects of different scales are not incorrectly matched.
+
+## [1.16.2] - 2026-06-07
+
+### Fixed
+- **Multi-Tracker Drift (Ghost Drift II)**: Implemented velocity damping for lost tracks (coast phase) in `MultiTracker`. Tracks that lose signal now gradually slow down instead of drifting indefinitely at their last estimated velocity, addressing the "wandering boxes" issue.
+- **Track Duplication Logic**: Improved duplicate track prevention in `MultiTracker` by expanding the overlap check to include recently lost tracks (up to 15 frames). This prevents the spawning of duplicate track IDs when a track is briefly lost or jittery.
+- **HUD Visual Feedback**: Lost/Coasting tracks are now visually dimmed and labeled with a `[COAST]` tag in the HUD, providing clear feedback that the system is currently in dead-reckoning mode for those targets.
+- **Build Stabilization**: Fixed a pre-existing build error in `DevConsolePanel.cpp` where `trackMs` was used instead of the correct `trackTimeMs` variable.
+- **Test Coverage**: Added new unit tests `VelocityDamping` and `DuplicatePreventionLostTrack` to verify tracking stability and expanded existing test tolerances to account for Kalman smoothing.
+
+## [1.15.2] - 2026-06-07
+
+### Optimized
+- **Zero-Copy Display Pipeline**: Refactored the triple-buffering mechanism in `Blackboard` to use shallow Mat assignments for the UI thread. This eliminates expensive 24MB+ memory copies of 4K frames on the render thread, significantly reducing micro-stutters and CPU load.
+- **Enhanced OpenGL Performance**: Updated `VideoRenderer` and `UIManager` to utilize `glTexSubImage2D` for texture updates when frame dimensions remain constant. This avoids costly GPU memory reallocations and improves frame delivery latency.
+- **Streamlined State Synchronization**: Replaced deep Mat copies with shallow reference-counted assignments in `VisionState` and `TrackingState` transfers. This ensures "Military-Grade" real-time responsiveness by minimizing memory bandwidth pressure.
+- **Efficient Frame Handoff**: Optimized internal worker loops in `VisionSystem` and `TrackingSystem` to pass frame references instead of creating full duplicates, maximizing throughput for 4K video analysis.
+
+### Fixed
+- **Dev Console Stability**: Resolved a compilation error in `DevConsolePanel.cpp` related to undeclared performance metric identifiers.
+
+## [1.16.0] - 2026-06-07
+
+### Added
+- **Comprehensive Performance Metrics (Micro-Benchmarking)**: Implemented granular timing instrumentation for Capture, Inference, and Tracking threads.
+- **Visual Performance Graphs**: Added real-time plotting of inference and tracking durations in the Developer Console.
+- **Advanced Debug Overlays**: Added toggles for Raw YOLO Detections (pre-filtering), Kalman Filter velocity vectors (cyan), and Vision Processing Freeze for static frame inspection.
+- **DataLogger Backlog Monitoring**: Added a "Logger Backlog" metric to track the asynchronous I/O queue size.
+- **Performance Persistence**: New debug settings are now persisted across application restarts in `settings.ini`.
+
+## [1.15.2] - 2026-06-07
+
+### Fixed
+- **UI Crash in Target Analyzer**: Resolved a high-frequency segmentation fault caused by an out-of-bounds access in the periodic snapshot gallery. The UI thread now correctly synchronizes its OpenGL texture cache with the dynamically growing snapshot history.
+- **OpenGL Resource Management**: Added missing `glDeleteTextures` calls in the Target Analyzer to prevent GPU memory leaks during long-running tracking sessions or target decimation events.
+- **Settings Stability**: Fixed a compilation error and potential initialization race in the persistent settings module.
+
+## [1.15.1] - 2026-06-07
+
+### Fixed
+- **Critical Memory Safety**: Resolved a segmentation fault in `TrackingSystem` caused by unsafe ROI clamping. When an object was partially or fully outside the camera frame (common with Kalman prediction), the ROI width/height could become negative, leading to an invalid memory access in `cv::Mat`. Implemented robust clamping logic across all image processing paths.
+
+## [1.15.0] - 2026-06-07
+
+### Added
+- **Asynchronous Data Logging**: Refactored the `DataLogger` to use a background worker thread for disk I/O. This ensures that slow storage devices or network latency never impact the real-time tracking performance.
+- **Display Frame Triple-Buffering**: Implemented a lock-free triple-buffering mechanism for the display frame pipeline. This completely decouples the Capture thread from the Render thread, eliminating mutex contention and providing a perfectly smooth UI experience even at high resolutions.
+
+### Fixed
+- **Logging Reliability**: Improved the shutdown and flush sequence of the data logger to ensure no data is lost during application exit or log file rotation.
+
+## [1.14.7] - 2026-06-07
+
+### Refactored
+- **UIManager Decoupling**: Initiated major architectural cleanup of the UI layer. Extracted `DevConsolePanel` and `AnalyzerPanel` into dedicated classes, reducing `UIManager` member count and improving SoC (Separation of Concerns).
+- **Analyzer Optimization**: The Target Analyzer now performs OpenGL texture updates only for the currently selected target, significantly reducing CPU/GPU overhead when a large history of targets is present.
+- **Component Pattern**: Migrated from monolithic UI state to a component-based approach, preparing the codebase for further modular expansion.
+
+## [1.14.6] - 2026-06-07
+
+### Added
+- **Integration Test Suite**: Added `tests/integration_tests.cpp` to verify the thread-safety and functional integrity of the modular Blackboard architecture under high concurrency and hot-swap events.
+- **ThreadSanitizer Validation**: Successfully passed a full system TSan run, confirming the absence of data races in the core processing pipeline and state synchronization logic.
+
+### Fixed
+- **Blackboard ClassNames**: Resolved a bug where object detection class labels were not being published to the Blackboard, causing empty class selection lists in the UI.
+- **VisionState Performance Bloat**: Eliminated 12MB+ per-frame memory bandwidth waste by removing redundant `rawFrame` and `trackingFrame` deep copies from the shared `VisionState`. The UI now uses the optimized `DisplayFrame` fast-path exclusively.
+- **Mutex Contention in Capture Thread**: Optimized the AppStatus update mechanism using a specialized `updateStatusCounts` API, reducing lock holding time and eliminating unnecessary struct copies in the high-frequency capture loop.
+- **NULL Pointer Safety**: Added defensive null checks for the detector in the asynchronous worker loop to prevent crashes during initialization failures or headless execution.
+
+## [1.14.5] - 2026-06-06
+
+### Added
+- **Configurable Motion Track Hold Duration**: Added `motionTrackHoldDuration` setting (0.1–10.0s) to define how long motion tracks remain visible after movement ceases, configurable via Settings window.
+- **Configurable Trail Line Width**: Added `trailLineWidth` setting (0.5–5.0px) for improved visibility of motion/tracking trails, configurable via Settings window.
+
+### Fixed
+- **Gallery Single View Image Scaling**: Improved aspect ratio calculation and viewport fitting for images in the gallery single view modal. Images are now strictly scaled to fit the available content region without exceeding viewport bounds, eliminating unnecessary scrolling.
+
 ## [1.14.4] - 2026-06-06
 
 ### Added
