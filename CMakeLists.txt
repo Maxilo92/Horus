@@ -15,7 +15,8 @@ find_package(SQLite3 REQUIRED)
 
 # Find OpenGL, GLFW, and GLEW
 find_package(OpenGL REQUIRED)
-if(WIN32)
+if(WIN32 OR APPLE)
+    # Homebrew (macOS) and vcpkg (Windows) both install CMake config files
     find_package(glfw3 CONFIG REQUIRED)
     find_package(GLEW REQUIRED)
     set(GLFW_LIBRARIES    glfw)
@@ -180,12 +181,25 @@ add_executable(integration_tests
     ${IMGUI_SRCS}
 )
 
+add_executable(functional_tests 
+    tests/functional_tests.cpp
+    ${googletest_SOURCE_DIR}/googletest/src/gtest-all.cc
+    ${googletest_SOURCE_DIR}/googletest/src/gtest_main.cc
+    ${CORE_SRCS}
+    ${IMGUI_SRCS}
+)
+
 target_include_directories(unit_tests BEFORE PRIVATE 
     ${googletest_SOURCE_DIR}/googletest/include
     ${googletest_SOURCE_DIR}/googletest
 )
 
 target_include_directories(integration_tests BEFORE PRIVATE 
+    ${googletest_SOURCE_DIR}/googletest/include
+    ${googletest_SOURCE_DIR}/googletest
+)
+
+target_include_directories(functional_tests BEFORE PRIVATE 
     ${googletest_SOURCE_DIR}/googletest/include
     ${googletest_SOURCE_DIR}/googletest
 )
@@ -218,11 +232,29 @@ target_include_directories(integration_tests PRIVATE
     ${CURL_INCLUDE_DIRS}
 )
 
+target_include_directories(functional_tests PRIVATE 
+    src
+    src/core
+    src/vision
+    src/tracking
+    src/ui
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+    ${GLFW_INCLUDE_DIRS}
+    ${GLEW_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
+    ${CURL_INCLUDE_DIRS}
+)
+
 target_compile_definitions(unit_tests PRIVATE
     PROJECT_HORUS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 target_compile_definitions(integration_tests PRIVATE
+    PROJECT_HORUS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_compile_definitions(functional_tests PRIVATE
     PROJECT_HORUS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
@@ -264,10 +296,32 @@ elseif(WIN32)
     target_link_libraries(integration_tests PRIVATE ole32 oleaut32 uuid winmm)
 endif()
 
+target_link_libraries(functional_tests PRIVATE
+    ${OpenCV_LIBS}
+    ${CURL_LIBRARIES}
+    ${GLEW_LIBRARIES}
+    ${GLFW_LIBRARIES}
+    OpenGL::GL
+    ${CMAKE_DL_LIBS}
+    SQLite::SQLite3
+)
+if(APPLE)
+    target_link_libraries(functional_tests PRIVATE
+        "-framework AudioToolbox"
+        "-framework CoreFoundation"
+        "-framework CoreAudio"
+    )
+elseif(WIN32)
+    target_link_libraries(functional_tests PRIVATE ole32 oleaut32 uuid winmm)
+endif()
+
 add_test(NAME unit_tests COMMAND unit_tests)
 add_test(NAME integration_tests COMMAND integration_tests)
+add_test(NAME functional_tests COMMAND functional_tests)
 
 gtest_discover_tests(unit_tests DISCOVERY_TIMEOUT 30)
+gtest_discover_tests(integration_tests DISCOVERY_TIMEOUT 30)
+gtest_discover_tests(functional_tests DISCOVERY_TIMEOUT 30)
 
 # On non-Apple platforms, copy model assets next to the binary so the
 # exe-relative path lookup in Application.cpp (path 4) finds them.

@@ -26,7 +26,8 @@ jobs:
       - name: Configure
         run: |
           cmake -B build -S . \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)"
 
       - name: Build
         run: cmake --build build --config Release -j$(sysctl -n hw.ncpu)
