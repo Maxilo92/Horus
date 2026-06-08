@@ -97,12 +97,10 @@ jobs:
           Copy-Item "assets\models\*" "$DIST\assets\models\"
 
           # Usage note
-          @"
-Project Horus — Tactileviewer $TAG
-=====================================
-Starte Tactileviewer.exe direkt aus diesem Ordner.
-Bewege die Datei nicht ohne den restlichen Ordnerinhalt.
-"@ | Set-Content "$DIST\START.txt"
+          Set-Content "$DIST\START.txt" "Project Horus - Tactileviewer $TAG"
+          Add-Content "$DIST\START.txt" "====================================="
+          Add-Content "$DIST\START.txt" "Starte Tactileviewer.exe direkt aus diesem Ordner."
+          Add-Content "$DIST\START.txt" "Bewege die Datei nicht ohne den restlichen Ordnerinhalt."
 
           Compress-Archive -Path "dist\Tactileviewer\*" `
                            -DestinationPath "Tactileviewer-${TAG}-windows.zip"
@@ -149,12 +147,7 @@ Bewege die Datei nicht ohne den restlichen Ordnerinhalt.
           cp assets/models/* "$DIST/assets/models/"
 
           # Launcher script — sets CWD to app dir so relative model paths work
-          cat > "$DIST/start.sh" << 'EOF'
-#!/bin/sh
-DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$DIR"
-exec ./Tactileviewer "$@"
-EOF
+          printf '#!/bin/sh\nDIR="$(cd "$(dirname "$0")" && pwd)"\ncd "$DIR"\nexec ./Tactileviewer "$@"\n' > "$DIST/start.sh"
           chmod +x "$DIST/start.sh"
 
           # Bundle non-core shared libs (OpenCV, etc.) that may differ across distros
