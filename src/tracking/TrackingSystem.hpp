@@ -116,7 +116,8 @@ private:
         int         face_id = -1;
         std::string face_name;
         cv::Rect    face_box;
-        int         retryCountdown = 0; // frames until next recognition attempt (when face_id == -1)
+        cv::Rect    last_person_box; // person box when face was last detected
+        int         retryCountdown = 0; // frames until next recognition attempt
     };
     // Face recognition identity cache: track_id -> {face_id, face_name, face_box}
     std::unordered_map<int, FaceTrackInfo> m_trackIdToFace;

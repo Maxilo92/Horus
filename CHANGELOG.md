@@ -1,6 +1,28 @@
 # Changelog
 
+## [1.17.3] - 2026-06-08
+
+### Fixed
+- **Face Recognition Deduplication**: Implemented a "Best-Row" confidence filter in `FaceRecognizer`. The system now only processes and registers the single most confident face detection within a person's ROI, eliminating the "Multiple Unknown Identities" bug where one person was recognized as several different IDs simultaneously.
+- **Dynamic Face Tracking**: Resolved the "Frozen Face Box" issue. The Face Recognition module now re-runs periodically (every 15 frames) for all active tracks to update features and coordinates. 
+- **Relative Box Interpolation**: Introduced relative coordinate interpolation for face bounding boxes. The face box now tracks smoothly in real-time by following the person's main body movements between recognition runs, instead of remaining static at its initial detection point.
+
+## [1.17.2] - 2026-06-08
+
+### Fixed
+- **Bounding Box Stability**: Resolved the "escaping boxes" issue where tracking rectangles would drift off-screen. Implemented robust coordinate clamping across `ObjectDetector`, `MultiTracker`, and `TrackingSystem`, ensuring all boxes remain within frame boundaries.
+- **Velocity Safeguards**: Added hard velocity caps (100-120 px/frame) and plausibility checks for lag-based extrapolation. This prevents positive feedback loops in the Kalman filter that previously caused runaway motion on noisy signals.
+- **Improved Lag Compensation**: Refined the extrapolation logic in `MultiTracker` to use safe, clamped offsets, eliminating "teleporting" boxes during network jitter.
+- **Pixel Tracker Robustness**: Applied similar clamping and velocity damping to the manual Pixel Lock system, ensuring stable tracking of custom-selected regions even at frame edges.
+
 ## [1.17.1] - 2026-06-08
+
+### Fixed
+- **Pixel Target Interaction**: Fixed a critical bug where moving or resizing the custom Pixel Target (ID 999) caused the Zoom Window to jump back to its original position and prevented smooth grabbing of resize handles. The UI now correctly preserves the local dragged state of the bounding box between frames without being continuously overwritten by the slower tracking thread.
+- **ROI Detection Filtering**: Fixed an architectural oversight where ROI zones (Inclusion/Exclusion) were visually drawn but never actually applied to filter detections in the background tracking thread. The `ROIManager` is now correctly invoked in the tracking loop, making ROI zones fully functional.
+- **Display Frame Double-Consumption**: Fixed a race condition in the UI loop where the display frame was accidentally consumed twice, occasionally causing the Camera View to receive empty frames.
+
+## [1.17.0] - 2026-06-08
 
 ### Fixed
 - **UIManager Syntax Error**: Resolved a critical build failure in `UIManager.cpp` caused by a missing closing brace in the `renderSetupWizard` function.

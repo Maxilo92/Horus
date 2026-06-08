@@ -107,6 +107,7 @@ MultiTracker::MultiTracker() : m_nextId(0) {}
 
 void MultiTracker::update(const std::vector<Detection>& detections,
                           const SystemSettings& settings,
+                          cv::Size frameSize,
                           int lagFrames,
                           cv::Point2d cameraMotion,
                           bool detectorRan)
@@ -123,7 +124,10 @@ void MultiTracker::update(const std::vector<Detection>& detections,
     for (auto& [id, track] : m_tracks) {
         track.kf.predict();
         trackIds.push_back(id);
-        predictedBoxes.push_back(track.getPredictedBoundingBox());
+        
+        // Clamp predicted box to ensure matching doesn't go off-screen
+        cv::Rect pred = clampRect(track.getPredictedBoundingBox(), frameSize.width, frameSize.height);
+        predictedBoxes.push_back(pred);
     }
 
     const int nTracks = static_cast<int>(trackIds.size());
@@ -144,15 +148,13 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             track.kf.statePost.at<double>(1) -= cameraMotion.y;
             predictedBoxes[i].x -= dx;
             predictedBoxes[i].y -= dy;
+            // Re-clamp after motion
+            predictedBoxes[i] = clampRect(predictedBoxes[i], frameSize.width, frameSize.height);
         }
     }
 
-    // --- Phase 2 & 3: Matching — only when detector produced a result this frame.
-    // When detectorRan==false and there are no detections from reacquisition either,
-    // we skip matching entirely. Tracks coast via Kalman prediction and lost_frames
-    // is NOT incremented, preventing boxes from disappearing between detector frames.
+    // --- Phase 2 & 3: Matching ---
     const bool shouldMatch = detectorRan || (nDets > 0);
-
     const float maxCenterDist = settings.trackerMaxCenterDistPx;
 
     std::vector<int>  matchedTracks(nTracks, -1);
@@ -181,8 +183,16 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             if (safeLag > 0 && !det.is_recovery) {
                 double vx = track.kf.statePost.at<double>(4);
                 double vy = track.kf.statePost.at<double>(5);
-                extBox.x += static_cast<int>(std::round(safeLag * vx));
-                extBox.y += static_cast<int>(std::round(safeLag * vy));
+                
+                // Velocity Plausibility Guard: limit extrapolation to 50% of frame dimensions
+                double maxJumpX = frameSize.width  * 0.5;
+                double maxJumpY = frameSize.height * 0.5;
+                double dx = std::clamp(safeLag * vx, -maxJumpX, maxJumpX);
+                double dy = std::clamp(safeLag * vy, -maxJumpY, maxJumpY);
+                
+                extBox.x += static_cast<int>(std::round(dx));
+                extBox.y += static_cast<int>(std::round(dy));
+                extBox = clampRect(extBox, frameSize.width, frameSize.height);
             }
 
             cv::Mat measurement(4, 1, CV_64F);
@@ -191,6 +201,10 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             measurement.at<double>(2) = static_cast<double>(extBox.width);
             measurement.at<double>(3) = static_cast<double>(extBox.height);
             track.kf.correct(measurement);
+
+            // Hard Velocity Cap: Prevent extreme velocity build-up (max 100 px/frame)
+            track.kf.statePost.at<double>(4) = std::clamp(track.kf.statePost.at<double>(4), -100.0, 100.0);
+            track.kf.statePost.at<double>(5) = std::clamp(track.kf.statePost.at<double>(5), -100.0, 100.0);
 
             track.confidence    = det.confidence;
             track.lost_frames   = 0;
@@ -207,11 +221,12 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             // it ran but this track wasn't matched (lost).
             // Forward statePost to the Kalman prediction so the displayed box
             // continues to follow the predicted trajectory instead of freezing.
-            // kf.predict() updates statePre and errorCovPre but does NOT update
-            // statePost/errorCovPost. Without this, getBoundingBox() returns the
-            // stale last-corrected position forever between detections.
             track.kf.statePost    = track.kf.statePre;
             track.kf.errorCovPost = track.kf.errorCovPre;
+            
+            // Apply velocity damping for lost tracks
+            track.kf.statePost.at<double>(4) *= settings.trackerDeadReckoningDamping;
+            track.kf.statePost.at<double>(5) *= settings.trackerDeadReckoningDamping;
 
             if (shouldMatch) {
                 // Detector ran but missed this track → count it as lost
@@ -219,7 +234,8 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             }
 
             // Trail zeigt vorhergesagte Position (gedimmt im HUD)
-            const cv::Rect pred = track.getBoundingBox(); // now reads updated statePost
+            cv::Rect pred = track.getBoundingBox();
+            pred = clampRect(pred, frameSize.width, frameSize.height);
             track.trail.emplace_back(pred.x + pred.width  / 2,
                                      pred.y + pred.height / 2);
         }

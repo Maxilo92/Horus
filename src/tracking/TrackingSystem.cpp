@@ -469,8 +469,13 @@ void TrackingSystem::updateTrackerAndFaces(std::vector<TrackedObject>& tracked,
                                             int detectorLag,
                                             const cv::Point2d& cameraMotion,
                                             bool hasNewDetections) {
-    m_tracker->update(detections, settings, detectorLag, cameraMotion, hasNewDetections);
+    m_tracker->update(detections, settings, frame.size(), detectorLag, cameraMotion, hasNewDetections);
     tracked = m_tracker->getTrackedObjects(settings.trackerMaxTrailLength);
+    
+    // Safety clamp for all tracked objects displayed in HUD
+    for (auto& obj : tracked) {
+        obj.box = clampRect(obj.box, frame.cols, frame.rows);
+    }
 
     if (!settings.faceRecognitionEnabled) {
         m_log(LogLevel::VERBOSE, "[FaceRecognizer] Skipped: faceRecognitionEnabled=false");
@@ -490,8 +495,8 @@ void TrackingSystem::updateTrackerAndFaces(std::vector<TrackedObject>& tracked,
             auto it = m_trackIdToFace.find(obj.track_id);
             if (it == m_trackIdToFace.end()) {
                 runRecognition = true;
-            } else if (it->second.face_id == -1) {
-                // No identity yet — retry every 15 frames (don't hammer the model every frame)
+            } else {
+                // Retry every 15 frames to update tracking and check identity
                 it->second.retryCountdown--;
                 if (it->second.retryCountdown <= 0) {
                     runRecognition = true;
@@ -514,23 +519,23 @@ void TrackingSystem::updateTrackerAndFaces(std::vector<TrackedObject>& tracked,
 
             {
                 std::lock_guard<std::mutex> lock(m_faceMutex);
-                FaceTrackInfo info;
+                auto& info = m_trackIdToFace[obj.track_id];
                 if (!faceResults.empty()) {
-                    info.face_id   = faceResults[0].identityId; // may be -1 (unknown)
-                    info.face_name = faceResults[0].name;
+                    // Update identity if recognized, otherwise keep current identity
+                    if (faceResults[0].identityId != -1) {
+                        info.face_id   = faceResults[0].identityId;
+                        info.face_name = faceResults[0].name;
+                    }
                     info.face_box  = faceResults[0].box;
+                    info.last_person_box = obj.box;
                     m_log(LogLevel::INFO, "[FaceRecognizer] Face found for track=" +
                           std::to_string(obj.track_id) + " id=" + std::to_string(info.face_id) +
                           " name=" + info.face_name);
                 } else {
-                    // No face detected — create a throttled "no face" entry so we
-                    // don't hammer the model every frame for this track.
-                    info.face_id = -1;
+                    // No face detected this time; we keep the existing identity but don't update face_box
+                    if (info.last_person_box.width == 0) info.face_id = -1;
                 }
-                // Always set a cooldown so retries are rate-limited.
-                // Default FaceTrackInfo has retryCountdown=0 which causes immediate re-runs.
                 info.retryCountdown = 15;
-                m_trackIdToFace[obj.track_id] = std::move(info);
             }
         }
         {
@@ -539,7 +544,21 @@ void TrackingSystem::updateTrackerAndFaces(std::vector<TrackedObject>& tracked,
             if (it != m_trackIdToFace.end()) {
                 obj.face_id   = it->second.face_id;
                 obj.face_name = it->second.face_name;
-                obj.face_box  = it->second.face_box;
+                
+                // Interpolate face_box relative to current person box for smooth tracking
+                if (it->second.last_person_box.width > 0 && it->second.last_person_box.height > 0) {
+                    float rel_x = (it->second.face_box.x - it->second.last_person_box.x) / (float)it->second.last_person_box.width;
+                    float rel_y = (it->second.face_box.y - it->second.last_person_box.y) / (float)it->second.last_person_box.height;
+                    float rel_w = it->second.face_box.width / (float)it->second.last_person_box.width;
+                    float rel_h = it->second.face_box.height / (float)it->second.last_person_box.height;
+                    
+                    obj.face_box.x = obj.box.x + static_cast<int>(rel_x * obj.box.width);
+                    obj.face_box.y = obj.box.y + static_cast<int>(rel_y * obj.box.height);
+                    obj.face_box.width = static_cast<int>(rel_w * obj.box.width);
+                    obj.face_box.height = static_cast<int>(rel_h * obj.box.height);
+                } else {
+                    obj.face_box = it->second.face_box;
+                }
             }
         }
     }
@@ -584,6 +603,9 @@ void TrackingSystem::runPixelTemplateMatch(std::vector<TrackedObject>& tracked,
                 static_cast<int>(std::round(m_pixelCenterX - lastBox.width  / 2.0f)),
                 static_cast<int>(std::round(m_pixelCenterY - lastBox.height / 2.0f)),
                 lastBox.width, lastBox.height);
+            
+            // Safety clamp for predicted box
+            predicted = clampRect(predicted, frame.cols, frame.rows);
 
             const int pad = 80;
             int sx1 = std::max(0, std::min(predicted.x - pad, frame.cols - 1));
@@ -659,6 +681,10 @@ void TrackingSystem::runPixelTemplateMatch(std::vector<TrackedObject>& tracked,
                         m_pixelVy = alpha * pixDy + (1.0f - alpha) * m_pixelVy;
                     }
 
+                    // Hard Velocity Cap for Pixel Target (max 120 px/frame)
+                    m_pixelVx = std::clamp(m_pixelVx, -120.0f, 120.0f);
+                    m_pixelVy = std::clamp(m_pixelVy, -120.0f, 120.0f);
+
                     m_pixelCenterX = static_cast<float>(newCx);
                     m_pixelCenterY = static_cast<float>(newCy);
 
@@ -668,7 +694,7 @@ void TrackingSystem::runPixelTemplateMatch(std::vector<TrackedObject>& tracked,
                         static_cast<int>(std::round(tw)),
                         static_cast<int>(std::round(th)));
 
-                    m_sharedLockedTarget.box         = newBox;
+                    m_sharedLockedTarget.box         = clampRect(newBox, frame.cols, frame.rows);
                     m_sharedLockedTarget.confidence  = static_cast<float>(bestMaxVal);
                     m_sharedLockedTarget.lost_frames = 0;
                     m_sharedLockedTarget.state       = TrackingState::LOCKED;

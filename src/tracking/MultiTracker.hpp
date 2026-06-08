@@ -61,6 +61,7 @@ public:
     // don't disappear while the async detector is between frames.
     void update(const std::vector<Detection>& detections,
                 const SystemSettings& settings,
+                cv::Size frameSize,
                 int lagFrames = 0,
                 cv::Point2d cameraMotion = {0.0, 0.0},
                 bool detectorRan = true);

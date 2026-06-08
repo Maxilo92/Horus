@@ -87,8 +87,24 @@ std::vector<FaceRecognizer::FaceResult> FaceRecognizer::process(const cv::Mat& f
     cv::Mat faces;
     m_detector->detect(personImg, faces);
 
-    std::vector<FaceResult> results;
+    if (faces.empty()) return {};
+
+    // Find the face with the highest detection confidence.
+    int bestRow = -1;
+    float maxDetConf = -1.0f;
     for (int i = 0; i < faces.rows; ++i) {
+        float detConf = faces.at<float>(i, 14); // Confidence is at index 14
+        if (detConf > maxDetConf) {
+            maxDetConf = detConf;
+            bestRow = i;
+        }
+    }
+
+    if (bestRow == -1) return {};
+
+    std::vector<FaceResult> results;
+    {
+        int i = bestRow;
         FaceResult res;
         // Bounding box is in faces.row(i).colRange(0, 4)
         float x = faces.at<float>(i, 0);
@@ -136,8 +152,7 @@ std::vector<FaceRecognizer::FaceResult> FaceRecognizer::process(const cv::Mat& f
             res.matchScore = bestScore;
         } else {
             // Self-register new identity if it's a "clean" detection (high confidence)
-            float detConf = faces.at<float>(i, 14); // Confidence is at index 14
-            if (detConf >= minDetConfidence) {
+            if (maxDetConf >= minDetConfidence) {
                 std::string newName = "Unbekannt " + std::to_string(m_nextId);
                 res.identityId = registerIdentity(newName, feature);
                 res.name = newName;

@@ -151,7 +151,7 @@ public:
                     int width = static_cast<int>(w / scale);
                     int height = static_cast<int>(h / scale);
 
-                    d.box = cv::Rect(left, top, width, height);
+                    d.box = clampRect(cv::Rect(left, top, width, height), frame.cols, frame.rows);
                 }
                 
                 // Priority class filter (just like local)
@@ -254,7 +254,7 @@ public:
             const int top    = static_cast<int>((cy - 0.5f * h - (float)offset_y) / scale);
             const int width  = static_cast<int>(w / scale);
             const int height = static_cast<int>(h / scale);
-            boxes.emplace_back(left, top, width, height);
+            boxes.push_back(clampRect(cv::Rect(left, top, width, height), frame.cols, frame.rows));
         }
 
         std::vector<int> nms_indices;
