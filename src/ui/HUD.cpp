@@ -158,10 +158,14 @@ void HUD::drawCornerBrackets(ImDrawList* drawList, const ViewportInfo& view, ImU
     float x2 = view.pos_x + view.target_w;
     float y2 = view.pos_y + view.target_h;
     float lw = 1.5f;
-    drawList->AddPolyline((ImVec2[]){ImVec2(x1+m+l, y1+m), ImVec2(x1+m, y1+m), ImVec2(x1+m, y1+m+l)}, 3, color, 0, lw);
-    drawList->AddPolyline((ImVec2[]){ImVec2(x2-m-l, y1+m), ImVec2(x2-m, y1+m), ImVec2(x2-m, y1+m+l)}, 3, color, 0, lw);
-    drawList->AddPolyline((ImVec2[]){ImVec2(x1+m+l, y2-m), ImVec2(x1+m, y2-m), ImVec2(x1+m, y2-m-l)}, 3, color, 0, lw);
-    drawList->AddPolyline((ImVec2[]){ImVec2(x2-m-l, y2-m), ImVec2(x2-m, y2-m), ImVec2(x2-m, y2-m-l)}, 3, color, 0, lw);
+    const ImVec2 c0[] = {ImVec2(x1+m+l, y1+m), ImVec2(x1+m, y1+m), ImVec2(x1+m, y1+m+l)};
+    const ImVec2 c1[] = {ImVec2(x2-m-l, y1+m), ImVec2(x2-m, y1+m), ImVec2(x2-m, y1+m+l)};
+    const ImVec2 c2[] = {ImVec2(x1+m+l, y2-m), ImVec2(x1+m, y2-m), ImVec2(x1+m, y2-m-l)};
+    const ImVec2 c3[] = {ImVec2(x2-m-l, y2-m), ImVec2(x2-m, y2-m), ImVec2(x2-m, y2-m-l)};
+    drawList->AddPolyline(c0, 3, color, 0, lw);
+    drawList->AddPolyline(c1, 3, color, 0, lw);
+    drawList->AddPolyline(c2, 3, color, 0, lw);
+    drawList->AddPolyline(c3, 3, color, 0, lw);
 }
 
 void HUD::drawTrackedObject(ImDrawList* drawList, const TrackedObject& obj,

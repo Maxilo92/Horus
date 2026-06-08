@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <filesystem>
 #include "core/Blackboard.hpp"
 #include "vision/VisionSystem.hpp"
 #include "tracking/TrackingSystem.hpp"
