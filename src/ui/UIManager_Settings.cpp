@@ -438,8 +438,7 @@ void UIManager::loadPersistedSettings(const std::string& path) {
         }
     }
 
-    // If the loaded file has no setup_complete key (e.g. migrated from an older version),
-    // show the wizard on next frame so the user can confirm/adjust their setup.
+    // Force setup wizard if setup is incomplete OR if models are missing
     {
         std::ifstream recheck(p);
         bool hasSetupComplete = false;
@@ -447,7 +446,15 @@ void UIManager::loadPersistedSettings(const std::string& path) {
         while (std::getline(recheck, chkLine)) {
             if (chkLine.rfind("setup_complete=", 0) == 0) { hasSetupComplete = true; break; }
         }
-        if (!hasSetupComplete) m_setupWizardActive = true;
+
+        checkModelsExist();
+        if (!hasSetupComplete) {
+            m_setupWizardActive = true;
+            m_setupWizardStep = 0;
+        } else if (!allModelsPresent()) {
+            m_setupWizardActive = true;
+            m_setupWizardStep = 1; // Jump directly to installation
+        }
     }
 }
 

@@ -4,6 +4,7 @@
 #include "../ui/UIManager.hpp"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include <imgui.h>
 #include <iostream>
 #include <cstdlib>
 #include <filesystem>
@@ -103,18 +104,26 @@ bool Application::init(int argc, char** argv) {
     if (!initGLFW()) { log(LogLevel::ERR, "GLFW init failed"); return false; }
     if (!initImGui()) { log(LogLevel::ERR, "ImGui init failed"); return false; }
 
+    // ── First frame: empty boot terminal ─────────────────────────────────
+    drawSplashFrame();
+
     auto logFn = [this](LogLevel l, const std::string& m) { this->log(l, m); };
 
+    // ── UI system ─────────────────────────────────────────────────────────
+    bootBegin("UI system initializing...");
     m_uiManager = std::make_unique<UIManager>(
         m_blackboard, *m_roiManager, *m_dataLogger, m_audioEngine,
         m_window, m_settingsPath, logFn);
     if (!m_uiManager->initRenderers()) {
+        bootEnd(false);
         log(LogLevel::ERR, "UIManager renderer init failed");
         return false;
     }
     m_uiManager->start();
+    bootEnd(true);
 
     // ── AI Dossier System ────────────────────────────────────────────────
+    bootBegin("Dossier database initializing...");
     {
 #ifdef _WIN32
         const char* appData = std::getenv("APPDATA");
@@ -129,17 +138,20 @@ bool Application::init(int argc, char** argv) {
         dbPath /= "dossiers.db";
 
         m_dossierDb = std::make_unique<DossierDatabase>(dbPath.string());
-        if (!m_dossierDb->init()) {
-            log(LogLevel::ERR, "DossierDatabase init failed");
-        }
+        bool dbOk = m_dossierDb->init();
+        if (!dbOk) log(LogLevel::ERR, "DossierDatabase init failed");
+        bootEnd(dbOk);
 
+        bootBegin("AI agent starting...");
         m_aiAgent = std::make_unique<AIAgent>(m_blackboard, *m_dossierDb, logFn);
         m_aiAgent->start();
+        bootEnd(true);
 
         m_uiManager->setDossierDatabase(m_dossierDb.get());
     }
 
     // ── AudioCapture ─────────────────────────────────────────────────────
+    bootBegin("Enumerating audio & camera devices...");
     {
         auto devices = AudioCapture::listDevices();
         std::vector<std::string> names;
@@ -149,7 +161,7 @@ bool Application::init(int argc, char** argv) {
             ids.push_back(d.id);
         }
         m_blackboard.setAudioDevices(names, ids);
-        
+
         auto camDevices = CameraModule::listDevices();
         std::vector<std::string> cNames;
         std::vector<int> cIds;
@@ -158,12 +170,15 @@ bool Application::init(int argc, char** argv) {
             cIds.push_back(d.id);
         }
         m_blackboard.setCameraDevices(cNames, cIds);
-        
+        bootEnd(true);
+
         SystemSettings s = m_blackboard.getSettings();
         if (s.audioCaptureEnabled) {
+            bootBegin("Audio capture starting...");
             m_audioCapture.start(s.audioCaptureDeviceId, [this](float intensity) {
                 m_blackboard.updateAudioIntensity(intensity);
             });
+            bootEnd(true);
         }
     }
 
@@ -171,6 +186,7 @@ bool Application::init(int argc, char** argv) {
     if (finalCameraAddress.empty()) finalCameraAddress = "1";
 
     // ── AudioEngine ──────────────────────────────────────────────────────
+    bootBegin("Audio engine configuring...");
     SystemSettings s = m_blackboard.getSettings();
     AudioEngine::Config cfg;
     cfg.masterEnabled       = s.audioEnabled;
@@ -200,15 +216,19 @@ bool Application::init(int argc, char** argv) {
     cfg.lockPulseSolutionFreqHz    = s.audioLockPulseSolutionFreqHz;
     cfg.lockPulseSolutionDurMs     = s.audioLockPulseSolutionDurMs;
     m_audioEngine.applyConfig(cfg);
+    bootEnd(true);
 
     // Find model paths — search order:
     //  1. macOS bundle Resources (../Resources/ relative to MacOS/ dir)
     //  2. Development build (../assets/models/ relative to binary in build/)
     //  3. CWD-relative (assets/models/ — works when launched from app dir)
     //  4. Exe-directory-relative (most reliable for installed release builds)
+    //  5. User-data models directory (where the Setup Wizard downloads them)
     auto exeDir = [&]() -> std::filesystem::path {
         return std::filesystem::path(argc > 0 ? argv[0] : ".").parent_path();
     };
+    auto userModelsDir = std::filesystem::path(m_settingsPath).parent_path() / "models";
+
     std::string modelPath  = "../Resources/yolov8n.onnx";
     std::string labelsPath = "../Resources/coco.txt";
     FILE* f = fopen(modelPath.c_str(), "r");
@@ -219,13 +239,20 @@ bool Application::init(int argc, char** argv) {
         labelsPath = (exeDir() / "assets" / "models" / "coco.txt").string();
         f = fopen(modelPath.c_str(), "r");
     }
+    if (!f) {
+        modelPath  = (userModelsDir / "yolov8n.onnx").string();
+        labelsPath = (userModelsDir / "coco.txt").string();
+        f = fopen(modelPath.c_str(), "r");
+    }
     if (f) fclose(f);
 
     // ── TrackingSystem ───────────────────────────────────────────────────
+    bootBegin("Tracking system initializing...");
     m_trackingSystem = std::make_unique<TrackingSystem>(m_blackboard, *m_roiManager, *m_dataLogger, m_audioEngine, logFn);
-    
+    bootEnd(true);
+
     // Setup Face Recognizer if models exist
-    // Search order mirrors the YOLO model lookup: bundle Resources first, then project fallbacks.
+    bootBegin("Face recognition models loading...");
     std::string faceDetPath = "../Resources/face_detection_yunet_2023mar.onnx";
     std::string faceRecPath = "../Resources/face_recognition_sface_2021dec.onnx";
     f = fopen(faceDetPath.c_str(), "r");
@@ -236,29 +263,41 @@ bool Application::init(int argc, char** argv) {
         faceRecPath = (exeDir() / "assets" / "models" / "face_recognition_sface_2021dec.onnx").string();
         f = fopen(faceDetPath.c_str(), "r");
     }
+    if (!f) {
+        faceDetPath = (userModelsDir / "face_detection_yunet_2023mar.onnx").string();
+        faceRecPath = (userModelsDir / "face_recognition_sface_2021dec.onnx").string();
+        f = fopen(faceDetPath.c_str(), "r");
+    }
     if (f) {
         fclose(f);
-        if (!m_trackingSystem->init(faceDetPath, faceRecPath, m_dossierDb.get())) {
-            log(LogLevel::ERR, "TrackingSystem face recognizer init failed");
-        }
+        bool faceOk = m_trackingSystem->init(faceDetPath, faceRecPath, m_dossierDb.get());
+        if (!faceOk) log(LogLevel::ERR, "TrackingSystem face recognizer init failed");
+        bootEnd(faceOk);
+    } else {
+        bootEnd(false);  // models not found — non-fatal
     }
 
     // ── VisionSystem ──────────────────────────────────────────────────────
+    bootBegin("Object detection model loading...");
     m_visionSystem = std::make_unique<VisionSystem>(m_blackboard, m_audioEngine, m_dossierDb.get(), m_aiAgent.get(), logFn);
     if (!m_visionSystem->init(finalCameraAddress, modelPath, labelsPath, finalCameraAddress)) {
+        bootEnd(false);
         log(LogLevel::ERR, "VisionSystem init failed");
         return false;
     }
+    bootEnd(true);
 
     m_visionSystem->setTrackingSystem(m_trackingSystem.get());
 
+    bootBegin("Camera stream starting...");
     m_visionSystem->start();
     m_trackingSystem->start();
+    bootEnd(true);
 
     // ── UpdateChecker ─────────────────────────────────────────────────────
     m_updateChecker = std::make_unique<UpdateChecker>();
     m_uiManager->setUpdateChecker(m_updateChecker.get());
-    m_updateChecker->checkAsync(5); // non-blocking; waits 5s before hitting API
+    m_updateChecker->checkAsync(5);
 
     return true;
 }
@@ -321,4 +360,168 @@ void Application::cleanup() {
         m_window = nullptr;
     }
     glfwTerminate();
+}
+
+// -----------------------------------------------------------------------
+// Boot helpers
+// -----------------------------------------------------------------------
+
+void Application::bootBegin(const std::string& msg) {
+    m_bootLog.push_back({ msg, BootStatus::PENDING });
+    drawSplashFrame();
+}
+
+void Application::bootEnd(bool ok) {
+    if (!m_bootLog.empty())
+        m_bootLog.back().status = ok ? BootStatus::OK : BootStatus::FAIL;
+    drawSplashFrame();
+}
+
+// -----------------------------------------------------------------------
+// drawSplashFrame  –  boot terminal, re-rendered on every bootBegin/bootEnd
+// -----------------------------------------------------------------------
+
+void Application::drawSplashFrame() {
+    glfwPollEvents();   // keep OS happy during long init
+
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float W  = vp->Size.x;
+    const float H  = vp->Size.y;
+    const float ox = vp->Pos.x;
+    const float oy = vp->Pos.y;
+    auto P = [&](float x, float y) { return ImVec2(ox + x, oy + y); };
+
+    ImGui::SetNextWindowPos(vp->Pos);
+    ImGui::SetNextWindowSize(vp->Size);
+    ImGui::SetNextWindowBgAlpha(1.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.020f, 0.035f, 0.020f, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,    ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+
+    ImGui::Begin("##boot", nullptr,
+        ImGuiWindowFlags_NoDecoration    |
+        ImGuiWindowFlags_NoInputs        |
+        ImGuiWindowFlags_NoNav           |
+        ImGuiWindowFlags_NoMove          |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoDocking);
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    const ImU32 kBg       = IM_COL32( 5,  9,  5, 255);
+    const ImU32 kGreen    = IM_COL32( 0, 200, 100, 255);
+    const ImU32 kGreenDim = IM_COL32( 0, 120,  60, 200);
+    const ImU32 kYellow   = IM_COL32(220, 200,  40, 255);
+    const ImU32 kRed      = IM_COL32(220,  60,  60, 255);
+    const ImU32 kGray     = IM_COL32(100, 130, 100, 200);
+
+    dl->AddRectFilled(P(0, 0), P(W, H), kBg);
+
+    // Faint grid
+    for (float x = 0; x < W; x += 60.0f)
+        dl->AddLine(P(x, 0), P(x, H), IM_COL32(0, 180, 80, 6));
+    for (float y = 0; y < H; y += 60.0f)
+        dl->AddLine(P(0, y), P(W, y), IM_COL32(0, 180, 80, 6));
+
+    // Corner brackets
+    const float bm = 20.0f, bL = 32.0f, bT = 1.5f;
+    dl->AddLine(P(bm,   bm),   P(bm+bL, bm),   kGreenDim, bT);
+    dl->AddLine(P(bm,   bm),   P(bm,   bm+bL), kGreenDim, bT);
+    dl->AddLine(P(W-bm, bm),   P(W-bm-bL, bm), kGreenDim, bT);
+    dl->AddLine(P(W-bm, bm),   P(W-bm, bm+bL), kGreenDim, bT);
+    dl->AddLine(P(bm,   H-bm), P(bm+bL, H-bm), kGreenDim, bT);
+    dl->AddLine(P(bm,   H-bm), P(bm,   H-bm-bL), kGreenDim, bT);
+    dl->AddLine(P(W-bm, H-bm), P(W-bm-bL, H-bm), kGreenDim, bT);
+    dl->AddLine(P(W-bm, H-bm), P(W-bm,   H-bm-bL), kGreenDim, bT);
+
+    const float lh     = ImGui::GetTextLineHeight();
+    const float margin = 60.0f;   // left margin for log lines
+    float curY         = 36.0f;   // current Y cursor
+
+    // ── Header ──────────────────────────────────────────────────────────
+    {
+        const char* title = "PROJECT HORUS  //  TARGET ACQUISITION SYSTEM";
+        ImGui::SetCursorScreenPos(P(margin, curY));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.784f, 0.392f, 1.0f));
+        ImGui::TextUnformatted(title);
+        ImGui::PopStyleColor();
+        curY += lh + 4.0f;
+    }
+    {
+        const char* sub = "BOOT SEQUENCE";
+        ImGui::SetCursorScreenPos(P(margin, curY));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.45f, 0.22f, 1.0f));
+        ImGui::TextUnformatted(sub);
+        ImGui::PopStyleColor();
+        curY += lh + 2.0f;
+    }
+
+    // Separator line
+    dl->AddLine(P(margin, curY + 4.0f), P(W - margin, curY + 4.0f), kGreenDim, 1.0f);
+    curY += 16.0f;
+
+    // ── Boot log entries ────────────────────────────────────────────────
+    const float tagW = 70.0f;   // width of the status badge column
+    for (const auto& entry : m_bootLog) {
+        // Status badge
+        const char* tag;
+        ImU32       tagCol;
+        switch (entry.status) {
+            case BootStatus::OK:      tag = "[  OK  ]"; tagCol = kGreen;  break;
+            case BootStatus::FAIL:    tag = "[ FAIL ]"; tagCol = kRed;    break;
+            default:                  tag = "[ .... ]"; tagCol = kYellow; break;
+        }
+        ImGui::SetCursorScreenPos(P(margin, curY));
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImVec4(((tagCol >>  0) & 0xFF) / 255.0f,
+                   ((tagCol >>  8) & 0xFF) / 255.0f,
+                   ((tagCol >> 16) & 0xFF) / 255.0f, 1.0f));
+        ImGui::TextUnformatted(tag);
+        ImGui::PopStyleColor();
+
+        // Message text
+        ImGui::SetCursorScreenPos(P(margin + tagW + 8.0f, curY));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.72f, 0.88f, 0.72f, 1.0f));
+        ImGui::TextUnformatted(entry.msg.c_str());
+        ImGui::PopStyleColor();
+
+        curY += lh + 3.0f;
+    }
+
+    // Blinking cursor after last line (only if something is pending)
+    bool anyPending = !m_bootLog.empty() &&
+                      m_bootLog.back().status == BootStatus::PENDING;
+    if (anyPending) {
+        ImGui::SetCursorScreenPos(P(margin + tagW + 8.0f, curY + 2.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.784f, 0.392f, 0.9f));
+        ImGui::TextUnformatted("_");
+        ImGui::PopStyleColor();
+    }
+
+    // ── Version footer ──────────────────────────────────────────────────
+    {
+        const char* ver = "HORUS  v0.1";
+        ImVec2 vs = ImGui::CalcTextSize(ver);
+        ImGui::SetCursorScreenPos(P(W - margin - vs.x, H - bm - lh));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.28f, 0.14f, 1.0f));
+        ImGui::TextUnformatted(ver);
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
+
+    int fw, fh;
+    glfwGetFramebufferSize(m_window, &fw, &fh);
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    glClearColor(0.020f, 0.035f, 0.020f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    glfwSwapBuffers(m_window);
 }

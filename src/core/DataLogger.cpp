@@ -97,14 +97,9 @@ void DataLogger::writeCSVRow(double ts, const TrackedObject& obj, double p2m) {
     float cx = static_cast<float>(obj.box.x) + obj.box.width  * 0.5f;
     float cy = static_cast<float>(obj.box.y) + obj.box.height * 0.5f;
 
-    // Velocity estimate from trail (px/frame): last two trail points
-    float vx = 0.0f, vy = 0.0f;
-    if (obj.trail.size() >= 2) {
-        const auto& p1 = obj.trail[obj.trail.size() - 1];
-        const auto& p0 = obj.trail[obj.trail.size() - 2];
-        vx = static_cast<float>(p1.x - p0.x);
-        vy = static_cast<float>(p1.y - p0.y);
-    }
+    // Use Kalman-estimated velocity from TrackedObject
+    float vx = obj.vx;
+    float vy = obj.vy;
 
     // Real-world coordinates (only valid if calibration active)
     double x_m = (p2m > 0.0) ? cx * p2m : 0.0;
@@ -142,13 +137,8 @@ void DataLogger::writeJSONRow(double ts, const TrackedObject& obj, double p2m) {
     float cx = static_cast<float>(obj.box.x) + obj.box.width  * 0.5f;
     float cy = static_cast<float>(obj.box.y) + obj.box.height * 0.5f;
 
-    float vx = 0.0f, vy = 0.0f;
-    if (obj.trail.size() >= 2) {
-        const auto& p1 = obj.trail[obj.trail.size() - 1];
-        const auto& p0 = obj.trail[obj.trail.size() - 2];
-        vx = static_cast<float>(p1.x - p0.x);
-        vy = static_cast<float>(p1.y - p0.y);
-    }
+    float vx = obj.vx;
+    float vy = obj.vy;
 
     double x_m = (p2m > 0.0) ? cx * p2m : 0.0;
     double y_m = (p2m > 0.0) ? cy * p2m : 0.0;

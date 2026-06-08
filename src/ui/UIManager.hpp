@@ -161,6 +161,20 @@ private:
     char m_wizardCameraInput[64]  = {"1"};
     int  m_wizardAudioIdx         = -1;
     int  m_wizardModelIdx         = 0;   // 0 = yolov8s (genau), 1 = yolov8n (schnell)
+
+    struct ModelStatus {
+        std::string name;
+        std::string filename;
+        std::string url;
+        bool        exists = false;
+        bool        downloading = false;
+        float       progress = 0.0f;
+    };
+    std::vector<ModelStatus> m_modelStatuses;
+    void checkModelsExist();
+    void startModelDownload(int idx);
+    bool allModelsPresent();
+
     void renderSetupWizard();
 
     // ── UI state booleans ────────────────────────────────────────────────

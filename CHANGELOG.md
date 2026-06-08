@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.17.1] - 2026-06-08
+
+### Fixed
+- **UIManager Syntax Error**: Resolved a critical build failure in `UIManager.cpp` caused by a missing closing brace in the `renderSetupWizard` function.
+- **Setup Wizard Logic**: Corrected duplicated and offset step indices in the Setup Wizard, ensuring a smooth multi-step configuration flow (0-5).
+
+## [1.17.0] - 2026-06-08
+
+### Added
+- **Integrated Setup & Installation Wizard**: Significantly expanded the Setup Wizard to handle automated "installation" of required AI models.
+- **Automated Model Verification**: The application now automatically checks for the presence of essential AI models (YOLOv8, Face Detection/Recognition) in multiple search paths.
+- **Asynchronous Model Downloads**: Implemented a robust download manager using CURL within the `UpdateChecker` to fetch missing models directly from GitHub releases without blocking the UI.
+- **Enforced Installation Step**: The Setup Wizard now includes a dedicated "Installation" step that blocks application startup if essential models are missing, ensuring a functional environment for the user.
+- **Enhanced UpdateChecker**: Extended the `UpdateChecker` class with file download capabilities, including progress tracking and status reporting.
+
+### Fixed
+- **Boot Logic Robustness**: Updated `Application::init` to include the user's local models directory in the search path, ensuring models downloaded via the wizard are correctly utilized.
+- **Setup Completion Logic**: Modified the configuration loader to force the Setup Wizard if models are missing, even if the initial setup was previously completed.
+
+## [1.16.7] - 2026-06-08
+
+### Added
+- **Functional Test Suite**: Introduced `tests/functional_tests.cpp` covering end-to-end functionality of core systems.
+- **Dossier Database Validation**: Automated testing for entity CRUD, face identity persistence, and SQLite integrity.
+- **Data Logger Verification**: Implemented content-level verification for CSV logging, ensuring accurate field mapping and coordinate persistence.
+- **Calibration Scaling Test**: Verified the pixel-to-meter scaling logic in the data logging pipeline.
+
+### Fixed
+- **Missing Velocity Data**: Fixed a bug in `MultiTracker::getTrackedObjects` where `vx` and `vy` fields of `TrackedObject` were not being populated from the Kalman filter state.
+- **Data Logger Precision**: Updated `DataLogger` to use the high-precision Kalman-estimated velocity from `TrackedObject` instead of calculating it via finite difference from the trail history.
+- **Log Logic**: Fixed `DataLogger` to correctly skip inactive tracks and ensure atomic flushes for deterministic data recovery.
+
 ## [1.16.6] - 2026-06-07
 
 ### Fixed

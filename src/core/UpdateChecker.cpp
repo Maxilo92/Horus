@@ -20,11 +20,25 @@ size_t curlWriteCallback(char* ptr, size_t size, size_t nmemb, void* userdata) {
     return size * nmemb;
 }
 
+size_t curlWriteFileCallback(void* ptr, size_t size, size_t nmemb, FILE* stream) {
+    return fwrite(ptr, size, nmemb, stream);
+}
+
+int curlProgressCallback(void* clientp, double dltotal, double dlnow, double ultotal, double ulnow) {
+    auto* progress = static_cast<std::atomic<double>*>(clientp);
+    if (dltotal > 0) {
+        progress->store(dlnow / dltotal, std::memory_order_relaxed);
+    }
+    return 0;
+}
+
 } // namespace
 
 UpdateChecker::~UpdateChecker() {
     if (m_thread.joinable())
         m_thread.detach();
+    if (m_downloadThread.joinable())
+        m_downloadThread.join();
 }
 
 void UpdateChecker::checkAsync(int initialDelaySec) {
@@ -34,6 +48,71 @@ void UpdateChecker::checkAsync(int initialDelaySec) {
 
     m_thread = std::thread(&UpdateChecker::runCheck, this, initialDelaySec);
     m_thread.detach();
+}
+
+void UpdateChecker::downloadFileAsync(const std::string& url, const std::string& destinationPath) {
+    DownloadState expected = DownloadState::IDLE;
+    if (!m_downloadState.compare_exchange_strong(expected, DownloadState::DOWNLOADING)) {
+        if (m_downloadState == DownloadState::FAILED || m_downloadState == DownloadState::COMPLETED) {
+            m_downloadState = DownloadState::DOWNLOADING;
+        } else {
+            return; // already downloading
+        }
+    }
+
+    if (m_downloadThread.joinable())
+        m_downloadThread.join();
+
+    m_downloadProgress = 0.0;
+    m_downloadThread = std::thread(&UpdateChecker::runDownload, this, url, destinationPath);
+}
+
+void UpdateChecker::runDownload(std::string url, std::string dest) {
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        m_downloadState = DownloadState::FAILED;
+        std::lock_guard<std::mutex> lk(m_mutex);
+        m_downloadStatusMsg = "CURL init failed";
+        return;
+    }
+
+    FILE* fp = fopen(dest.c_str(), "wb");
+    if (!fp) {
+        curl_easy_cleanup(curl);
+        m_downloadState = DownloadState::FAILED;
+        std::lock_guard<std::mutex> lk(m_mutex);
+        m_downloadStatusMsg = "Failed to open destination file";
+        return;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteFileCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, curlProgressCallback);
+    curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, &m_downloadProgress);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Tactileviewer/" APP_VERSION);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L); // 5 min timeout for models
+
+    CURLcode res = curl_easy_perform(curl);
+    long httpCode = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+    
+    fclose(fp);
+    curl_easy_cleanup(curl);
+
+    if (res == CURLE_OK && httpCode == 200) {
+        m_downloadState = DownloadState::COMPLETED;
+        m_downloadProgress = 1.0;
+        std::lock_guard<std::mutex> lk(m_mutex);
+        m_downloadStatusMsg = "Download completed";
+    } else {
+        m_downloadState = DownloadState::FAILED;
+        std::lock_guard<std::mutex> lk(m_mutex);
+        m_downloadStatusMsg = "Download failed (HTTP " + std::to_string(httpCode) + ")";
+        if (res != CURLE_OK) m_downloadStatusMsg += " - CURL error " + std::to_string(res);
+    }
 }
 
 void UpdateChecker::runCheck(int delaySec) {
@@ -234,4 +313,24 @@ std::string UpdateChecker::getReleaseNotes() const {
 std::string UpdateChecker::getDownloadUrl() const {
     std::lock_guard<std::mutex> lk(m_mutex);
     return m_downloadUrl;
+}
+
+DownloadState UpdateChecker::getDownloadState() const {
+    return m_downloadState.load();
+}
+
+float UpdateChecker::getDownloadProgress() const {
+    return static_cast<float>(m_downloadProgress.load());
+}
+
+std::string UpdateChecker::getDownloadStatus() const {
+    std::lock_guard<std::mutex> lk(m_mutex);
+    return m_downloadStatusMsg;
+}
+
+void UpdateChecker::resetDownload() {
+    m_downloadState = DownloadState::IDLE;
+    m_downloadProgress = 0.0;
+    std::lock_guard<std::mutex> lk(m_mutex);
+    m_downloadStatusMsg = "";
 }

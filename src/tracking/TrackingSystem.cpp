@@ -163,6 +163,10 @@ void TrackingSystem::trackingWorkerLoop() {
 
             if (settings.enableTracking) {
                 runReacquisition(detections, trackingFrame, settings, motionTracks);
+                
+                // Plan 04: Filter detections through ROI zones (Inclusion/Exclusion)
+                m_roiManager.filterDetections(detections);
+                
                 deduplicateDetections(detections);
 
                 cv::Point2d cameraMotion = estimateCameraMotion(trackingFrame, settings);

@@ -292,6 +292,8 @@ std::vector<TrackedObject> MultiTracker::getTrackedObjects(int maxTrailLength) c
         obj.class_id    = track.class_id;
         obj.className   = track.className;
         obj.box         = track.getBoundingBox();
+        obj.vx          = static_cast<float>(track.kf.statePost.at<double>(4));
+        obj.vy          = static_cast<float>(track.kf.statePost.at<double>(5));
         obj.confidence  = track.confidence;
         obj.lost_frames = track.lost_frames;
         obj.is_active   = (track.lost_frames == 0);
