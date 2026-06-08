@@ -1,6 +1,7 @@
 #ifndef BLACKBOARD_HPP
 #define BLACKBOARD_HPP
 
+#include <atomic>
 #include <mutex>
 #include <vector>
 #include <opencv2/opencv.hpp>
