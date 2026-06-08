@@ -7,6 +7,22 @@
 #include <set>
 #include <cstdint>
 #include <chrono>
+#include <algorithm>
+
+// Utility: Clamps a rectangle to stay within defined image boundaries [0, width] and [0, height].
+inline cv::Rect clampRect(const cv::Rect& rect, int width, int height) {
+    if (width <= 0 || height <= 0) return rect;
+    int x1 = std::max(0, std::min(rect.x, width - 1));
+    int y1 = std::max(0, std::min(rect.y, height - 1));
+    int x2 = std::max(0, std::min(rect.x + rect.width,  width));
+    int y2 = std::max(0, std::min(rect.y + rect.height, height));
+    
+    // Ensure width and height are at least 1 if the original rect was not empty
+    int nw = std::max(rect.width > 0 ? 1 : 0, x2 - x1);
+    int nh = std::max(rect.height > 0 ? 1 : 0, y2 - y1);
+    
+    return cv::Rect(x1, y1, nw, nh);
+}
 
 // Kein imgui.h hier – ImU32 = uint32_t, kompatibel ohne imgui-Abhängigkeit
 

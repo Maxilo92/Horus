@@ -132,7 +132,7 @@ target_link_libraries(Tactileviewer
     ${GLFW_LIBRARIES}
     ${GLEW_LIBRARIES}
     ${CURL_LIBRARIES}
-    SQLite::SQLite3
+    SQLite3::SQLite3
 )
 if(APPLE)
     target_link_libraries(Tactileviewer
@@ -265,7 +265,7 @@ target_link_libraries(unit_tests PRIVATE
     ${GLFW_LIBRARIES}
     OpenGL::GL
     ${CMAKE_DL_LIBS}
-    SQLite::SQLite3
+    SQLite3::SQLite3
 )
 if(APPLE)
     target_link_libraries(unit_tests PRIVATE
@@ -284,7 +284,7 @@ target_link_libraries(integration_tests PRIVATE
     ${GLFW_LIBRARIES}
     OpenGL::GL
     ${CMAKE_DL_LIBS}
-    SQLite::SQLite3
+    SQLite3::SQLite3
 )
 if(APPLE)
     target_link_libraries(integration_tests PRIVATE
@@ -303,7 +303,7 @@ target_link_libraries(functional_tests PRIVATE
     ${GLFW_LIBRARIES}
     OpenGL::GL
     ${CMAKE_DL_LIBS}
-    SQLite::SQLite3
+    SQLite3::SQLite3
 )
 if(APPLE)
     target_link_libraries(functional_tests PRIVATE
