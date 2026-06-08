@@ -98,6 +98,41 @@ void UIManager::renderSettingsWindow() {
             ImGui::EndTabItem();
         }
 
+        // ── AI Dossier ───────────────────────────────────────────────────────
+        if (ImGui::BeginTabItem("AI Dossier")) {
+            ImGui::Spacing();
+            changed |= ImGui::Checkbox("Enable AI Dossiers##s", &m_settings.aiDossierEnabled);
+            ImGui::Separator();
+            
+            ImGui::Text("OpenRouter API Key:");
+            char keyBuf[128];
+            strncpy(keyBuf, m_settings.aiOpenRouterKey.c_str(), sizeof(keyBuf));
+            if (ImGui::InputText("##aiKey", keyBuf, sizeof(keyBuf), ImGuiInputTextFlags_Password)) {
+                m_settings.aiOpenRouterKey = keyBuf;
+                changed = true;
+            }
+            
+            ImGui::Text("VLM Model:");
+            char modelBuf[128];
+            strncpy(modelBuf, m_settings.aiVlmModel.c_str(), sizeof(modelBuf));
+            if (ImGui::InputText("##aiModel", modelBuf, sizeof(modelBuf))) {
+                m_settings.aiVlmModel = modelBuf;
+                changed = true;
+            }
+            ImGui::TextDisabled("Default: google/gemini-flash-1.5");
+            
+            ImGui::Separator();
+            changed |= ImGui::SliderFloat("ReID Threshold##s", &m_settings.aiReidThreshold, 0.5f, 0.95f, "%.2f");
+            changed |= ImGui::SliderInt("Req / Min##s", &m_settings.aiRequestLimitPerMin, 1, 20);
+            changed |= ImGui::SliderFloat("Stability (sec)##s", &m_settings.aiStabilitySec, 1.0f, 10.0f, "%.1f");
+            
+            ImGui::Separator();
+            if (ImGui::Checkbox("Show Dossier Panel##s",   &m_showDossierPanel))   changed = true;
+            if (ImGui::Checkbox("Show Dossier Archive##s", &m_showDossierArchive)) changed = true;
+
+            ImGui::EndTabItem();
+        }
+
         // ── Camera & Zoom ────────────────────────────────────────────────────
         if (ImGui::BeginTabItem("Camera & Zoom")) {
             ImGui::Spacing();
@@ -345,6 +380,58 @@ void UIManager::renderSettingsWindow() {
 
             ImGui::EndDisabled(); // master
 
+            ImGui::EndTabItem();
+        }
+
+        // ── Face Detection & Recognition ─────────────────────────────────────
+        if (ImGui::BeginTabItem("Gesichtserkennung")) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Gesichtserkennung");
+            changed |= ImGui::Checkbox("Aktivieren##fr", &m_settings.faceRecognitionEnabled);
+
+            ImGui::BeginDisabled(!m_settings.faceRecognitionEnabled);
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Erkennungs-Schwelle");
+            ImGui::TextDisabled("Cosine-Similarity: höher = strenger (weniger Fehlerkennungen)");
+            changed |= ImGui::SliderFloat("Erkennungs-Schwelle##fr",
+                &m_settings.faceRecognitionThreshold, 0.10f, 0.90f, "%.2f");
+
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Auto-Registrierung");
+            ImGui::TextDisabled("Mindest-Konfidenz des YuNet-Detektors, um ein neues");
+            ImGui::TextDisabled("unbekanntes Gesicht automatisch zu registrieren.");
+            changed |= ImGui::SliderFloat("Mindest-Konfidenz##fr",
+                &m_settings.faceDetectionMinConfidence, 0.50f, 1.00f, "%.2f");
+
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Gesichts-Box");
+            changed |= ImGui::Checkbox("Gesichts-Box zeichnen##fr", &m_settings.showFaceBoxes);
+            ImGui::BeginDisabled(!m_settings.showFaceBoxes);
+            {
+                // Color picker (ImGui ColorEdit4 works on float[4])
+                static float s_faceColorF[4] = {0.0f, 0.86f, 1.0f, 0.86f};
+                static bool  s_faceColorInit = false;
+                if (!s_faceColorInit) {
+                    if (m_settings.faceBoxColor != 0) {
+                        s_faceColorF[0] = ((m_settings.faceBoxColor >>  0) & 0xFF) / 255.0f;
+                        s_faceColorF[1] = ((m_settings.faceBoxColor >>  8) & 0xFF) / 255.0f;
+                        s_faceColorF[2] = ((m_settings.faceBoxColor >> 16) & 0xFF) / 255.0f;
+                        s_faceColorF[3] = ((m_settings.faceBoxColor >> 24) & 0xFF) / 255.0f;
+                    }
+                    s_faceColorInit = true;
+                }
+                if (ImGui::ColorEdit4("Box-Farbe##fr", s_faceColorF,
+                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar)) {
+                    m_settings.faceBoxColor =
+                        IM_COL32(static_cast<int>(s_faceColorF[0] * 255),
+                                 static_cast<int>(s_faceColorF[1] * 255),
+                                 static_cast<int>(s_faceColorF[2] * 255),
+                                 static_cast<int>(s_faceColorF[3] * 255));
+                    changed = true;
+                }
+            }
+            ImGui::EndDisabled();
+            ImGui::EndDisabled(); // faceRecognitionEnabled
             ImGui::EndTabItem();
         }
 

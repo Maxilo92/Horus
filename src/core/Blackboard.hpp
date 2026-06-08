@@ -57,6 +57,16 @@ struct TrackingStateData {
     bool pixelLockActive = false;
 };
 
+struct FaceDebugState {
+    bool        initOk          = false;
+    std::string detPath;                 // path of loaded detector model
+    std::string recPath;                 // path of loaded recognizer model
+    int         identityCount   = 0;     // registered identities in DB
+    int         callCount       = 0;     // total face-recognition calls made
+    int         lastFacesFound  = 0;     // YuNet faces found in the most recent call
+    int         totalFacesFound = 0;     // cumulative faces found across all calls
+};
+
 struct UICommandState {
     bool lockRequested = false;
     int requestedLockId = -1;
@@ -72,6 +82,10 @@ struct UICommandState {
 
     int manualCaptureTargetId = -1;
     bool screenshotRequested = false;
+
+    // Face identity rename request (from Akte/Analyzer UI)
+    int         renameFaceId = -1;
+    std::string renameFaceName;
 
     bool motionDetectorResetRequested = false;
 
@@ -135,8 +149,15 @@ struct AudioState {
     std::chrono::steady_clock::time_point lastActive;
 };
 
+struct DossierState {
+    bool hasActiveDossier = false;
+    DossierEntry activeDossier;
+    bool updatePending = false;
+    int queueSize = 0;
+};
 
 class Blackboard {
+
 public:
     Blackboard() = default;
     ~Blackboard() = default;
@@ -165,9 +186,7 @@ public:
 
     void updateAudioIntensity(float intensity) {
         std::lock_guard<std::mutex> lock(m_audioMutex);
-        if (intensity > m_audioState.intensity) {
-            m_audioState.intensity = intensity;
-        }
+        m_audioState.intensity = intensity;
         m_audioState.lastActive = std::chrono::steady_clock::now();
     }
 
@@ -223,6 +242,17 @@ public:
         return m_trackingState;
     }
 
+    // --- Face Debug State ---
+    void setFaceDebugState(const FaceDebugState& state) {
+        std::lock_guard<std::mutex> lock(m_faceDebugMutex);
+        m_faceDebugState = state;
+    }
+
+    FaceDebugState getFaceDebugState() const {
+        std::lock_guard<std::mutex> lock(m_faceDebugMutex);
+        return m_faceDebugState;
+    }
+
     // --- UI Commands ---
     void setUICommand(const UICommandState& cmd) {
         std::lock_guard<std::recursive_mutex> lock(m_uiCmdMutex);
@@ -244,6 +274,7 @@ public:
         m_uiCommand.snapshotMidManualTrackId = -1;
         m_uiCommand.snapshotMidManualIdx = -1;
         m_uiCommand.manualCaptureTargetId = -1; // Also reset manual capture to avoid repeated triggers
+        m_uiCommand.renameFaceId = -1;          // Reset rename request after it is consumed once
         return copy;
     }
 
@@ -331,6 +362,12 @@ public:
     void requestManualCapture(int trackId) {
         std::lock_guard<std::recursive_mutex> lock(m_uiCmdMutex);
         m_uiCommand.manualCaptureTargetId = trackId;
+    }
+
+    void requestFaceRename(int faceId, const std::string& name) {
+        std::lock_guard<std::recursive_mutex> lock(m_uiCmdMutex);
+        m_uiCommand.renameFaceId = faceId;
+        m_uiCommand.renameFaceName = name;
     }
 
     void requestScreenshot() {
@@ -458,6 +495,17 @@ public:
         return m_performanceMetrics;
     }
 
+    // --- AI Dossier ---
+    void setDossierState(const DossierState& state) {
+        std::lock_guard<std::mutex> lock(m_dossierMutex);
+        m_dossierState = state;
+    }
+
+    DossierState getDossierState() const {
+        std::lock_guard<std::mutex> lock(m_dossierMutex);
+        return m_dossierState;
+    }
+
 private:
     mutable std::mutex m_settingsMutex;
     SystemSettings m_settings;
@@ -471,6 +519,9 @@ private:
     mutable std::mutex m_trackingMutex;
     TrackingStateData m_trackingState;
 
+    mutable std::mutex m_faceDebugMutex;
+    FaceDebugState m_faceDebugState;
+
     mutable std::recursive_mutex m_uiCmdMutex;
     UICommandState m_uiCommand;
 
@@ -479,6 +530,9 @@ private:
 
     mutable std::mutex m_performanceMutex;
     PerformanceMetrics m_performanceMetrics;
+
+    mutable std::mutex m_dossierMutex;
+    DossierState m_dossierState;
 
     mutable std::mutex m_audioMutex;
     AudioState m_audioState;

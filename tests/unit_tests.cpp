@@ -25,25 +25,27 @@ TEST(MultiTrackerTest, StartsTrackingOnDetection) {
     d.className = "test";
 
     SystemSettings settings;
+    settings.trackerConfirmFrames = 2; // test the confirmed/unconfirmed transition
+
     tracker.update({d}, settings);
-    
+
+    // Track exists internally but is not yet confirmed → getTrackedObjects hides it
     EXPECT_EQ(tracker.getActiveTrackCount(), 1);
+    EXPECT_EQ(tracker.getTrackedObjects(10).size(), 0);
+
+    // Second update: reaches confirmFrames threshold → now visible
+    tracker.update({d}, settings);
     auto objects = tracker.getTrackedObjects(10);
     ASSERT_EQ(objects.size(), 1);
     EXPECT_EQ(objects[0].class_id, 1);
-    EXPECT_FALSE(objects[0].is_confirmed); // Initially false
-
-    // Second update with same detection should confirm it
-    tracker.update({d}, settings);
-    objects = tracker.getTrackedObjects(10);
-    ASSERT_EQ(objects.size(), 1);
-    EXPECT_TRUE(objects[0].is_confirmed); 
+    EXPECT_TRUE(objects[0].is_confirmed);
 }
 
 TEST(MultiTrackerTest, SuccessfulTracking) {
     MultiTracker tracker;
     SystemSettings settings;
-    
+    settings.trackerConfirmFrames = 1; // confirm on first match so track is visible immediately
+
     // First detection
     Detection d1;
     d1.class_id = 1; d1.box = cv::Rect(10, 10, 100, 100); d1.confidence = 0.9f; d1.className = "test";
@@ -62,7 +64,7 @@ TEST(MultiTrackerTest, SuccessfulTracking) {
     auto objects2 = tracker.getTrackedObjects(10);
     ASSERT_EQ(objects2.size(), 1);
     EXPECT_EQ(objects2[0].track_id, track_id); // Stable ID
-    EXPECT_EQ(objects2[0].box.x, 15);
+    EXPECT_NEAR(objects2[0].box.x, 15, 2);     // Kalman smooths, allow ±2px tolerance
     EXPECT_EQ(objects2[0].lost_frames, 0);
     EXPECT_TRUE(objects2[0].is_active);
 }
@@ -70,6 +72,7 @@ TEST(MultiTrackerTest, SuccessfulTracking) {
 TEST(MultiTrackerTest, PredictionOnSignalLoss) {
     MultiTracker tracker;
     SystemSettings settings;
+    settings.trackerConfirmFrames = 1; // confirm on first match so track is visible immediately
     
     // Initialize track with velocity
     Detection d1; d1.class_id = 1; d1.box = cv::Rect(100, 100, 50, 50); d1.className = "test";
@@ -110,6 +113,7 @@ TEST(MultiTrackerTest, TrackRemovalAfterTimeout) {
 TEST(MultiTrackerTest, Kalman6DStateAndLagCompensation) {
     MultiTracker tracker;
     SystemSettings settings;
+    settings.trackerConfirmFrames = 1; // confirm on first match so track is visible immediately
 
     // First detection to initialize target
     Detection d1;

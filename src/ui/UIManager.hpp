@@ -24,6 +24,8 @@
 #include "AnalyzerPanel.hpp"
 #include "AudioVisualizerPanel.hpp"
 #include "ReplayPanel.hpp"
+#include "DossierArchivePanel.hpp"
+#include "UpdateChecker.hpp"
 
 class UIManager : public IModule {
 public:
@@ -41,6 +43,9 @@ public:
     void start() override;
     void stop() override;
 
+    void setDossierDatabase(DossierDatabase* db);
+    void setUpdateChecker(UpdateChecker* uc);
+
     // Runs one full ImGui frame — call from Application::run()
     void update() override;
 
@@ -49,6 +54,8 @@ public:
 
     void loadPersistedSettings(const std::string& path);
     void savePersistedSettings() const;
+
+    // Settings & Injection
 
 private:
     // ── Render helpers ───────────────────────────────────────────────────
@@ -67,6 +74,7 @@ private:
                           const AppStatusState& status);
     void renderSettingsWindow();
     void renderTargetAnalyzer(const TrackingStateData& tracking);
+    void renderDossierPanel(const DossierState& dossier);
 
     // ── Export / utility ─────────────────────────────────────────────────
     bool exportTarget(const UniqueTargetRecord& record);
@@ -84,11 +92,13 @@ private:
     void syncColorEditorsFromSettings();
     void pushSettingsToBlackboard();
 
-    // ── References ───────────────────────────────────────────────────────
+    // ── External Dependencies ────────────────────────────────────────────
     Blackboard&   m_blackboard;
     ROIManager&   m_roiManager;
     DataLogger&   m_dataLogger;
     AudioEngine&  m_audioEngine;
+    DossierDatabase* m_dossierDb = nullptr;
+    UpdateChecker*   m_updateChecker = nullptr;
     GLFWwindow*   m_window;
     std::string   m_settingsPath;
     LogFn         m_log;
@@ -105,6 +115,7 @@ private:
     std::unique_ptr<AnalyzerPanel>   m_analyzerPanel;
     std::unique_ptr<AudioVisualizerPanel> m_audioVisualizerPanel;
     std::unique_ptr<ReplayPanel>     m_replayPanel;
+    std::unique_ptr<DossierArchivePanel> m_dossierArchivePanel;
 
     // ── Settings (local; pushed to Blackboard on change) ─────────────────
     SystemSettings m_settings;
@@ -137,6 +148,21 @@ private:
     float m_frameTimeMs = 0.0f;
     std::chrono::steady_clock::time_point m_appStart;
 
+    // ── Splash screen ─────────────────────────────────────────────────────
+    bool  m_splashActive   = true;
+    float m_splashMinSec   = 3.0f;
+    bool  m_splashTimerSet = false;
+    std::chrono::steady_clock::time_point m_splashShownAt;
+    void  renderSplashScreen();
+
+    // ── Setup wizard (first-run) ──────────────────────────────────────────
+    bool m_setupWizardActive = false;
+    int  m_setupWizardStep   = 0;
+    char m_wizardCameraInput[64]  = {"1"};
+    int  m_wizardAudioIdx         = -1;
+    int  m_wizardModelIdx         = 0;   // 0 = yolov8s (genau), 1 = yolov8n (schnell)
+    void renderSetupWizard();
+
     // ── UI state booleans ────────────────────────────────────────────────
     bool m_showSettingsWindow = false;
     bool m_showDataPanel      = true;
@@ -144,15 +170,21 @@ private:
     bool m_showDevConsole     = false;
     bool m_showTargetAnalyzer = true;
     bool m_showShortcutHelp   = false;
+    bool m_showDossierPanel   = true;
+    bool m_showDossierArchive = false;
     int  m_devConsoleTab      = 0;
     char m_dataPanelFilter[128] = {0};
+    bool m_showUpdateDialog     = false;
+    bool m_updateDismissed      = false;
+    void renderUpdateDialog();
     bool m_showFeedbackWindow   = false;
     char m_feedbackBuf[1024]    = {0};
     int  m_feedbackCategoryIdx  = 0;
     int  m_feedbackPriorityIdx  = 2; // Normal
     char m_feedbackContactBuf[128] = {0};
     std::string m_feedbackStatus;
-    bool m_screenshotPending    = false;
+    bool m_screenshotPending      = false;
+    bool m_resetWindowsPending    = false;
 
     // ── Target Analyzer Selection ────────────────────────────────────────
     int m_selectedAnalyzerTargetId = -1;

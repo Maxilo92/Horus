@@ -55,7 +55,9 @@ void DevConsolePanel::render(bool& show,
                              std::function<void(LogLevel, const std::string&)> logFn,
                              GLFWwindow* window,
                              float remoteRttMs,
-                             const std::string& activeModelName) {
+                             const std::string& activeModelName,
+                             const TrackingStateData* trackingState,
+                             const FaceDebugState* faceDbg) {
     if (!show) return;
 
     ImGui::Begin("Dev Console", &show);
@@ -327,6 +329,96 @@ void DevConsolePanel::render(bool& show,
                     ImGui::EndTable();
                 }
             }
+
+            ImGui::EndTabItem();
+        }
+
+        // ── TAB: Face / KI ───────────────────────────────────────────────────
+        if (ImGui::BeginTabItem("Face / KI")) {
+
+            // ── Face Recognizer Status ───────────────────────────────────────
+            ImGui::TextDisabled("Face Recognizer");
+            if (faceDbg) {
+                if (faceDbg->initOk) {
+                    ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "[OK]");
+                } else {
+                    ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "[FEHLER - nicht geladen]");
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled("Identitaeten: %d", faceDbg->identityCount);
+
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
+                ImGui::TextWrapped("Det:  %s", faceDbg->detPath.empty() ? "(kein Pfad)" : faceDbg->detPath.c_str());
+                ImGui::TextWrapped("Rec:  %s", faceDbg->recPath.empty() ? "(kein Pfad)" : faceDbg->recPath.c_str());
+                ImGui::PopStyleColor();
+
+                ImGui::Separator();
+                ImGui::Columns(2, "facestats", false);
+                ImGui::TextDisabled("Aufrufe gesamt");  ImGui::NextColumn();
+                ImGui::Text("%d", faceDbg->callCount);  ImGui::NextColumn();
+                ImGui::TextDisabled("Gesichter (letzter Aufruf)"); ImGui::NextColumn();
+                ImGui::Text("%d", faceDbg->lastFacesFound); ImGui::NextColumn();
+                ImGui::TextDisabled("Gesichter gesamt");  ImGui::NextColumn();
+                ImGui::Text("%d", faceDbg->totalFacesFound); ImGui::NextColumn();
+                ImGui::Columns(1);
+            } else {
+                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.1f, 1.0f), "Keine Debug-Daten verfuegbar");
+            }
+
+            // ── Live Controls ────────────────────────────────────────────────
+            ImGui::Separator();
+            ImGui::TextDisabled("Live-Einstellungen");
+            settingsChanged |= ImGui::Checkbox("Gesichtserkennung aktiv##face", &settings.faceRecognitionEnabled);
+            settingsChanged |= ImGui::Checkbox("Gesichts-Boxen anzeigen##face", &settings.showFaceBoxes);
+            ImGui::SetNextItemWidth(220.0f);
+            settingsChanged |= ImGui::SliderFloat("Erkennungs-Schwellwert##face",
+                &settings.faceRecognitionThreshold, 0.1f, 1.0f, "%.3f");
+            ImGui::SetNextItemWidth(220.0f);
+            settingsChanged |= ImGui::SliderFloat("Erkennungs-Mindestkonfidenz##face",
+                &settings.faceDetectionMinConfidence, 0.1f, 1.0f, "%.3f");
+
+            // ── Per-Track Face State ─────────────────────────────────────────
+            ImGui::Separator();
+            ImGui::TextDisabled("Pro-Track Gesichtszustand");
+            if (trackingState && !trackingState->activeTracks.empty()) {
+                if (ImGui::BeginTable("FaceTrackTable", 4,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                        ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp,
+                        ImVec2(0, 160.0f))) {
+                    ImGui::TableSetupScrollFreeze(0, 1);
+                    ImGui::TableSetupColumn("Track",    ImGuiTableColumnFlags_WidthFixed, 42.0f);
+                    ImGui::TableSetupColumn("Box",      ImGuiTableColumnFlags_WidthFixed, 72.0f);
+                    ImGui::TableSetupColumn("ID",       ImGuiTableColumnFlags_WidthFixed, 32.0f);
+                    ImGui::TableSetupColumn("Name",     ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableHeadersRow();
+
+                    for (const auto& obj : trackingState->activeTracks) {
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::Text("%d", obj.track_id);
+                        ImGui::TableSetColumnIndex(1);
+                        ImGui::Text("%dx%d", obj.box.width, obj.box.height);
+                        ImGui::TableSetColumnIndex(2);
+                        if (obj.face_id >= 0)
+                            ImGui::Text("%d", obj.face_id);
+                        else
+                            ImGui::TextDisabled("--");
+                        ImGui::TableSetColumnIndex(3);
+                        if (!obj.face_name.empty())
+                            ImGui::TextUnformatted(obj.face_name.c_str());
+                        else
+                            ImGui::TextDisabled("(unbekannt)");
+                    }
+                    ImGui::EndTable();
+                }
+            } else {
+                ImGui::TextDisabled("Keine aktiven Tracks");
+            }
+
+            // ── KI / Dossier ─────────────────────────────────────────────────
+            ImGui::Separator();
+            ImGui::TextDisabled("KI / Dossier");
+            settingsChanged |= ImGui::Checkbox("KI-Dossier aktivieren##ai", &settings.aiDossierEnabled);
 
             ImGui::EndTabItem();
         }

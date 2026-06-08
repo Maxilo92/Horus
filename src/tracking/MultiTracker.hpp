@@ -55,9 +55,15 @@ public:
 
     // Aktualisiert alle Tracks mit neuen Detektionen. Thread-safe nicht
     // (muss im Worker-Thread ausgeführt werden).
+    // detectorRan: true when the YOLO detector produced these results this frame.
+    // false when detections come from reacquisition only (detector still running).
+    // When false and detections are empty, lost_frames is NOT incremented so tracks
+    // don't disappear while the async detector is between frames.
     void update(const std::vector<Detection>& detections,
                 const SystemSettings& settings,
-                int lagFrames = 0);
+                int lagFrames = 0,
+                cv::Point2d cameraMotion = {0.0, 0.0},
+                bool detectorRan = true);
 
     // Gibt alle aktiven Tracks als TrackedObject für das HUD zurück
     std::vector<TrackedObject> getTrackedObjects(int maxTrailLength) const;

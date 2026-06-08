@@ -55,6 +55,34 @@ void AnalyzerPanel::render(int& selectedId, std::vector<UniqueTargetRecord>& his
     ImGui::TextColored(ImVec4(0, 1, 0.5f, 1), "TARGET REPORT: ID %03d", rec.track_id);
     ImGui::Separator();
 
+    // --- Face identity / name editing -----------------------------------
+    if (rec.face_id != -1) {
+        ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "GESICHT: %s",
+                           rec.face_name.empty() ? "(unbenannt)" : rec.face_name.c_str());
+
+        // Seed the edit buffer from the recognized name once.
+        if (!uiState.name_buf_initialized) {
+            snprintf(uiState.name_buf, sizeof(uiState.name_buf), "%s", rec.face_name.c_str());
+            uiState.name_buf_initialized = true;
+        }
+
+        ImGui::SetNextItemWidth(180.0f);
+        ImGui::InputText("##facename", uiState.name_buf, sizeof(uiState.name_buf));
+        ImGui::SameLine();
+        if (ImGui::Button("Name speichern")) {
+            std::string newName = uiState.name_buf;
+            if (!newName.empty()) {
+                blackboard.requestFaceRename(rec.face_id, newName);
+                rec.face_name = newName;  // Immediate UI feedback
+                if (logFn) logFn(LogLevel::INFO,
+                    "Face #" + std::to_string(rec.face_id) + " umbenannt in \"" + newName + "\"");
+            }
+        }
+    } else {
+        ImGui::TextDisabled("GESICHT: kein Gesicht erkannt");
+    }
+    ImGui::Separator();
+
     if (ImGui::SmallButton(uiState.show_full_gallery ? "[ VIEW: SINGLE ]" : "[ VIEW: GALLERY ]"))
         uiState.show_full_gallery = !uiState.show_full_gallery;
 

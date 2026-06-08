@@ -20,10 +20,17 @@ static SystemSettings MakeStandardSettings() {
 }
 
 static std::string GetDefaultSettingsPath() {
+#ifdef _WIN32
+    const char* base = std::getenv("APPDATA");
+    std::filesystem::path p = base ? base : ".";
+    p /= "Tactileviewer";
+#else
     const char* home = std::getenv("HOME");
-    std::filesystem::path base = home ? home : ".";
-    base /= ".tactileviewer";
-    return (base / "settings.ini").string();
+    std::filesystem::path p = home ? home : ".";
+    p /= ".tactileviewer";
+#endif
+    std::filesystem::create_directories(p);
+    return (p / "settings.ini").string();
 }
 
 static bool ParseBoolSetting(const std::string& v) {
@@ -88,6 +95,7 @@ void UIManager::savePersistedSettings() const {
     }
 
     out << "# Tactileviewer persistent settings\n";
+    out << "setup_complete=1\n";
     out << "cameraAddress="       << (m_cameraAddress.empty() ? "1" : m_cameraAddress) << '\n';
     out << "showSettingsWindow="  << (m_showSettingsWindow ? 1 : 0) << '\n';
     out << "showDevConsole="      << (m_showDevConsole ? 1 : 0) << '\n';
@@ -168,12 +176,25 @@ void UIManager::savePersistedSettings() const {
     out << "subZoomsUseSeparateWindows=" << (s.subZoomsUseSeparateWindows ? 1 : 0) << '\n';
     out << "subZoomPaddingPx="     << s.subZoomPaddingPx << '\n';
     out << "subZoomMagnification=" << s.subZoomMagnification << '\n';
-    out << "faceRecognitionEnabled="   << (s.faceRecognitionEnabled ? 1 : 0) << '\n';
-    out << "faceRecognitionThreshold=" << s.faceRecognitionThreshold << '\n';
+    out << "faceRecognitionEnabled="       << (s.faceRecognitionEnabled ? 1 : 0) << '\n';
+    out << "faceRecognitionThreshold="     << s.faceRecognitionThreshold << '\n';
+    out << "faceDetectionMinConfidence="   << s.faceDetectionMinConfidence << '\n';
+    out << "showFaceBoxes="               << (s.showFaceBoxes ? 1 : 0) << '\n';
+    out << "faceBoxColor="                << s.faceBoxColor << '\n';
     out << "debugShowRawDetections="   << (s.debugShowRawDetections ? 1 : 0) << '\n';
     out << "debugShowKalmanVectors="    << (s.debugShowKalmanVectors ? 1 : 0) << '\n';
     out << "debugFreezeVision="         << (s.debugFreezeVision ? 1 : 0) << '\n';
     out << "debugPerformanceGraphs="    << (s.debugPerformanceGraphs ? 1 : 0) << '\n';
+
+    // AI Dossier Settings (Plan 13)
+    out << "aiDossierEnabled="     << (s.aiDossierEnabled ? 1 : 0) << '\n';
+    out << "aiOpenRouterKey="      << s.aiOpenRouterKey << '\n';
+    out << "aiVlmModel="           << s.aiVlmModel << '\n';
+    out << "aiReidThreshold="      << s.aiReidThreshold << '\n';
+    out << "aiRequestLimitPerMin=" << s.aiRequestLimitPerMin << '\n';
+    out << "aiStabilitySec="       << s.aiStabilitySec << '\n';
+    out << "showDossierPanel="     << (m_showDossierPanel ? 1 : 0) << '\n';
+    out << "showDossierArchive="   << (m_showDossierArchive ? 1 : 0) << '\n';
 
     out << "audioEnabled="         << (s.audioEnabled ? 1 : 0) << '\n';
     out << "audioMasterVolume="    << s.audioMasterVolume << '\n';
@@ -228,8 +249,10 @@ void UIManager::loadPersistedSettings(const std::string& path) {
     std::filesystem::path p(m_settingsPath.empty() ? GetDefaultSettingsPath() : m_settingsPath);
     std::ifstream in(p);
     if (!in) {
+        // No settings file — first run
         if (m_cameraAddress.empty()) m_cameraAddress = "1";
         std::filesystem::create_directories(p.parent_path());
+        m_setupWizardActive = true;
         savePersistedSettings();
         return;
     }
@@ -248,7 +271,8 @@ void UIManager::loadPersistedSettings(const std::string& path) {
         const std::string key = line.substr(0, sep);
         const std::string val = line.substr(sep + 1);
         try {
-            if      (key == "cameraAddress")             m_cameraAddress                 = val;
+            if      (key == "setup_complete")             { /* recognized; wizard stays inactive */ }
+            else if (key == "cameraAddress")             m_cameraAddress                 = val;
             else if (key == "detectorModel")             s.detectorModel                 = std::stoi(val);
             else if (key == "showSettingsWindow")         m_showSettingsWindow            = ParseBoolSetting(val);
             else if (key == "showDevConsole")             m_showDevConsole                = ParseBoolSetting(val);
@@ -326,8 +350,21 @@ void UIManager::loadPersistedSettings(const std::string& path) {
             else if (key == "subZoomsUseSeparateWindows") s.subZoomsUseSeparateWindows    = ParseBoolSetting(val);
             else if (key == "subZoomPaddingPx")           s.subZoomPaddingPx              = std::stoi(val);
             else if (key == "subZoomMagnification")       s.subZoomMagnification          = std::stof(val);
-            else if (key == "faceRecognitionEnabled")     s.faceRecognitionEnabled        = ParseBoolSetting(val);
-            else if (key == "faceRecognitionThreshold")   s.faceRecognitionThreshold      = std::stof(val);
+            else if (key == "faceRecognitionEnabled")       s.faceRecognitionEnabled        = ParseBoolSetting(val);
+            else if (key == "faceRecognitionThreshold")     s.faceRecognitionThreshold      = std::stof(val);
+            else if (key == "faceDetectionMinConfidence")   s.faceDetectionMinConfidence    = std::stof(val);
+            else if (key == "showFaceBoxes")                s.showFaceBoxes                 = ParseBoolSetting(val);
+            else if (key == "faceBoxColor")                 s.faceBoxColor = static_cast<uint32_t>(std::stoul(val));
+            // AI Dossier Settings (Plan 13)
+            else if (key == "aiDossierEnabled")           s.aiDossierEnabled              = ParseBoolSetting(val);
+            else if (key == "aiOpenRouterKey")            s.aiOpenRouterKey               = val;
+            else if (key == "aiVlmModel")                 s.aiVlmModel                    = val;
+            else if (key == "aiReidThreshold")            s.aiReidThreshold               = std::stof(val);
+            else if (key == "aiRequestLimitPerMin")       s.aiRequestLimitPerMin          = std::stoi(val);
+            else if (key == "aiStabilitySec")             s.aiStabilitySec                = std::stof(val);
+            else if (key == "showDossierPanel")           m_showDossierPanel              = ParseBoolSetting(val);
+            else if (key == "showDossierArchive")         m_showDossierArchive            = ParseBoolSetting(val);
+
             else if (key == "debugShowRawDetections")     s.debugShowRawDetections        = ParseBoolSetting(val);
             else if (key == "debugShowKalmanVectors")      s.debugShowKalmanVectors         = ParseBoolSetting(val);
             else if (key == "debugFreezeVision")           s.debugFreezeVision              = ParseBoolSetting(val);
@@ -383,7 +420,7 @@ void UIManager::loadPersistedSettings(const std::string& path) {
                 }
             }
         } catch (...) {
-            std::cerr << "[WARN] Ignoring invalid settings entry: " << key << std::endl;
+            std::cerr << "[WARN] Ignoring malformed settings value for key: \"" << key << "\"" << std::endl;
         }
     }
     if (m_cameraAddress.empty()) m_cameraAddress = "1";
@@ -399,6 +436,18 @@ void UIManager::loadPersistedSettings(const std::string& path) {
                 if (!pr.active) m_roiManager.toggleROI(id);
             }
         }
+    }
+
+    // If the loaded file has no setup_complete key (e.g. migrated from an older version),
+    // show the wizard on next frame so the user can confirm/adjust their setup.
+    {
+        std::ifstream recheck(p);
+        bool hasSetupComplete = false;
+        std::string chkLine;
+        while (std::getline(recheck, chkLine)) {
+            if (chkLine.rfind("setup_complete=", 0) == 0) { hasSetupComplete = true; break; }
+        }
+        if (!hasSetupComplete) m_setupWizardActive = true;
     }
 }
 

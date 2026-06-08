@@ -29,6 +29,11 @@ void ROIManager::removeROI(int id) {
         m_zones.end());
 }
 
+void ROIManager::clearAll() {
+    std::lock_guard<std::mutex> lk(m_mutex);
+    m_zones.clear();
+}
+
 // -----------------------------------------------------------------------
 // toggleROI
 // -----------------------------------------------------------------------

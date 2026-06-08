@@ -44,9 +44,10 @@ struct TrackedObject {
     float vx = 0.0f;          // Pixel velocity X (Kalman-estimated)
     float vy = 0.0f;          // Pixel velocity Y (Kalman-estimated)
 
-    // Face Recognition (Plan 11)
+    // Face Recognition
     int         face_id   = -1;
     std::string face_name = "";
+    cv::Rect    face_box;          // Face bounding box in frame-space (empty = no face detected)
 
     // Centroid-History für Trail-Rendering
     std::vector<cv::Point> trail;
@@ -114,6 +115,16 @@ struct UniqueTargetRecord {
     int gallery_version = 0;
 };
 
+struct DossierEntry {
+    std::string uuid;
+    std::string type;
+    std::vector<float> embedding;
+    std::string first_seen;
+    std::string last_seen;
+    std::string dossier_text;
+    int sightings_count = 0;
+};
+
 struct SystemSettings {
     // ----------------------------------------------------------------
     // Detector Settings
@@ -131,13 +142,13 @@ struct SystemSettings {
     // ----------------------------------------------------------------
     // Multi-Tracker Settings
     // ----------------------------------------------------------------
-    int   trackerMaxLostFrames    = 25;       // Slightly reduced to clean up ghosts faster
+    int   trackerMaxLostFrames    = 12;       // Reduced: removes ghost tracks faster
     float trackerMinMatchIOU      = 0.20f;    // Slightly lower IOU requirement for 4K jitter
     int   trackerMaxTrailLength   = 30;
     bool  showTrails              = true;
-    float trackerMinMatchScore    = 0.25f;    // Increased from 0.15
-    float trackerMaxCenterDistPx  = 500.0f;   // Increased from 200 for 4K
-    int   trackerConfirmFrames    = 2;        // Frames until a track is confirmed
+    float trackerMinMatchScore    = 0.35f;    // Raised from 0.25 to reduce spurious matches
+    float trackerMaxCenterDistPx  = 300.0f;   // Reduced from 500 to prevent cross-track matching
+    int   trackerConfirmFrames    = 3;        // Box visible only after 3 consecutive matches
 
     // ----------------------------------------------------------------
     // Tracking Re-acquisition Settings (Plan 11)
@@ -180,6 +191,7 @@ struct SystemSettings {
     bool  enableTracking     = true;   // Toggle tracking pipeline
     int   detectionSkipFrames = 0;     // Run detector every N+1 frames (0 = every frame)
     bool  grayscaleInput     = false;  // Convert to grayscale before detection (speed)
+    bool  enableCameraMotionComp = true; // Ego-Motion: Sparse Optical Flow + RANSAC zur Kamerabewegungskompensation
 
     // ----------------------------------------------------------------
     // Console / Logging Settings
@@ -278,6 +290,12 @@ struct SystemSettings {
     float audioLockPulseSolutionDurMs  = 450.0f;
 
     // ----------------------------------------------------------------
+    // Audio Capture Settings
+    // ----------------------------------------------------------------
+    bool     audioCaptureEnabled      = false;
+    uint32_t audioCaptureDeviceId     = 0; // 0 = default
+
+    // ----------------------------------------------------------------
     // Sub Zooms Settings
     // ----------------------------------------------------------------
     bool  subZoomsEnabled             = true;
@@ -293,10 +311,23 @@ struct SystemSettings {
     int         remoteInferencePort    = 8000;
 
     // ----------------------------------------------------------------
-    // Face Recognition Settings (Plan 11)
+    // Face Detection / Recognition Settings
     // ----------------------------------------------------------------
-    bool  faceRecognitionEnabled   = true;
-    float faceRecognitionThreshold = 0.36f; // Cosine similarity threshold for SFace
+    bool        faceRecognitionEnabled      = true;
+    float       faceRecognitionThreshold    = 0.36f;  // Cosine similarity for SFace identity match
+    float       faceDetectionMinConfidence  = 0.75f;  // Min YuNet confidence to auto-register new face
+    bool        showFaceBoxes               = true;   // Draw separate box around each detected face
+    uint32_t    faceBoxColor                = 0;      // 0 = default cyan (IM_COL32(0,220,255,220))
+
+    // ----------------------------------------------------------------
+    // AI Dossier Settings (Plan 13)
+    // ----------------------------------------------------------------
+    bool        aiDossierEnabled      = true;
+    std::string aiOpenRouterKey       = "";
+    std::string aiVlmModel            = "google/gemini-flash-1.5";
+    float       aiReidThreshold       = 0.75f;
+    int         aiRequestLimitPerMin  = 5;
+    float       aiStabilitySec        = 3.0f;
 
     // ----------------------------------------------------------------
     // Debug & Performance Settings
@@ -318,6 +349,8 @@ struct ConsoleEntry {
     std::string message;
     float       timestamp = 0.0f;  // seconds since app start
 };
+
+using LogFn = std::function<void(LogLevel, const std::string&)>;
 
 #endif // COMMON_HPP
 

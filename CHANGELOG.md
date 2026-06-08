@@ -44,7 +44,7 @@
 - **Build Stabilization**: Fixed a pre-existing build error in `DevConsolePanel.cpp` where `trackMs` was used instead of the correct `trackTimeMs` variable.
 - **Test Coverage**: Added new unit tests `VelocityDamping` and `DuplicatePreventionLostTrack` to verify tracking stability and expanded existing test tolerances to account for Kalman smoothing.
 
-## [1.15.2] - 2026-06-07
+## [1.16.1] - 2026-06-07
 
 ### Optimized
 - **Zero-Copy Display Pipeline**: Refactored the triple-buffering mechanism in `Blackboard` to use shallow Mat assignments for the UI thread. This eliminates expensive 24MB+ memory copies of 4K frames on the render thread, significantly reducing micro-stutters and CPU load.
@@ -331,7 +331,7 @@
 - `Common.hpp`: `SystemSettings` um `motionHeatmapOverlay` und `motionHeatmapDecay` erweitert.
 - `Application.hpp/cpp`: Pipeline-Integration, Texture-Sync (Worker → Render Thread) und Einstellungs-Persistenz implementiert.
 
-## [1.12.0] - 2026-06-06
+## [1.11.13] - 2026-06-06
 
 ### Added
 
@@ -429,7 +429,7 @@
   - **Independent Motion Logging**: Logs motion events separately (under class name `"Motion"` and track ID offset by 10000) unless they overlap with existing tracked targets (overlap ratio > 0.2).
   - **Persistence & Presets**: Configured `settings.ini` to persist sub zoom settings across app launches.
 
-## [1.11.5] - 2026-06-06
+## [1.11.6] - 2026-06-06
 
 ### Added
 
@@ -626,9 +626,6 @@
 - **Target Size Metrics Display**: Enhanced the Target Zoom overlay text to display the original HD bounding box coordinates alongside the high-resolution crop dimensions (e.g. `600x600 (HD: 200x200)`).
 - **Test Discoverability Fix**: Increased GTest discovery timeout in CMake to 30 seconds to support library loading overhead on macOS.
 - **Unit Testing**: Added a coordinate scaling math test verifying exact conversions and bounds clamping logic.
-
-## [1.10.4] - 2026-06-05
-### Added
 - **Build and Run Automation:** Created `run.sh` in the project root to automate the build directory configuration (`cmake`), parallelized compilation (`make -j`), and application launch processes.
 
 ## [1.10.3] - 2026-06-05
@@ -675,10 +672,6 @@
 - **Defensive bbox validation in `renderZoomWindow()`:** Added a pre-crop check that validates the locked target's bounding box (non-zero size, fully inside frame dimensions). If the box is degenerate or stale, the function renders an "INVALID TARGET BOUNDS" message instead of attempting an out-of-bounds `cv::Mat` crop.
 
 ## [1.9.0] - 2026-06-05
-### Fixed
-- **Target Locking:** Fixed mouse click targeting inside the Camera View window by replacing `!WantCaptureMouse` with `ImGui::IsWindowHovered()`, allowing targets to be correctly locked by clicking on their bounding boxes.
-
-## [1.9.0] - 2026-06-05
 ### Added
 - **ROI Management (Plan 04):** New `ROIManager` module implementing up to 4 independent rectangular surveillance zones.
 - **Drag-to-Draw:** In Camera View, activate Edit Mode in the ROI tab and drag to define zones. Right-click cancels an in-progress drag.
@@ -686,6 +679,8 @@
 - **ROI Overlay:** Active zones rendered as semi-transparent green rectangles with labels directly on the Camera View. Inactive zones shown in gray. Controlled by `showROIOverlay` toggle.
 - **ROI Dev Console Tab:** New "ROI" tab with Edit Mode toggle, zone table (ID/Label/Rect/Enable/Delete), "Clear All" button, and zone label editing.
 - **Auto-Exit Edit Mode:** Automatically exits edit mode when 4 zones are drawn (maximum capacity reached).
+### Fixed
+- **Target Locking:** Fixed mouse click targeting inside the Camera View window by replacing `!WantCaptureMouse` with `ImGui::IsWindowHovered()`, allowing targets to be correctly locked by clicking on their bounding boxes.
 
 ## [1.8.0] - 2026-06-05
 ### Added
@@ -708,9 +703,18 @@
 ## [1.7.1] - 2026-06-05
 ### Added
 - **UI Safety Hardening:** Implemented a mandatory "Enable Admin Actions" checkbox for destructive operations (Reset/Quit) to prevent accidental closure from phantom input or glitches.
+- **Live Camera Selection UI:** System tab now contains a full camera-source panel with:
+  - Status badge showing current active source (green = active, red = failed)
+  - Quick-select combo dropdown (Camera 0–5, RTSP, HTTP presets)
+  - Manual `InputText` field for any numeric ID, device path (`/dev/video0`), or full network URI (`rtsp://...`, `http://...`)
+  - `Apply` button (disabled during pending swap) that triggers a thread-safe hot-swap
+  - `Switching...` indicator while the worker thread is reconnecting
+- **`CameraModule::close()`:** New public method to safely release the current capture without destroying the object, enabling hot-swap.
 ### Fixed
 - **HUD Synchronization:** Restored the `lockedTarget` reference to the `HUD::render` loop and updated the status window to display real-time lock status (LOCKED/LOST/ONLINE).
 - **Type Stability:** Corrected `ImVec` type mismatches in the Dev Console.
+### Changed
+- Camera hot-swap is fully thread-safe: the UI sets an atomic flag + mutex-protected address; the worker thread performs the actual `close()`/`open()` sequence and writes the result status back.
 
 ## [1.7.0] - 2026-06-05
 
@@ -719,18 +723,6 @@
 - **Worker Synchronization:** Fixed a race condition where UI-thread lock requests were being overwritten or ignored by the tracking worker thread.
 - **HUD Telemetry Restoration:** Restored the "TARGET" status block in the HUD, providing real-time data for the currently locked track.
 - **Visual Highlighting:** Re-implemented distinctive red highlighting for locked targets in both the Camera View and Data Panel.
-
-## [1.7.1] - 2026-06-05
-### Added
-- **Live Camera Selection UI:** System tab now contains a full camera-source panel with:
-  - Status badge showing current active source (green = active, red = failed)
-  - Quick-select combo dropdown (Camera 0–5, RTSP, HTTP presets)
-  - Manual `InputText` field for any numeric ID, device path (`/dev/video0`), or full network URI (`rtsp://...`, `http://...`)
-  - `Apply` button (disabled during pending swap) that triggers a thread-safe hot-swap
-  - `Switching...` indicator while the worker thread is reconnecting
-- **`CameraModule::close()`:** New public method to safely release the current capture without destroying the object, enabling hot-swap.
-### Changed
-- Camera hot-swap is fully thread-safe: the UI sets an atomic flag + mutex-protected address; the worker thread performs the actual `close()`/`open()` sequence and writes the result status back.
 
 ## [1.6.8] - 2026-06-05
 ### Changed
@@ -750,7 +742,7 @@
 - **Linker Error Resolution:** Re-implemented the `Application::log` function to ensure correct symbol resolution and cross-thread diagnostic stability.
 - **Improved Console Mirroring:** Diagnostic logs are now mirrored to stdout/stderr for easier debugging during App Bundle execution.
 
-## [1.6.4] - 2026-06-05
+## [1.6.5b] - 2026-06-05
 
 ### Added
 - **Tabbed Dev Console:** Complete overhaul with 5 tabs — System, Detector, Tracker, HUD, Console.
@@ -807,7 +799,7 @@
 - **Camera Config:** Set default camera ID to 1 as requested by the user.
 - **Architecture Regression:** Resolved the regression where the camera feed was rendered as a background instead of a windowed component.
 
-## [1.5.3] - 2026-06-05
+## [1.6.1b] - 2026-06-05
 ### Fixed
 - **ImGui API Compatibility:** Fixed a build error where `DockSpaceOverViewport` was called with incorrect parameters. Corrected the signature to match the Dear ImGui `docking` branch.
 

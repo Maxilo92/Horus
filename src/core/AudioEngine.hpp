@@ -7,12 +7,18 @@
 // Military-grade audible feedback module.
 // Design constraints (per GEMINI.md):
 //  • Zero heap allocation in the render/worker hot path.
-//  • PCM samples are synthesised once during init()/applyConfig() and stored
-//    as registered SystemSoundIDs (macOS AudioToolbox).
-//  • AudioServicesPlaySystemSound() is non-blocking and thread-safe.
+//  • PCM samples are synthesised once during init()/applyConfig().
+//  • Playback is non-blocking and thread-safe on all platforms.
 // ---------------------------------------------------------------------------
 
-#include <AudioToolbox/AudioToolbox.h>
+#ifdef __APPLE__
+#  include <AudioToolbox/AudioToolbox.h>
+#elif defined(_WIN32)
+#  include <windows.h>
+#  include <mmdeviceapi.h>
+#  include <audioclient.h>
+#  include <audiopolicy.h>
+#endif
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -111,6 +117,11 @@ public:
     // Fire-and-forget; safe to call from the UI thread.
     void startLockPulseTest();
 
+    // Current lock strength in [0, 1]; used by the audio visualizer.
+    float getInstantIntensity() const { return m_lockStrength.load(); }
+
+    bool isPulseEnabled() const { return m_cfg.lockPulseEnabled; }
+
     // Returns true if enough time has passed since the last motion beep.
     bool motionCooldownElapsed();
 
@@ -125,9 +136,17 @@ private:
     // reference to the raw data pointer for the lifetime of the AudioFileID.
     struct SoundBuffer {
         std::vector<int16_t>   samples;          // PCM data (host byte order)
+#ifdef __APPLE__
         std::vector<uint8_t>*  aiffBlob = nullptr; // Heap-allocated AIFF container
         std::string            tempFilePath;
         SystemSoundID          soundID  = 0;
+#elif defined(_WIN32)
+        IAudioClient*          audioClient  = nullptr;
+        IAudioRenderClient*    renderClient = nullptr;
+        HANDLE                 eventHandle  = nullptr;
+        std::atomic<bool>      playing{false};
+        std::thread            drainThread;
+#endif
         bool                   valid    = false;
 
         void dispose();

@@ -107,10 +107,12 @@ MultiTracker::MultiTracker() : m_nextId(0) {}
 
 void MultiTracker::update(const std::vector<Detection>& detections,
                           const SystemSettings& settings,
-                          int lagFrames)
+                          int lagFrames,
+                          cv::Point2d cameraMotion,
+                          bool detectorRan)
 {
     const int nDets = static_cast<int>(detections.size());
-    const int safeLag = std::clamp(lagFrames, 0, 30);
+    const int safeLag = std::clamp(lagFrames, 0, 30); // 30 frames ≈ 1 s at 30 fps, caps extreme network jitter
 
     // --- Phase 1: Kalman-Predict für alle aktiven Tracks ---
     std::vector<int>     trackIds;
@@ -126,21 +128,40 @@ void MultiTracker::update(const std::vector<Detection>& detections,
 
     const int nTracks = static_cast<int>(trackIds.size());
 
-    // --- Phase 2: Hybride Cost-Matrix berechnen ---
-    // Max. erlaubte Zentrum-Distanz für ein Match:
-    // Skaliert mit der typischen Objektgröße, mind. 150px.
-    // Erlaubt schnell-bewegten Objekten dennoch gematcht zu werden.
-    const float maxCenterDist = settings.trackerMaxCenterDistPx; // Frame-Pixel
+    // --- Kamerabewegungskompensation (Ego-Motion) ---
+    // Alle Track-Positionen werden um die inverse Kamerabewegung verschoben,
+    // damit stationäre Objekte bei bewegter Kamera korrekt gematcht werden.
+    // statePre  → für Matching (Phase 2)
+    // statePost → für Coast-Track-Anzeige und Trail
+    if ((cameraMotion.x != 0.0 || cameraMotion.y != 0.0) && nTracks > 0) {
+        const int dx = static_cast<int>(std::round(cameraMotion.x));
+        const int dy = static_cast<int>(std::round(cameraMotion.y));
+        for (int i = 0; i < nTracks; ++i) {
+            auto& track = m_tracks.at(trackIds[i]);
+            track.kf.statePre.at<double>(0)  -= cameraMotion.x;
+            track.kf.statePre.at<double>(1)  -= cameraMotion.y;
+            track.kf.statePost.at<double>(0) -= cameraMotion.x;
+            track.kf.statePost.at<double>(1) -= cameraMotion.y;
+            predictedBoxes[i].x -= dx;
+            predictedBoxes[i].y -= dy;
+        }
+    }
+
+    // --- Phase 2 & 3: Matching — only when detector produced a result this frame.
+    // When detectorRan==false and there are no detections from reacquisition either,
+    // we skip matching entirely. Tracks coast via Kalman prediction and lost_frames
+    // is NOT incremented, preventing boxes from disappearing between detector frames.
+    const bool shouldMatch = detectorRan || (nDets > 0);
+
+    const float maxCenterDist = settings.trackerMaxCenterDistPx;
 
     std::vector<int>  matchedTracks(nTracks, -1);
     std::vector<bool> matchedDets(nDets, false);
 
-    if (nTracks > 0 && nDets > 0) {
+    if (shouldMatch && nTracks > 0 && nDets > 0) {
         auto costMatrix = computeCostMatrix(trackIds, predictedBoxes, detections,
                                             maxCenterDist, safeLag,
                                             settings.trackerReacquisitionMaxDist);
-        // Mindest-Score für ein gültiges Match:
-        // IoU-only wäre 0.25, aber durch hybrides Scoring auch bei IoU=0 möglich
         const float minScore = settings.trackerMinMatchScore;
         greedyMatch(costMatrix, minScore, matchedTracks, matchedDets);
     }
@@ -153,7 +174,7 @@ void MultiTracker::update(const std::vector<Detection>& detections,
         if (did >= 0) {
             // Kalman correct()
             const Detection& det = detections[did];
-            
+
             // Extrapolate the detection coordinates using the track's estimated velocity
             cv::Rect extBox = det.box;
             // Plan 11 Safeguard: Recovery-Detektionen sind bereits Echtzeit
@@ -174,18 +195,31 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             track.confidence    = det.confidence;
             track.lost_frames   = 0;
             track.matched_frames++;
-            // Bestätigt nach 1 erfolgreichem Match (sofortige Anzeige)
-            track.is_confirmed  = true;
+            // Confirmed only after trackerConfirmFrames consecutive matches (prevents ephemeral flicker).
+            if (!track.is_confirmed)
+                track.is_confirmed = (track.matched_frames >= settings.trackerConfirmFrames);
 
             // Trail-Punkt (gemessene, extrapolierte Position)
             track.trail.emplace_back(extBox.x + extBox.width  / 2,
                                      extBox.y + extBox.height / 2);
         } else {
-            // Kein Match → Dead Reckoning via Kalman-Prediction
-            track.lost_frames++;
+            // No match — either detector didn't run this frame (!shouldMatch) or
+            // it ran but this track wasn't matched (lost).
+            // Forward statePost to the Kalman prediction so the displayed box
+            // continues to follow the predicted trajectory instead of freezing.
+            // kf.predict() updates statePre and errorCovPre but does NOT update
+            // statePost/errorCovPost. Without this, getBoundingBox() returns the
+            // stale last-corrected position forever between detections.
+            track.kf.statePost    = track.kf.statePre;
+            track.kf.errorCovPost = track.kf.errorCovPre;
+
+            if (shouldMatch) {
+                // Detector ran but missed this track → count it as lost
+                track.lost_frames++;
+            }
 
             // Trail zeigt vorhergesagte Position (gedimmt im HUD)
-            const cv::Rect pred = track.getBoundingBox();
+            const cv::Rect pred = track.getBoundingBox(); // now reads updated statePost
             track.trail.emplace_back(pred.x + pred.width  / 2,
                                      pred.y + pred.height / 2);
         }
@@ -210,7 +244,7 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             for (const auto& [id, track] : m_tracks) {
                 if (track.lost_frames == 0 && track.is_confirmed) {
                     float iou = calculateIoU(detections[di].box, track.getBoundingBox());
-                    if (iou > 0.35f) {
+                    if (iou > 0.35f) { // suppress new track when overlap with confirmed track exceeds 35%
                         isDuplicate = true;
                         break;
                     }
@@ -219,6 +253,10 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             if (isDuplicate) continue;
 
             m_tracks.emplace(m_nextId, TrackState(m_nextId, detections[di]));
+            // Creation itself counts as the first match.
+            auto& newTrack = m_tracks.at(m_nextId);
+            newTrack.matched_frames = 1;
+            newTrack.is_confirmed   = (newTrack.matched_frames >= settings.trackerConfirmFrames);
             ++m_nextId;
         }
     }
@@ -246,9 +284,8 @@ std::vector<TrackedObject> MultiTracker::getTrackedObjects(int maxTrailLength) c
     result.reserve(m_tracks.size());
 
     for (const auto& [id, track] : m_tracks) {
-        // Optimierung: Zeige Tracks sofort, wenn sie frisch sind (lost_frames == 0),
-        // auch wenn sie noch nicht "bestätigt" (is_confirmed) sind.
-        if (!track.is_confirmed && track.lost_frames > 0) continue;
+        // Only show confirmed tracks; dead-reckoning is fine for confirmed+lost tracks.
+        if (!track.is_confirmed) continue;
 
         TrackedObject obj;
         obj.track_id    = track.track_id;
@@ -275,7 +312,7 @@ const TrackState* MultiTracker::findNearestTrack(cv::Point2f point, float maxDis
     float minDist = maxDistPx;
 
     for (const auto& [id, track] : m_tracks) {
-        if (!track.is_confirmed && track.lost_frames > 0) continue;
+        if (!track.is_confirmed) continue;
         const cv::Rect box = track.getBoundingBox();
         const float cx   = static_cast<float>(box.x + box.width  / 2);
         const float cy   = static_cast<float>(box.y + box.height / 2);
@@ -336,7 +373,8 @@ std::vector<std::vector<MatchCost>> MultiTracker::computeCostMatrix(
         // Typische Objektgröße für adaptive Distanz-Schwelle
         const float objDiag = std::hypot(static_cast<float>(pb.width),
                                          static_cast<float>(pb.height));
-        // Adaptiver maxDist: mindestens 80px, maximal maxCenterDistPx
+        // Adaptiver maxDist: mindestens 80px (verhindert Fehlmatches bei kleinen Objekten),
+        // maximal maxCenterDistPx; 1.5× Diagonale deckt typische Bewegung in einem Frame ab.
         float adaptiveDist = std::min(maxCenterDistPx,
                                       std::max(80.0f, objDiag * 1.5f));
 
@@ -376,9 +414,9 @@ std::vector<std::vector<MatchCost>> MultiTracker::computeCostMatrix(
             // Gibt bei dist=0 → 1.0, bei dist=adaptiveDist → 0.0
             const float distScore = (1.0f - normDist) * (1.0f - normDist);
 
-            // Gesamt-Score: gewichtete Kombination
-            // IoU wird bevorzugt (zuverlässiger), Distanz als Fallback
-            // Formel: max(iou, 0.6 * distScore) – bei IoU=0 greift Distanz
+            // Gesamt-Score: IoU bevorzugt (geometrisch zuverlässiger);
+            // Distanzanteil (Gewicht 0.65) greift als Fallback wenn IoU≈0
+            // (z.B. schnelle Bewegung mit großem Sprung zwischen Frames).
             const float score = std::max(iou, 0.65f * distScore);
 
             matrix[ti][di] = {iou, normDist, score};

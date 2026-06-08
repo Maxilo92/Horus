@@ -1,10 +1,9 @@
 // ---------------------------------------------------------------------------
 // AudioEngine.cpp — Project Horus
 //
-// Synthesises short sine-burst PCM samples and registers them with macOS
-// AudioToolbox as SystemSoundIDs.  Playback is fully asynchronous and
-// non-blocking.  All heap allocation happens only during init/applyConfig,
-// never in the real-time loop.
+// Synthesises short sine-burst PCM samples and plays them via the platform
+// audio API.  Playback is fully asynchronous and non-blocking.  All heap
+// allocation happens only during init/applyConfig, never in the real-time loop.
 // ---------------------------------------------------------------------------
 
 #include "AudioEngine.hpp"
@@ -15,6 +14,16 @@
 #include <fstream>
 #include <atomic>
 #include <cstdio>
+
+#ifdef _WIN32
+#  include <ole2.h>
+#  pragma comment(lib, "ole32.lib")
+#  pragma comment(lib, "oleaut32.lib")
+
+static void ensureCoInit() {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -99,6 +108,7 @@ static std::vector<uint8_t> buildAIFFBlob(const std::vector<int16_t>& pcm) {
 // SoundBuffer::dispose
 // ---------------------------------------------------------------------------
 void AudioEngine::SoundBuffer::dispose() {
+#ifdef __APPLE__
     if (soundID) {
         AudioServicesRemoveSystemSoundCompletion(soundID);
         AudioServicesDisposeSystemSoundID(soundID);
@@ -108,9 +118,24 @@ void AudioEngine::SoundBuffer::dispose() {
         std::remove(tempFilePath.c_str());
         tempFilePath.clear();
     }
-    // Free the AIFF blob that was kept alive for AudioToolbox
     delete aiffBlob;
     aiffBlob = nullptr;
+#elif defined(_WIN32)
+    if (audioClient) {
+        audioClient->Stop();
+    }
+    // Closing the event handle signals the drain thread's WaitForSingleObject to
+    // return WAIT_FAILED, causing the thread loop to exit.
+    if (eventHandle) {
+        CloseHandle(eventHandle);
+        eventHandle = nullptr;
+    }
+    if (drainThread.joinable()) {
+        drainThread.join();
+    }
+    if (renderClient) { renderClient->Release(); renderClient = nullptr; }
+    if (audioClient)  { audioClient->Release();  audioClient  = nullptr; }
+#endif
     samples.clear();
     valid = false;
 }
@@ -287,13 +312,14 @@ AudioEngine::SoundBuffer AudioEngine::buildSound(Event type, float freqHz, float
         sb.samples[i] = static_cast<int16_t>(sampleVal * 32767.0f);
     }
 
+#ifdef __APPLE__
     // Build AIFF blob — heap-allocated, kept alive until dispose()
     sb.aiffBlob = new std::vector<uint8_t>(buildAIFFBlob(sb.samples));
 
     // Save to temp file
     static std::atomic<int> s_soundCounter{0};
     std::string tempPath = "/tmp/horus_audio_" + std::to_string(s_soundCounter.fetch_add(1)) + "_" + std::to_string(static_cast<int>(freqHz)) + ".aiff";
-    
+
     std::ofstream out(tempPath, std::ios::binary);
     if (!out) {
         delete sb.aiffBlob;
@@ -334,6 +360,119 @@ AudioEngine::SoundBuffer AudioEngine::buildSound(Event type, float freqHz, float
 
     sb.tempFilePath = tempPath;
     sb.valid = true;
+
+#elif defined(_WIN32)
+    ensureCoInit();
+
+    // Acquire default render endpoint
+    IMMDeviceEnumerator* pEnum = nullptr;
+    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
+                                  CLSCTX_ALL, IID_PPV_ARGS(&pEnum));
+    if (FAILED(hr)) return sb;
+
+    IMMDevice* pDevice = nullptr;
+    hr = pEnum->GetDefaultAudioEndpoint(eRender, eConsole, &pDevice);
+    pEnum->Release();
+    if (FAILED(hr)) return sb;
+
+    hr = pDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL,
+                           nullptr, reinterpret_cast<void**>(&sb.audioClient));
+    pDevice->Release();
+    if (FAILED(hr)) return sb;
+
+    WAVEFORMATEX wfx = {};
+    wfx.wFormatTag      = WAVE_FORMAT_PCM;
+    wfx.nChannels       = 1;
+    wfx.nSamplesPerSec  = kSampleRate;
+    wfx.wBitsPerSample  = 16;
+    wfx.nBlockAlign     = 2;
+    wfx.nAvgBytesPerSec = kSampleRate * 2;
+
+    // Buffer duration = sound duration + 50 ms headroom, in 100-ns units
+    const float    durationSec = static_cast<float>(numSamples) / kSampleRate;
+    REFERENCE_TIME bufDur = static_cast<REFERENCE_TIME>((durationSec + 0.05f) * 10000000.0f);
+
+    hr = sb.audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                    bufDur, 0, &wfx, nullptr);
+    if (FAILED(hr)) { sb.audioClient->Release(); sb.audioClient = nullptr; return sb; }
+
+    sb.eventHandle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!sb.eventHandle) { sb.audioClient->Release(); sb.audioClient = nullptr; return sb; }
+
+    hr = sb.audioClient->SetEventHandle(sb.eventHandle);
+    if (FAILED(hr)) {
+        CloseHandle(sb.eventHandle); sb.eventHandle = nullptr;
+        sb.audioClient->Release();   sb.audioClient = nullptr;
+        return sb;
+    }
+
+    hr = sb.audioClient->GetService(IID_PPV_ARGS(&sb.renderClient));
+    if (FAILED(hr)) {
+        CloseHandle(sb.eventHandle); sb.eventHandle = nullptr;
+        sb.audioClient->Release();   sb.audioClient = nullptr;
+        return sb;
+    }
+
+    // Pre-fill the WASAPI buffer with our PCM samples
+    UINT32 bufferFrameCount = 0;
+    sb.audioClient->GetBufferSize(&bufferFrameCount);
+
+    BYTE* pData = nullptr;
+    hr = sb.renderClient->GetBuffer(bufferFrameCount, &pData);
+    if (FAILED(hr)) {
+        sb.renderClient->Release();  sb.renderClient  = nullptr;
+        CloseHandle(sb.eventHandle); sb.eventHandle   = nullptr;
+        sb.audioClient->Release();   sb.audioClient   = nullptr;
+        return sb;
+    }
+
+    const UINT32 copyFrames  = std::min(numSamples, bufferFrameCount);
+    const UINT32 silentFrames = bufferFrameCount - copyFrames;
+    std::memcpy(pData, sb.samples.data(), copyFrames * sizeof(int16_t));
+    if (silentFrames > 0)
+        std::memset(pData + copyFrames * sizeof(int16_t), 0, silentFrames * sizeof(int16_t));
+
+    hr = sb.renderClient->ReleaseBuffer(bufferFrameCount,
+             silentFrames == bufferFrameCount ? AUDCLNT_BUFFERFLAGS_SILENT : 0);
+    if (FAILED(hr)) {
+        sb.renderClient->Release();  sb.renderClient  = nullptr;
+        CloseHandle(sb.eventHandle); sb.eventHandle   = nullptr;
+        sb.audioClient->Release();   sb.audioClient   = nullptr;
+        return sb;
+    }
+
+    // Drain thread: waits for the buffer-consumed event, then stops and
+    // re-arms the client so it is ready for the next playEvent() call.
+    // All allocation happens here at init time, not in the hot path.
+    sb.drainThread = std::thread([buf = &sb]() {
+        ensureCoInit();
+        while (true) {
+            DWORD result = WaitForSingleObject(buf->eventHandle, INFINITE);
+            if (result != WAIT_OBJECT_0) break;  // handle closed — exit
+            if (!buf->playing.load()) continue;  // spurious wake
+            buf->audioClient->Stop();
+            buf->audioClient->Reset();           // rewind for next play
+            // Re-fill buffer for next call — happens after playback, not during
+            UINT32 bufSize = 0;
+            buf->audioClient->GetBufferSize(&bufSize);
+            BYTE* pRefill = nullptr;
+            if (SUCCEEDED(buf->renderClient->GetBuffer(bufSize, &pRefill))) {
+                const UINT32 n      = static_cast<UINT32>(buf->samples.size());
+                const UINT32 copy   = std::min(n, bufSize);
+                const UINT32 silent = bufSize - copy;
+                std::memcpy(pRefill, buf->samples.data(), copy * sizeof(int16_t));
+                if (silent > 0)
+                    std::memset(pRefill + copy * sizeof(int16_t), 0, silent * sizeof(int16_t));
+                buf->renderClient->ReleaseBuffer(bufSize,
+                    silent == bufSize ? AUDCLNT_BUFFERFLAGS_SILENT : 0);
+            }
+            buf->playing.store(false);
+        }
+    });
+
+    sb.valid = true;
+#endif
     return sb;
 }
 
@@ -394,36 +533,28 @@ void AudioEngine::applyConfig(const Config& cfg) {
 void AudioEngine::playEvent(Event e) {
     if (!m_cfg.masterEnabled) return;
 
+    SoundBuffer* sb = nullptr;
     switch (e) {
-        case Event::MOTION_ALERT:
-            if (m_cfg.motionEnabled && m_motionSound.valid)
-                AudioServicesPlaySystemSound(m_motionSound.soundID);
-            break;
-        case Event::ALARM_ENTRY:
-            if (m_cfg.alarmEntryEnabled && m_alarmEntrySound.valid)
-                AudioServicesPlaySystemSound(m_alarmEntrySound.soundID);
-            break;
-        case Event::ALARM_EXIT:
-            if (m_cfg.alarmExitEnabled && m_alarmExitSound.valid)
-                AudioServicesPlaySystemSound(m_alarmExitSound.soundID);
-            break;
-        case Event::LOCK_ACQUIRED:
-            if (m_cfg.lockAcquiredEnabled && m_lockAcquiredSound.valid)
-                AudioServicesPlaySystemSound(m_lockAcquiredSound.soundID);
-            break;
-        case Event::LOCK_LOST:
-            if (m_cfg.lockLostEnabled && m_lockLostSound.valid)
-                AudioServicesPlaySystemSound(m_lockLostSound.soundID);
-            break;
-        case Event::LOCK_PULSE:
-            if (m_lockPulseSound.valid)
-                AudioServicesPlaySystemSound(m_lockPulseSound.soundID);
-            break;
-        case Event::LOCK_SOLUTION:
-            if (m_lockSolutionSound.valid)
-                AudioServicesPlaySystemSound(m_lockSolutionSound.soundID);
-            break;
+        case Event::MOTION_ALERT:   if (m_cfg.motionEnabled && m_motionSound.valid)             sb = &m_motionSound;       break;
+        case Event::ALARM_ENTRY:    if (m_cfg.alarmEntryEnabled && m_alarmEntrySound.valid)     sb = &m_alarmEntrySound;   break;
+        case Event::ALARM_EXIT:     if (m_cfg.alarmExitEnabled && m_alarmExitSound.valid)       sb = &m_alarmExitSound;    break;
+        case Event::LOCK_ACQUIRED:  if (m_cfg.lockAcquiredEnabled && m_lockAcquiredSound.valid) sb = &m_lockAcquiredSound; break;
+        case Event::LOCK_LOST:      if (m_cfg.lockLostEnabled && m_lockLostSound.valid)         sb = &m_lockLostSound;     break;
+        case Event::LOCK_PULSE:     if (m_lockPulseSound.valid)                                 sb = &m_lockPulseSound;    break;
+        case Event::LOCK_SOLUTION:  if (m_lockSolutionSound.valid)                              sb = &m_lockSolutionSound; break;
     }
+    if (!sb) return;
+
+#ifdef __APPLE__
+    AudioServicesPlaySystemSound(sb->soundID);
+#elif defined(_WIN32)
+    // Non-allocating; buffer was pre-loaded during buildSound().
+    // If already playing, skip — same fire-and-forget semantics as AudioServices.
+    bool expected = false;
+    if (sb->playing.compare_exchange_strong(expected, true)) {
+        (void)sb->audioClient->Start();
+    }
+#endif
 }
 
 bool AudioEngine::motionCooldownElapsed() {

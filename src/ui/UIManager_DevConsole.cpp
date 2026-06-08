@@ -7,8 +7,8 @@ void UIManager::renderDevConsole(const VisionState& vision,
     if (!m_devConsolePanel) return;
 
     bool settingsChanged = false;
-    
-    // We pass all necessary context to the panel
+    FaceDebugState faceDbg = m_blackboard.getFaceDebugState();
+
     m_devConsolePanel->render(
         m_showDevConsole,
         m_renderFps, m_frameTimeMs, m_cameraFps,
@@ -27,7 +27,9 @@ void UIManager::renderDevConsole(const VisionState& vision,
         m_log,
         m_window,
         status.remoteInferenceRttMs,
-        status.activeModelName
+        status.activeModelName,
+        &tracking,
+        &faceDbg
     );
 
     if (settingsChanged) {

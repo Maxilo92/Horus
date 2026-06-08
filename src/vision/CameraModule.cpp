@@ -51,8 +51,12 @@ bool CameraModule::open(const std::string& address, int requestedWidth, int requ
     m_isFile = false;
     if (isNumber) {
 #ifdef __APPLE__
-        // Try opening with AVFoundation backend explicitly on macOS
         m_cap.open(std::stoi(address), cv::CAP_AVFOUNDATION);
+        if (!m_cap.isOpened()) {
+            m_cap.open(std::stoi(address));
+        }
+#elif defined(_WIN32)
+        m_cap.open(std::stoi(address), cv::CAP_DSHOW);
         if (!m_cap.isOpened()) {
             m_cap.open(std::stoi(address));
         }

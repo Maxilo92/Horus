@@ -3,9 +3,12 @@
 #include <iostream>
 #include <chrono>
 
-VisionSystem::VisionSystem(Blackboard& blackboard, AudioEngine& audioEngine, LogFn logFn)
+VisionSystem::VisionSystem(Blackboard& blackboard, AudioEngine& audioEngine, 
+                           DossierDatabase* dossierDb, AIAgent* aiAgent, LogFn logFn)
     : m_blackboard(blackboard),
       m_audioEngine(audioEngine),
+      m_dossierDb(dossierDb),
+      m_aiAgent(aiAgent),
       m_log(std::move(logFn)) {
     m_camera = std::make_unique<CameraModule>();
 }
@@ -43,6 +46,7 @@ bool VisionSystem::init(const std::string& cameraAddress, const std::string& mod
         m_labelsPath = labelsPath;
         m_modelPathS = dir + "yolov8s.onnx";
         m_modelPathN = dir + "yolov8n.onnx";
+        m_reidModelPath = dir + "osnet_x0_25.onnx";
 
         // Verify which paths actually exist
         auto exists = [](const std::string& p) {
@@ -52,12 +56,16 @@ bool VisionSystem::init(const std::string& cameraAddress, const std::string& mod
         };
         if (!exists(m_modelPathS)) m_modelPathS.clear();
         if (!exists(m_modelPathN)) m_modelPathN.clear();
+        if (!exists(m_reidModelPath)) m_reidModelPath.clear();
     }
 
     try {
         m_detector = std::make_unique<ObjectDetector>(modelPath, labelsPath);
+        if (!m_reidModelPath.empty()) {
+            m_reidManager = std::make_unique<ReIDManager>(m_reidModelPath);
+        }
     } catch (const std::exception& e) {
-        m_log(LogLevel::ERR, std::string("[VisionSystem] Detector init failed: ") + e.what());
+        m_log(LogLevel::ERR, std::string("[VisionSystem] Detector/ReID init failed: ") + e.what());
         return false;
     }
 
@@ -280,7 +288,7 @@ void VisionSystem::detectorWorkerLoop() {
         // Publish remote RTT (only meaningful when remote inference is active)
         if (settings.remoteInferenceEnabled && m_detector) {
             AppStatusState st = m_blackboard.getAppStatus();
-            st.remoteInferenceRttMs = m_detector->getLastRttMs();
+            // st.remoteInferenceRttMs = m_detector->getLastRttMs();
             m_blackboard.setAppStatus(st);
         }
 
@@ -576,7 +584,8 @@ void VisionSystem::workerLoop() {
             m_trackingSystem->submitFrame(
                 trackingFrame, settings,
                 hasNewDetections ? m_detections : std::vector<Detection>(),
-                detectorLag, nowMs - m_logSessionStartMs, mTracks);
+                detectorLag, nowMs - m_logSessionStartMs, mTracks,
+                hasNewDetections);
         }
 
         // ── Data logging session management ────────────────────────────
@@ -684,6 +693,100 @@ void VisionSystem::workerLoop() {
             dState.motionTracks.push_back(mt);
         }
         m_blackboard.setDetectionState(dState);
+
+        // ── AI Dossier Processing (Plan 13) ────────────────────────────
+        if (settings.aiDossierEnabled && m_dossierDb && m_reidManager && m_aiAgent) {
+            auto now = std::chrono::steady_clock::now();
+            
+            // Clean up stale stability info
+            std::set<int> activeIds;
+            for (const auto& track : tState.activeTracks) activeIds.insert(track.track_id);
+            for (auto it = m_trackStability.begin(); it != m_trackStability.end(); ) {
+                if (activeIds.find(it->first) == activeIds.end()) it = m_trackStability.erase(it);
+                else ++it;
+            }
+
+            for (const auto& track : tState.activeTracks) {
+                if (!track.is_confirmed) continue;
+
+                auto& info = m_trackStability[track.track_id];
+                if (info.firstSeen == std::chrono::steady_clock::time_point()) {
+                    info.firstSeen = now;
+                }
+
+                float duration = std::chrono::duration<float>(now - info.firstSeen).count();
+                if (duration >= settings.aiStabilitySec && !info.reidDone) {
+                    // Extract embedding
+                    cv::Rect roi = track.box;
+                    if (roi.x >= 0 && roi.y >= 0 && 
+                        roi.x + roi.width <= trackingFrame.cols && 
+                        roi.y + roi.height <= trackingFrame.rows) {
+                        
+                        cv::Mat crop = trackingFrame(roi).clone();
+                        std::vector<float> embedding = m_reidManager->extractFeatures(crop);
+                        
+                        if (!embedding.empty()) {
+                            DossierEntry entry;
+                            bool found = m_dossierDb->findNearestEntity(embedding, track.className, settings.aiReidThreshold, entry);
+                            
+                            if (found) {
+                                m_log(LogLevel::INFO, "[VisionSystem] Re-identified " + track.className + " as " + entry.uuid);
+                                m_dossierDb->addSighting(entry.uuid, "session_001"); // TODO: Real session ID
+                                info.lastUuid = entry.uuid;
+                            } else {
+                                // Create new entity
+                                entry.uuid = "OBJ-" + std::to_string(now.time_since_epoch().count() % 1000000);
+                                entry.type = track.className;
+                                entry.embedding = embedding;
+                                entry.first_seen = "now"; // DB CURRENT_TIMESTAMP handles this usually
+                                entry.last_seen = "now";
+                                entry.dossier_text = "Analysis pending...";
+                                m_dossierDb->upsertEntity(entry);
+                                m_dossierDb->addSighting(entry.uuid, "session_001");
+                                m_log(LogLevel::INFO, "[VisionSystem] New entity registered: " + entry.uuid);
+                                info.lastUuid = entry.uuid;
+                            }
+                            info.reidDone = true;
+
+                            // Queue AI Request if dossier is empty or too old
+                            if (!info.aiRequested && (entry.dossier_text.empty() || entry.dossier_text == "Analysis pending...")) {
+                                AIRequest req;
+                                req.entityUuid = entry.uuid;
+                                req.type = entry.type;
+                                req.crop = crop;
+                                req.currentDossier = entry.dossier_text;
+                                req.isUpdate = false;
+                                m_aiAgent->queueRequest(req);
+                                info.aiRequested = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Sync locked target dossier to Blackboard
+            if (tState.lockedTarget.state == TrackingState::LOCKED) {
+                int lockedId = tState.lockedTarget.track_id;
+                if (m_trackStability.count(lockedId) && m_trackStability[lockedId].reidDone) {
+                    std::string uuid = m_trackStability[lockedId].lastUuid;
+                    DossierState ds = m_blackboard.getDossierState();
+                    if (!ds.hasActiveDossier || ds.activeDossier.uuid != uuid) {
+                        DossierEntry entry;
+                        if (m_dossierDb->getEntityByUUID(uuid, entry)) {
+                            ds.hasActiveDossier = true;
+                            ds.activeDossier = entry;
+                            m_blackboard.setDossierState(ds);
+                        }
+                    }
+                }
+            } else {
+                DossierState ds = m_blackboard.getDossierState();
+                if (ds.hasActiveDossier) {
+                    ds.hasActiveDossier = false;
+                    m_blackboard.setDossierState(ds);
+                }
+            }
+        }
     }
 
     m_log(LogLevel::INFO, "Worker thread stopping");

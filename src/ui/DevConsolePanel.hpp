@@ -36,7 +36,9 @@ public:
                 std::function<void(LogLevel, const std::string&)> logFn,
                 GLFWwindow* window,
                 float remoteRttMs = -1.0f,
-                const std::string& activeModelName = "");
+                const std::string& activeModelName = "",
+                const TrackingStateData* trackingState = nullptr,
+                const FaceDebugState* faceDbg = nullptr);
 
     // Timing history
     void addFpsSample(float fps);

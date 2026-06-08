@@ -9,6 +9,7 @@
 #include "AudioEngine.hpp"
 #include "FaceRecognizer.hpp"
 #include "ObjectDetector.hpp"
+#include "DossierDatabase.hpp"
 #include <thread>
 #include <atomic>
 #include <memory>
@@ -28,21 +29,50 @@ public:
     ~TrackingSystem() override;
 
     bool init(const std::string& faceDetPath, const std::string& faceRecPath,
-              ObjectDetector* sharedDetector);
+              DossierDatabase* dossierDb);
+void start() override;
+void stop() override;
+void update() override;
 
-    void start() override;
-    void stop() override;
-    void update() override;
-
-    // Called by VisionSystem::workerLoop to hand off a frame for tracking
+    // Called by VisionSystem::workerLoop to hand off a frame for tracking.
+    // hasNewDetections: false when YOLO is still running and detections is stale/empty.
     void submitFrame(const cv::Mat& frame, const SystemSettings& settings,
                      const std::vector<Detection>& detections, int detectorLag,
-                     uint64_t sessionMs, const std::vector<MotionTrack>& motionTracks);
+                     uint64_t sessionMs, const std::vector<MotionTrack>& motionTracks,
+                     bool hasNewDetections = true);
 
 private:
     void trackingWorkerLoop();
     void updateTargetHistory(const std::vector<TrackedObject>& activeTracks,
                               const cv::Mat& currentFrame, int manualCaptureId);
+
+    // --- trackingWorkerLoop helpers (one per numbered section) ---
+    void handleLockCommands(const UICommandState& cmd);
+    void handlePixelLockCommands(const UICommandState& cmd, const cv::Mat& frame);
+    void runReacquisition(std::vector<Detection>& detections,
+                          const cv::Mat& frame,
+                          const SystemSettings& settings,
+                          const std::vector<MotionTrack>& motionTracks);
+    void deduplicateDetections(std::vector<Detection>& detections);
+    cv::Point2d estimateCameraMotion(const cv::Mat& frame, const SystemSettings& settings);
+    void updateTrackerAndFaces(std::vector<TrackedObject>& tracked,
+                               const cv::Mat& frame,
+                               const std::vector<Detection>& detections,
+                               const SystemSettings& settings,
+                               int detectorLag,
+                               const cv::Point2d& cameraMotion,
+                               bool hasNewDetections);
+    void runPixelTemplateMatch(std::vector<TrackedObject>& tracked,
+                               const cv::Mat& frame,
+                               const UICommandState& cmd,
+                               const SystemSettings& settings);
+    void updateLockedTargetYolo(const std::vector<TrackedObject>& tracked);
+    void updateAudioFeedback(const SystemSettings& settings);
+    void checkAlarmZones(const std::vector<TrackedObject>& tracked);
+    void logTrackingData(const std::vector<TrackedObject>& tracked,
+                         const std::vector<MotionTrack>& motionTracks,
+                         const SystemSettings& settings,
+                         uint64_t sessionMs);
 
     Blackboard&  m_blackboard;
     ROIManager&  m_roiManager;
@@ -53,6 +83,7 @@ private:
     std::unique_ptr<MultiTracker>    m_tracker;
     std::unique_ptr<FaceRecognizer>  m_faceRecognizer;
     ObjectDetector*                  m_detector = nullptr;
+    DossierDatabase*                 m_dossierDb = nullptr;
 
     std::thread          m_trackingThread;
     std::atomic<bool>    m_running{false};
@@ -67,6 +98,10 @@ private:
     int                      m_trackingDetectorLag = 0;
     uint64_t                 m_trackingSessionMs = 0;
     std::vector<MotionTrack> m_trackingMotionTracksCopy;
+    bool                     m_trackingHasNewDetections = true;
+
+    // Kamerabewegungsschätzung (Ego-Motion via Sparse Optical Flow)
+    cv::Mat  m_prevFrameGray;
 
     // Pixel template tracking state
     bool     m_pixelLockActive = false;
@@ -77,9 +112,18 @@ private:
     float    m_pixelCenterX = 0.0f;
     float    m_pixelCenterY = 0.0f;
 
-    // Face recognition identity cache (track_id -> {face_id, face_name})
-    std::unordered_map<int, std::pair<int, std::string>> m_trackIdToFace;
+    struct FaceTrackInfo {
+        int         face_id = -1;
+        std::string face_name;
+        cv::Rect    face_box;
+        int         retryCountdown = 0; // frames until next recognition attempt (when face_id == -1)
+    };
+    // Face recognition identity cache: track_id -> {face_id, face_name, face_box}
+    std::unordered_map<int, FaceTrackInfo> m_trackIdToFace;
     std::mutex m_faceMutex;
+
+    // Accumulated face recognition stats — updated by tracking thread, pushed to Blackboard.
+    FaceDebugState m_faceDbg;
 
     // Alarm zone state (zone_id -> set of track_ids currently inside)
     std::unordered_map<int, std::unordered_set<int>> m_activeAlarms;

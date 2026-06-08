@@ -3,6 +3,7 @@
 #include <cmath>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 
 static float GetTimeSeconds() {
     static auto start = std::chrono::steady_clock::now();
@@ -204,6 +205,18 @@ void HUD::drawTrackedObject(ImDrawList* drawList, const TrackedObject& obj,
     // Bounding box
     drawList->AddRect(ImVec2(x1, y1), ImVec2(x2, y2), boxColor, 0.0f, 0, lw);
 
+    // Separate face box (drawn on top of person box in a distinct color)
+    if (settings.showFaceBoxes && obj.face_box.width > 0 && obj.face_box.height > 0) {
+        const ImU32 faceColor = (settings.faceBoxColor != 0)
+            ? static_cast<ImU32>(settings.faceBoxColor)
+            : IM_COL32(0, 220, 255, 220);
+        const float fx1 = view.pos_x + obj.face_box.x * view.scale;
+        const float fy1 = view.pos_y + obj.face_box.y * view.scale;
+        const float fx2 = fx1 + obj.face_box.width  * view.scale;
+        const float fy2 = fy1 + obj.face_box.height * view.scale;
+        drawList->AddRect(ImVec2(fx1, fy1), ImVec2(fx2, fy2), faceColor, 2.0f, 0, lw * 0.85f);
+    }
+
     // Label: build according to visibility toggles
     char tag[160] = {0};
     if (isLocked) {
@@ -219,6 +232,14 @@ void HUD::drawTrackedObject(ImDrawList* drawList, const TrackedObject& obj,
                  obj.className.c_str(), obj.confidence);
     } else {
         snprintf(tag, sizeof(tag), "[%s]", obj.className.c_str());
+    }
+
+    // Append face name when a registered identity is known (face_id >= 0 with a real name)
+    if (obj.face_id != -1 && !obj.face_name.empty() && obj.face_name != "Unknown") {
+        char faceTag[96];
+        snprintf(faceTag, sizeof(faceTag), "%s%s",
+                 (tag[0] != '\0') ? "  -  " : "", obj.face_name.c_str());
+        strncat(tag, faceTag, sizeof(tag) - strlen(tag) - 1);
     }
 
     if (tag[0] != '\0') {

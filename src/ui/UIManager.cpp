@@ -7,6 +7,24 @@
 #include <filesystem>
 #include <iostream>
 #include <cstring>
+#ifdef _WIN32
+#  include <windows.h>
+#  include <shellapi.h>
+#endif
+
+// Opens a URL in the system's default browser, cross-platform.
+static void openUrl(const std::string& url) {
+    if (url.empty()) return;
+#ifdef __APPLE__
+    system(("open \"" + url + "\"").c_str());
+#elif defined(_WIN32)
+    ShellExecuteW(nullptr, L"open",
+                  std::wstring(url.begin(), url.end()).c_str(),
+                  nullptr, nullptr, SW_SHOWNORMAL);
+#else
+    system(("xdg-open \"" + url + "\"").c_str());
+#endif
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constructor / Destructor
@@ -68,6 +86,16 @@ void UIManager::start() {
 
 void UIManager::stop() {
     savePersistedSettings();
+}
+
+void UIManager::setDossierDatabase(DossierDatabase* db) {
+    if (db) {
+        m_dossierArchivePanel = std::make_unique<DossierArchivePanel>(*db);
+    }
+}
+
+void UIManager::setUpdateChecker(UpdateChecker* uc) {
+    m_updateChecker = uc;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,6 +180,7 @@ void UIManager::update() {
     TrackingStateData  tracking = m_blackboard.getTrackingState();
     DetectionState     det      = m_blackboard.getDetectionState();
     AppStatusState     status   = m_blackboard.getAppStatus();
+    DossierState       dossier  = m_blackboard.getDossierState();
     m_perfMetrics               = m_blackboard.getPerformanceMetrics();
 
     // Cache fields into UIManager members
@@ -203,6 +232,66 @@ void UIManager::update() {
             m_subZoomRenderers[i]->updateTexture(m_subZooms[i].frame);
     }
 
+    // ── Window layout reset (applied before NewFrame so positions take effect) ──
+    if (m_resetWindowsPending) {
+        int fw, fh;
+        glfwGetFramebufferSize(m_window, &fw, &fh);
+        const int menuH    = 19;
+        const int contentH = fh - menuH;
+        const int conW     = std::min(360, fw / 4);
+        const int camW     = fw - conW;
+
+        // Build a default ini: Camera View fills the left area, Dev Console docks right.
+        // All other panels are placed at non-overlapping positions and collapsed.
+        char buf[4096];
+        snprintf(buf, sizeof(buf),
+            "[Window][Camera View]\n"
+            "Pos=0,%d\nSize=%d,%d\nCollapsed=0\n\n"
+            "[Window][Dev Console]\n"
+            "Pos=%d,%d\nSize=%d,%d\nCollapsed=0\n\n"
+            "[Window][Data Panel]\n"
+            "Pos=10,%d\nSize=320,180\nCollapsed=1\n\n"
+            "[Window][Target Zoom]\n"
+            "Pos=10,%d\nSize=320,240\nCollapsed=1\n\n"
+            "[Window][Settings]\n"
+            "Pos=%d,%d\nSize=480,600\nCollapsed=1\n\n"
+            "[Window][Target Analyzer]\n"
+            "Pos=%d,%d\nSize=460,500\nCollapsed=1\n\n"
+            "[Window][AI Dossier]\n"
+            "Pos=%d,%d\nSize=420,400\nCollapsed=1\n\n"
+            "[Window][AI Dossier Archive]\n"
+            "Pos=%d,%d\nSize=500,450\nCollapsed=1\n\n"
+            "[Window][Audio Visualizer]\n"
+            "Pos=%d,%d\nSize=300,120\nCollapsed=1\n\n"
+            "[Window][Replay Control]\n"
+            "Pos=%d,%d\nSize=400,200\nCollapsed=1\n\n",
+            // Camera View
+            menuH, camW, contentH,
+            // Dev Console
+            camW, menuH, conW, contentH,
+            // Data Panel
+            menuH + 10,
+            // Target Zoom
+            menuH + 200,
+            // Settings
+            fw / 2 - 240, menuH + 60,
+            // Target Analyzer
+            fw / 2 - 230, menuH + 80,
+            // AI Dossier
+            fw / 2 - 210, menuH + 100,
+            // AI Dossier Archive
+            fw / 2 - 250, menuH + 50,
+            // Audio Visualizer
+            10, fh - 140,
+            // Replay Control
+            fw / 2 - 200, fh - 220
+        );
+
+        ImGui::LoadIniSettingsFromMemory(buf, strlen(buf));
+        ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
+        m_resetWindowsPending = false;
+    }
+
     // ── ImGui frame begin ─────────────────────────────────────────────────
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -230,6 +319,11 @@ void UIManager::update() {
             ImGui::Separator();
             if (ImGui::MenuItem("Keyboard Shortcuts", "F1"))
                 m_showShortcutHelp = true;
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reset Windows")) {
+                m_resetWindowsPending = true;
+                m_log(LogLevel::INFO, "Window layout reset");
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Tools")) {
@@ -295,12 +389,20 @@ void UIManager::update() {
         ImGui::EndMainMenuBar();
     }
 
+    // ── Full-viewport DockSpace (must come before any dockable windows) ───
+    // PassthruCentralNode lets mouse clicks and the OpenGL scene show through
+    // the centre when no window is docked there.
+    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
+                                 ImGuiDockNodeFlags_PassthruCentralNode);
+
     // ── Panels & Windows ──────────────────────────────────────────────────
     if (m_showDataPanel)      renderDataPanel(m_trackedObjects, m_lockedTarget, m_cameraFps, m_renderFps);
     if (m_showZoomWindow)      renderZoomWindow(vision.zoomCrop, m_lockedTarget);
     if (m_showSettingsWindow)  renderSettingsWindow();
     if (m_showDevConsole)      renderDevConsole(vision, tracking, status);
     if (m_showTargetAnalyzer)  renderTargetAnalyzer(tracking);
+    if (m_showDossierPanel)    renderDossierPanel(dossier);
+    if (m_dossierArchivePanel) m_dossierArchivePanel->render(&m_showDossierArchive);
     
     // Replay Control Panel
     if (m_replayPanel) m_replayPanel->render(m_blackboard);
@@ -374,6 +476,33 @@ void UIManager::update() {
         ImGui::EndPopup();
     }
 
+    // ── Splash screen overlay (shown until first camera frame) ───────────
+    if (m_splashActive) {
+        if (!m_splashTimerSet) {
+            m_splashShownAt  = std::chrono::steady_clock::now();
+            m_splashTimerSet = true;
+        }
+        float elapsed = std::chrono::duration<float>(
+            std::chrono::steady_clock::now() - m_splashShownAt).count();
+        bool cameraReady = (m_cameraWidth > 0 && m_renderer->getTextureID() != 0);
+        if (cameraReady && elapsed >= m_splashMinSec)
+            m_splashActive = false;
+        else
+            renderSplashScreen();
+    }
+
+    // ── Setup wizard (first run, shown once after splash clears) ─────────
+    if (m_setupWizardActive && !m_splashActive)
+        renderSetupWizard();
+
+    // ── Update notification ───────────────────────────────────────────────
+    if (m_updateChecker && !m_updateDismissed && !m_setupWizardActive) {
+        if (m_updateChecker->getState() == UpdateState::UPDATE_AVAILABLE)
+            m_showUpdateDialog = true;
+    }
+    if (m_showUpdateDialog)
+        renderUpdateDialog();
+
     // ── Render ────────────────────────────────────────────────────────────
     int display_w, display_h;
     glfwGetFramebufferSize(m_window, &display_w, &display_h);
@@ -396,4 +525,438 @@ void UIManager::update() {
     }
 
     glfwSwapBuffers(m_window);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// renderSplashScreen
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UIManager::renderSplashScreen() {
+    // With ViewportsEnable, (0,0) is the monitor origin — use the main viewport
+    // position and size so the splash always fills exactly the app window.
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float W = vp->Size.x;
+    const float H = vp->Size.y;
+
+    ImGui::SetNextWindowPos(vp->Pos);
+    ImGui::SetNextWindowSize(vp->Size);
+    ImGui::SetNextWindowBgAlpha(1.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.030f, 0.047f, 0.030f, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+
+    ImGui::Begin("##splash", nullptr,
+        ImGuiWindowFlags_NoDecoration    |
+        ImGuiWindowFlags_NoInputs        |
+        ImGuiWindowFlags_NoNav           |
+        ImGuiWindowFlags_NoMove          |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoDocking);
+
+    ImGui::SetWindowFocus();
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    // Screen-space origin of the app window (non-zero when ViewportsEnable)
+    const float ox = vp->Pos.x;
+    const float oy = vp->Pos.y;
+    // Convenience lambda: local → screen coords
+    auto P = [&](float x, float y) { return ImVec2(ox + x, oy + y); };
+
+    const ImU32 kGreen      = IM_COL32(0,   200, 100, 255);
+    const ImU32 kGreenDim   = IM_COL32(0,   140,  70, 180);
+    const ImU32 kGreenFaint = IM_COL32(0,   200, 100,  40);
+    const ImU32 kBg         = IM_COL32(8,   12,   8, 255);
+
+    // Background fill
+    dl->AddRectFilled(P(0, 0), P(W, H), kBg);
+
+    // Subtle grid overlay
+    const float gridSpacing = 60.0f;
+    for (float x = 0; x < W; x += gridSpacing)
+        dl->AddLine(P(x, 0), P(x, H), IM_COL32(0, 200, 100, 8));
+    for (float y = 0; y < H; y += gridSpacing)
+        dl->AddLine(P(0, y), P(W, y), IM_COL32(0, 200, 100, 8));
+
+    // Corner brackets
+    const float bLen   = 40.0f;
+    const float bThk   = 2.0f;
+    const float margin = 24.0f;
+    // top-left
+    dl->AddLine(P(margin,     margin),     P(margin + bLen, margin),          kGreen, bThk);
+    dl->AddLine(P(margin,     margin),     P(margin,        margin + bLen),   kGreen, bThk);
+    // top-right
+    dl->AddLine(P(W - margin, margin),     P(W - margin - bLen, margin),      kGreen, bThk);
+    dl->AddLine(P(W - margin, margin),     P(W - margin, margin + bLen),      kGreen, bThk);
+    // bottom-left
+    dl->AddLine(P(margin,     H - margin), P(margin + bLen, H - margin),      kGreen, bThk);
+    dl->AddLine(P(margin,     H - margin), P(margin,        H - margin - bLen), kGreen, bThk);
+    // bottom-right
+    dl->AddLine(P(W - margin, H - margin), P(W - margin - bLen, H - margin),  kGreen, bThk);
+    dl->AddLine(P(W - margin, H - margin), P(W - margin, H - margin - bLen),  kGreen, bThk);
+
+    // Center decorative circle
+    const float cx = W * 0.5f;
+    const float cy = H * 0.40f;
+    dl->AddCircle(P(cx, cy), 80.0f, kGreenFaint, 64, 1.0f);
+    dl->AddCircle(P(cx, cy), 82.0f, kGreenDim,   64, 0.5f);
+
+    // Horizontal rule above title
+    const float ruleY = cy + 100.0f;
+    dl->AddLine(P(cx - 220.0f, ruleY), P(cx - 10.0f, ruleY),  kGreenDim, 1.0f);
+    dl->AddLine(P(cx + 10.0f,  ruleY), P(cx + 220.0f, ruleY), kGreenDim, 1.0f);
+
+    // ── Title ─────────────────────────────────────────────────────────────
+    {
+        const char* title = "PROJECT HORUS";
+        ImVec2 ts = ImGui::CalcTextSize(title);
+        ImGui::SetCursorScreenPos(P((W - ts.x) * 0.5f, ruleY + 14.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.784f, 0.392f, 1.0f));
+        ImGui::TextUnformatted(title);
+        ImGui::PopStyleColor();
+    }
+
+    // Subtitle
+    {
+        const char* sub = "TARGET ACQUISITION SYSTEM";
+        ImVec2 ss = ImGui::CalcTextSize(sub);
+        ImGui::SetCursorScreenPos(P((W - ss.x) * 0.5f,
+                                    ruleY + 14.0f + ImGui::GetTextLineHeight() + 6.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.55f, 0.27f, 1.0f));
+        ImGui::TextUnformatted(sub);
+        ImGui::PopStyleColor();
+    }
+
+    // Horizontal rule below title
+    const float rule2Y = ruleY + 14.0f + ImGui::GetTextLineHeight() * 2.0f + 20.0f;
+    dl->AddLine(P(cx - 220.0f, rule2Y), P(cx - 10.0f, rule2Y),  kGreenDim, 1.0f);
+    dl->AddLine(P(cx + 10.0f,  rule2Y), P(cx + 220.0f, rule2Y), kGreenDim, 1.0f);
+
+    // ── Animated spinner + status ─────────────────────────────────────────
+    float t = static_cast<float>(glfwGetTime());
+    const char* spinFrames[] = { "|", "/", "-", "\\" };
+    const char* spinner = spinFrames[static_cast<int>(t * 6.0f) % 4];
+
+    bool cameraReady = (m_cameraWidth > 0 && m_renderer && m_renderer->getTextureID() != 0);
+    const char* statusStr = cameraReady ? "CAMERA ONLINE  —  STARTING UP"
+                                        : "INITIALIZING CAMERA...";
+
+    char statusLine[128];
+    std::snprintf(statusLine, sizeof(statusLine), "%s  %s", spinner, statusStr);
+
+    const float statusY = rule2Y + 20.0f;
+    {
+        ImVec2 stSz = ImGui::CalcTextSize(statusLine);
+        ImGui::SetCursorScreenPos(P((W - stSz.x) * 0.5f, statusY));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.784f, 0.392f, 0.85f));
+        ImGui::TextUnformatted(statusLine);
+        ImGui::PopStyleColor();
+    }
+
+    // Animated scanning bar
+    const float barW    = 360.0f;
+    const float barH    = 3.0f;
+    const float barLX   = (W - barW) * 0.5f;
+    const float barY    = statusY + ImGui::GetTextLineHeight() + 14.0f;
+    const float scanPos = barLX + std::fmod(t * 120.0f, barW + 60.0f) - 30.0f;
+    dl->AddRectFilled(P(barLX, barY), P(barLX + barW, barY + barH), IM_COL32(0, 80, 40, 120));
+    dl->AddRectFilled(P(std::max(barLX, scanPos),        barY),
+                      P(std::min(barLX + barW, scanPos + 60.0f), barY + barH),
+                      kGreen);
+
+    // Version / build tag (bottom centre)
+    {
+#ifndef APP_VERSION
+#define APP_VERSION "0.0.0"
+#endif
+        static const std::string verStr = std::string("v") + APP_VERSION + "  //  HORUS";
+        ImVec2 vs = ImGui::CalcTextSize(verStr.c_str());
+        ImGui::SetCursorScreenPos(P((W - vs.x) * 0.5f, H - margin - ImGui::GetTextLineHeight()));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.35f, 0.18f, 1.0f));
+        ImGui::TextUnformatted(verStr.c_str());
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// renderUpdateDialog
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UIManager::renderUpdateDialog() {
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(vp->Pos.x + vp->Size.x * 0.5f, vp->Pos.y + vp->Size.y * 0.5f),
+        ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowViewport(vp->ID);
+
+    ImGui::OpenPopup("##update_dialog");
+    if (!ImGui::BeginPopupModal("##update_dialog", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove     | ImGuiWindowFlags_NoSavedSettings)) {
+        return;
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.85f, 0.45f, 1.0f));
+    ImGui::TextUnformatted("  UPDATE VERFUGBAR");
+    ImGui::PopStyleColor();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    std::string latest = m_updateChecker ? m_updateChecker->getLatestVersion() : "?";
+    ImGui::Text("Aktuelle Version : v" APP_VERSION);
+    ImGui::Text("Neue Version     : %s", latest.c_str());
+
+    std::string notes = m_updateChecker ? m_updateChecker->getReleaseNotes() : "";
+    if (!notes.empty()) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("Release Notes:");
+        ImGui::BeginChild("##release_notes", ImVec2(0, 120), true);
+        ImGui::TextWrapped("%s", notes.c_str());
+        ImGui::EndChild();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Direct download button (only shown when a platform asset was found)
+    std::string dlUrl = m_updateChecker ? m_updateChecker->getDownloadUrl() : "";
+    if (!dlUrl.empty()) {
+        if (ImGui::Button("Herunterladen", ImVec2(160, 0))) {
+            openUrl(dlUrl);
+            m_showUpdateDialog = false;
+            m_updateDismissed  = true;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+    }
+
+    if (ImGui::Button("Release-Seite", ImVec2(dlUrl.empty() ? 200 : 130, 0))) {
+        std::string url = m_updateChecker ? m_updateChecker->getReleaseUrl() : "";
+        if (!url.empty()) openUrl(url);
+        m_showUpdateDialog = false;
+        m_updateDismissed  = true;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Spater", ImVec2(100, 0))) {
+        m_showUpdateDialog = false;
+        m_updateDismissed  = true;
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// renderSetupWizard  —  shown once on first launch, after splash clears
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UIManager::renderSetupWizard() {
+    static const ImVec4 kGreen  = ImVec4(0.0f, 0.85f, 0.45f, 1.0f);
+    static const ImVec4 kDim    = ImVec4(0.55f, 0.55f, 0.55f, 1.0f);
+    static const ImVec4 kBg     = ImVec4(0.07f, 0.10f, 0.07f, 1.0f);
+
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(vp->Pos.x + vp->Size.x * 0.5f, vp->Pos.y + vp->Size.y * 0.5f),
+        ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(520, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowViewport(vp->ID);
+    ImGui::SetNextWindowBgAlpha(0.97f);
+
+    ImGui::OpenPopup("##setup_wizard");
+    if (!ImGui::BeginPopupModal("##setup_wizard", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove     | ImGuiWindowFlags_NoSavedSettings))
+        return;
+
+    // ── Header ───────────────────────────────────────────────────────────
+    ImGui::PushStyleColor(ImGuiCol_Text, kGreen);
+    ImGui::TextUnformatted("  PROJECT HORUS  —  ERSTEINRICHTUNG");
+    ImGui::PopStyleColor();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // ── Step indicator ────────────────────────────────────────────────────
+    const char* kStepLabels[] = { "Willkommen", "Kamera", "Audio", "Modell", "Fertig" };
+    constexpr int kTotalSteps = 5;
+    for (int i = 0; i < kTotalSteps; ++i) {
+        if (i > 0) { ImGui::SameLine(); ImGui::TextDisabled(" › "); ImGui::SameLine(); }
+        if (i == m_setupWizardStep)
+            ImGui::PushStyleColor(ImGuiCol_Text, kGreen);
+        else
+            ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+        ImGui::TextUnformatted(kStepLabels[i]);
+        ImGui::PopStyleColor();
+    }
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // ── Step content ─────────────────────────────────────────────────────
+
+    if (m_setupWizardStep == 0) {
+        // ─ Willkommen ────────────────────────────────────────────────────
+        ImGui::TextWrapped(
+            "Willkommen bei Project Horus!\n\n"
+            "Dieser Einrichtungsassistent hilft dir, die wichtigsten "
+            "Einstellungen in wenigen Schritten zu konfigurieren.\n\n"
+            "Du kannst alle Einstellungen jederzeit im Einstellungs-"
+            "fenster anpassen.");
+
+#ifdef _WIN32
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+        ImGui::TextUnformatted("Plattform: Windows");
+        ImGui::PopStyleColor();
+#elif defined(__APPLE__)
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+        ImGui::TextUnformatted("Plattform: macOS");
+        ImGui::PopStyleColor();
+#endif
+
+    } else if (m_setupWizardStep == 1) {
+        // ─ Kamera ────────────────────────────────────────────────────────
+        ImGui::TextUnformatted("Kameraquelle auswählen:");
+        ImGui::Spacing();
+
+        const auto& status = m_blackboard.getAppStatus();
+        if (!status.cameraDeviceNames.empty()) {
+            // Enumerate detected devices
+            for (int i = 0; i < static_cast<int>(status.cameraDeviceNames.size()); ++i) {
+                const std::string label = std::to_string(status.cameraDeviceIDs[i])
+                                        + "  —  " + status.cameraDeviceNames[i];
+                bool sel = (m_wizardCameraInput[0] != '\0' &&
+                            std::string(m_wizardCameraInput) == std::to_string(status.cameraDeviceIDs[i]));
+                if (ImGui::RadioButton(label.c_str(), sel)) {
+                    const std::string id = std::to_string(status.cameraDeviceIDs[i]);
+                    std::strncpy(m_wizardCameraInput, id.c_str(), sizeof(m_wizardCameraInput) - 1);
+                    m_wizardCameraInput[sizeof(m_wizardCameraInput) - 1] = '\0';
+                }
+            }
+            ImGui::Spacing();
+            ImGui::TextDisabled("— oder manuell eingeben —");
+        } else {
+            ImGui::TextDisabled("(Kameraerkennung läuft…)");
+        }
+
+        ImGui::Spacing();
+        ImGui::SetNextItemWidth(260.0f);
+        ImGui::InputText("Index / URL##wiz_cam", m_wizardCameraInput,
+                         sizeof(m_wizardCameraInput));
+        ImGui::TextDisabled("Zahl = lokale Kamera (0, 1, …)   |   rtsp://… = Netzwerk-Stream");
+
+    } else if (m_setupWizardStep == 2) {
+        // ─ Audio ─────────────────────────────────────────────────────────
+        ImGui::TextUnformatted("Audioeingang (optional — für Audio-Visualizer):");
+        ImGui::Spacing();
+
+        const auto& status = m_blackboard.getAppStatus();
+
+        bool sel_none = (m_wizardAudioIdx == -1);
+        if (ImGui::RadioButton("Kein Audioeingang##wiz_audio_none", sel_none))
+            m_wizardAudioIdx = -1;
+
+        for (int i = 0; i < static_cast<int>(status.audioDeviceNames.size()); ++i) {
+            bool sel = (m_wizardAudioIdx == static_cast<int>(status.audioDeviceIDs[i]));
+            const std::string label = status.audioDeviceNames[i] + "##wiz_audio_" + std::to_string(i);
+            if (ImGui::RadioButton(label.c_str(), sel))
+                m_wizardAudioIdx = static_cast<int>(status.audioDeviceIDs[i]);
+        }
+        if (status.audioDeviceNames.empty())
+            ImGui::TextDisabled("(Keine Eingabegeräte gefunden)");
+
+    } else if (m_setupWizardStep == 3) {
+        // ─ Modell ─────────────────────────────────────────────────────────
+        ImGui::TextUnformatted("Erkennungsmodell:");
+        ImGui::Spacing();
+
+        if (ImGui::RadioButton("YOLOv8s  —  Genauer, langsamer (empfohlen)##wiz_model_s",
+                               m_wizardModelIdx == 0))
+            m_wizardModelIdx = 0;
+        ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+        ImGui::TextUnformatted("    Besser für statische Szenen und hohe Erkennungsrate.");
+        ImGui::PopStyleColor();
+        ImGui::Spacing();
+        if (ImGui::RadioButton("YOLOv8n  —  Schneller, leichter##wiz_model_n",
+                               m_wizardModelIdx == 1))
+            m_wizardModelIdx = 1;
+        ImGui::PushStyleColor(ImGuiCol_Text, kDim);
+        ImGui::TextUnformatted("    Für schwächere Hardware oder Echtzeit-Anforderungen.");
+        ImGui::PopStyleColor();
+
+    } else if (m_setupWizardStep == 4) {
+        // ─ Fertig ─────────────────────────────────────────────────────────
+        ImGui::PushStyleColor(ImGuiCol_Text, kGreen);
+        ImGui::TextUnformatted("Einrichtung abgeschlossen!");
+        ImGui::PopStyleColor();
+        ImGui::Spacing();
+
+        ImGui::Text("Kamera:  %s", m_wizardCameraInput);
+        if (m_wizardAudioIdx >= 0) {
+            ImGui::Text("Audio:   Gerät %d", m_wizardAudioIdx);
+        } else {
+            ImGui::TextUnformatted("Audio:   Kein Eingang");
+        }
+        ImGui::Text("Modell:  %s", m_wizardModelIdx == 0 ? "YOLOv8s" : "YOLOv8n");
+        ImGui::Spacing();
+        ImGui::TextWrapped("Diese Einstellungen können jederzeit über das Einstellungsfenster geändert werden.");
+    }
+
+    // ── Navigation ────────────────────────────────────────────────────────
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (m_setupWizardStep > 0) {
+        if (ImGui::Button("< Zurück##wiz_back", ImVec2(100, 0)))
+            --m_setupWizardStep;
+        ImGui::SameLine();
+    }
+
+    const bool isLastStep = (m_setupWizardStep == kTotalSteps - 1);
+    const char* nextLabel = isLastStep ? "Starten  >" : "Weiter  >";
+
+    // Align next/finish button to right
+    float buttonW = isLastStep ? 130.0f : 110.0f;
+    ImGui::SetCursorPosX(ImGui::GetContentRegionAvail().x - buttonW +
+                         (m_setupWizardStep > 0 ? 108.0f : 0.0f));
+
+    if (ImGui::Button(nextLabel, ImVec2(buttonW, 0))) {
+        if (isLastStep) {
+            // Apply wizard choices
+            if (m_wizardCameraInput[0] != '\0')
+                m_cameraAddress = std::string(m_wizardCameraInput);
+
+            // Apply model choice
+            m_settings.detectorModel = m_wizardModelIdx;
+
+            // Apply audio capture device
+            if (m_wizardAudioIdx >= 0) {
+                m_settings.audioCaptureEnabled  = true;
+                m_settings.audioCaptureDeviceId = static_cast<uint32_t>(m_wizardAudioIdx);
+            } else {
+                m_settings.audioCaptureEnabled = false;
+            }
+
+            // Propagate to blackboard and save — this also writes setup_complete=1
+            pushSettingsToBlackboard();
+            savePersistedSettings();
+
+            m_setupWizardActive = false;
+            m_setupWizardStep   = 0;
+            ImGui::CloseCurrentPopup();
+        } else {
+            ++m_setupWizardStep;
+        }
+    }
+
+    ImGui::EndPopup();
 }

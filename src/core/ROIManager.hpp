@@ -48,6 +48,9 @@ public:
 
     // Remove a zone by ID.
     void removeROI(int id);
+    
+    // Remove all zones.
+    void clearAll();
 
     // Toggle active state for a zone.
     void toggleROI(int id);

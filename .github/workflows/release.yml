@@ -1,0 +1,206 @@
+name: Release
+
+# Fires on every version tag push (e.g. v1.16.7)
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write   # needed to create releases and upload assets
+
+# ─────────────────────────────────────────────────────────────────────────────
+# macOS build  (arm64, macos-15)
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  build-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install opencv glfw glew curl sqlite3
+
+      - name: Configure
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release -j$(sysctl -n hw.ncpu)
+
+      - name: Ad-hoc sign (reduces Gatekeeper friction)
+        run: codesign --deep --force --sign - build/Tactileviewer.app
+
+      - name: Package
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          cd build
+          zip -r "../Tactileviewer-${TAG}-macos.zip" Tactileviewer.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-zip
+          path: Tactileviewer-*.zip
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Windows build
+# ─────────────────────────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Use bash so square brackets in feature flags aren't misinterpreted by PowerShell
+      - name: Install vcpkg dependencies
+        shell: bash
+        run: |
+          vcpkg install \
+            "opencv4[core,dnn,videoio]:x64-windows" \
+            "glfw3:x64-windows" \
+            "glew:x64-windows" \
+            "curl:x64-windows" \
+            "sqlite3:x64-windows"
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -B build -S . `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DVCPKG_APPLOCAL_DEPS=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $TAG  = $env:GITHUB_REF_NAME
+          $DIST = "dist\Tactileviewer"
+          New-Item -ItemType Directory -Force -Path "$DIST\assets\models" | Out-Null
+
+          # Executable
+          Copy-Item "build\Release\Tactileviewer.exe" $DIST
+
+          # DLLs: VCPKG_APPLOCAL_DEPS copies them next to the exe at build time;
+          # also pull from vcpkg bin as a belt-and-suspenders fallback.
+          Get-ChildItem "build\Release\*.dll" -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $DIST
+          Get-ChildItem "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\*.dll" -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $DIST
+
+          # Model assets
+          Copy-Item "assets\models\*" "$DIST\assets\models\"
+
+          # Usage note
+          @"
+Project Horus — Tactileviewer $TAG
+=====================================
+Starte Tactileviewer.exe direkt aus diesem Ordner.
+Bewege die Datei nicht ohne den restlichen Ordnerinhalt.
+"@ | Set-Content "$DIST\START.txt"
+
+          Compress-Archive -Path "dist\Tactileviewer\*" `
+                           -DestinationPath "Tactileviewer-${TAG}-windows.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: Tactileviewer-*-windows.zip
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Linux build  (ubuntu-22.04)
+# ─────────────────────────────────────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libopencv-dev \
+            libglfw3-dev \
+            libglew-dev \
+            libcurl4-openssl-dev \
+            libsqlite3-dev
+
+      - name: Configure
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release -j$(nproc)
+
+      - name: Package
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          DIST="dist/Tactileviewer"
+          mkdir -p "$DIST/assets/models"
+
+          cp build/Tactileviewer "$DIST/"
+          cp assets/models/* "$DIST/assets/models/"
+
+          # Launcher script — sets CWD to app dir so relative model paths work
+          cat > "$DIST/start.sh" << 'EOF'
+#!/bin/sh
+DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DIR"
+exec ./Tactileviewer "$@"
+EOF
+          chmod +x "$DIST/start.sh"
+
+          # Bundle non-core shared libs (OpenCV, etc.) that may differ across distros
+          ldd build/Tactileviewer | awk '/=> \// { print $3 }' | \
+            grep -Ev "libGL|libX|libc\.|libm\.|libpthread|libdl\.|librt\.|libstdc\+\+" | \
+            xargs -I{} cp -n {} "$DIST/" 2>/dev/null || true
+
+          cd dist
+          zip -r "../Tactileviewer-${TAG}-linux.zip" Tactileviewer/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-zip
+          path: Tactileviewer-*-linux.zip
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Create GitHub Release
+# ─────────────────────────────────────────────────────────────────────────────
+  create-release:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/*.zip
+          body: |
+            ## Installation
+
+            | Platform | Datei | Hinweis |
+            |----------|-------|---------|
+            | **Windows** | `Tactileviewer-*-windows.zip` | Entpacken → `Tactileviewer.exe` starten |
+            | **macOS** | `Tactileviewer-*-macos.zip` | Entpacken → App in Programme ziehen. Beim ersten Start: Rechtsklick → Öffnen |
+            | **Linux** | `Tactileviewer-*-linux.zip` | Entpacken → `./start.sh` oder `./Tactileviewer` |
+
+            > **macOS:** Da die App nicht notarisiert ist, erscheint beim ersten Start ein Sicherheitsdialog.
+            > Rechtsklick auf die App → „Öffnen" umgeht das.
+            >
+            > **Windows:** Windows Defender SmartScreen kann beim ersten Start warnen.
+            > „Weitere Informationen" → „Trotzdem ausführen" bestätigen.
