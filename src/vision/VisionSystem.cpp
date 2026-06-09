@@ -360,6 +360,10 @@ void VisionSystem::workerLoop() {
             m_captureNewFrameVision = false;
         }
 
+        // One iteration = one tracker update. Lag is measured in these units so it shares
+        // the Kalman velocity time base (px/iteration), unlike the capture-frame counter.
+        ++m_workerFrameCounter;
+
         auto now   = std::chrono::steady_clock::now();
         currentFps = 1.0f / std::chrono::duration<float>(now - lastTime).count();
         lastTime   = now;
@@ -560,8 +564,8 @@ void VisionSystem::workerLoop() {
         if (m_trackingSystem) {
             if (pendingDetections) {
                 hasNewDetections = true;
-                detectorLag = static_cast<int>(
-                    static_cast<uint64_t>(curStatus.totalFramesProcessed) - detectionTriggerFrame);
+                // Lag in worker iterations (same time base as Kalman velocity).
+                detectorLag = static_cast<int>(m_workerFrameCounter - detectionTriggerFrame);
                 pendingDetections = false;
             }
 
@@ -609,7 +613,7 @@ void VisionSystem::workerLoop() {
                 std::lock_guard<std::mutex> lock(m_detectorMutex);
                 m_detectorFrameCopy = trackingFrame; // Shallow copy
                 m_detectorSettingsCopy = settings;
-                m_detectorTriggerFrame = curStatus.totalFramesProcessed;
+                m_detectorTriggerFrame = static_cast<int>(m_workerFrameCounter);
                 m_detectorBusy         = true;
                 m_detectorCv.notify_one();
             }

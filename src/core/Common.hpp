@@ -158,7 +158,7 @@ struct SystemSettings {
     // ----------------------------------------------------------------
     // Multi-Tracker Settings
     // ----------------------------------------------------------------
-    int   trackerMaxLostFrames    = 12;       // Reduced: removes ghost tracks faster
+    int   trackerMaxLostFrames    = 30;       // ~1s tolerance: survives brief misses/occlusion (coast track stays visible)
     float trackerMinMatchIOU      = 0.20f;    // Slightly lower IOU requirement for 4K jitter
     int   trackerMaxTrailLength   = 30;
     bool  showTrails              = true;

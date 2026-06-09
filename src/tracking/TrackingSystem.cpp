@@ -438,14 +438,23 @@ cv::Point2d TrackingSystem::estimateCameraMotion(const cv::Mat& frame,
 
             if (goodPrev.size() >= 6) {
                 // Partial affine (Translation + Rotation + uniform Scale), RANSAC filters outliers
+                cv::Mat inliers;
                 cv::Mat affine = cv::estimateAffinePartial2D(
-                    goodPrev, goodCurr, cv::noArray(), cv::RANSAC, 3.0);
+                    goodPrev, goodCurr, inliers, cv::RANSAC, 3.0);
 
-                if (!affine.empty()) {
+                // Inlier gating: a trustworthy global motion needs a clear consensus of
+                // static features. Otherwise (foreground motion, low texture) we self-disable
+                // the compensation rather than shoving every track by a bad estimate.
+                const int inlierCount = cv::countNonZero(inliers);
+                const double inlierRatio = goodPrev.empty() ? 0.0
+                    : static_cast<double>(inlierCount) / static_cast<double>(goodPrev.size());
+
+                if (!affine.empty() && inlierCount >= 12 && inlierRatio >= 0.40) {
                     const double dx = affine.at<double>(0, 2);
                     const double dy = affine.at<double>(1, 2);
-                    // Plausibility guard: reject shifts exceeding 25 % of frame width
-                    const double maxShift = 0.25 * frame.cols;
+                    // Plausibility guard: a real pan rarely moves the scene more than
+                    // ~8 % of frame width per frame at 30 fps.
+                    const double maxShift = 0.08 * frame.cols;
                     if (std::abs(dx) <= maxShift && std::abs(dy) <= maxShift) {
                         motion.x = dx;
                         motion.y = dy;
@@ -455,6 +464,11 @@ cv::Point2d TrackingSystem::estimateCameraMotion(const cv::Mat& frame,
         }
     }
     m_prevFrameGray = grayFrame.clone();
+
+    // Temporal smoothing dampens single-frame outliers before the shift hits every track.
+    motion.x = 0.6 * motion.x + 0.4 * m_prevCameraMotion.x;
+    motion.y = 0.6 * motion.y + 0.4 * m_prevCameraMotion.y;
+    m_prevCameraMotion = motion;
     return motion;
 }
 

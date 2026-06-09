@@ -101,7 +101,8 @@ private:
     bool                     m_trackingHasNewDetections = true;
 
     // Kamerabewegungsschätzung (Ego-Motion via Sparse Optical Flow)
-    cv::Mat  m_prevFrameGray;
+    cv::Mat      m_prevFrameGray;
+    cv::Point2d  m_prevCameraMotion{0.0, 0.0}; // for temporal smoothing of the ego-motion estimate
 
     // Pixel template tracking state
     bool     m_pixelLockActive = false;

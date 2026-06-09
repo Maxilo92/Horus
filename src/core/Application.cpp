@@ -523,5 +523,16 @@ void Application::drawSplashFrame() {
     glClearColor(0.020f, 0.035f, 0.020f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+    // Multi-viewport contract: with ViewportsEnable set, every frame must end with these
+    // calls (same as the main render loop in UIManager). Without them, the next NewFrame()
+    // aborts with the "Forgot to call UpdatePlatformWindows()" sanity-check assertion.
+    if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        GLFWwindow* backup = glfwGetCurrentContext();
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
+        glfwMakeContextCurrent(backup);
+    }
+
     glfwSwapBuffers(m_window);
 }

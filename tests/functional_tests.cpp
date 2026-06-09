@@ -212,11 +212,11 @@ TEST(MultiTrackerFunctionalTest, VelocityEstimation) {
 
     // Frame 0: (100, 100)
     Detection d1; d1.box = cv::Rect(100, 100, 50, 50); d1.className = "test";
-    tracker.update({d1}, settings);
+    tracker.update({d1}, settings, cv::Size(1280, 720));
 
     // Frame 1: (110, 105) -> dx=10, dy=5
     Detection d2; d2.box = cv::Rect(110, 105, 50, 50); d2.className = "test";
-    tracker.update({d2}, settings);
+    tracker.update({d2}, settings, cv::Size(1280, 720));
 
     auto objects = tracker.getTrackedObjects(10);
     ASSERT_EQ(objects.size(), 1);

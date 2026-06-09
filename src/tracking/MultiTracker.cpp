@@ -113,7 +113,7 @@ void MultiTracker::update(const std::vector<Detection>& detections,
                           bool detectorRan)
 {
     const int nDets = static_cast<int>(detections.size());
-    const int safeLag = std::clamp(lagFrames, 0, 30); // 30 frames ≈ 1 s at 30 fps, caps extreme network jitter
+    const int safeLag = std::clamp(lagFrames, 0, 10); // cap extrapolation horizon; large lag only adds noise
 
     // --- Phase 1: Kalman-Predict für alle aktiven Tracks ---
     std::vector<int>     trackIds;
@@ -183,10 +183,15 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             if (safeLag > 0 && !det.is_recovery) {
                 double vx = track.kf.statePost.at<double>(4);
                 double vy = track.kf.statePost.at<double>(5);
-                
-                // Velocity Plausibility Guard: limit extrapolation to 50% of frame dimensions
-                double maxJumpX = frameSize.width  * 0.5;
-                double maxJumpY = frameSize.height * 0.5;
+
+                // Velocity Plausibility Guard: cap extrapolation to a few object diagonals,
+                // never more than 25% of the frame — prevents boxes teleporting on lag spikes
+                // while still allowing genuine fast motion. Must stay consistent with the
+                // matching extrapolation in computeCostMatrix, otherwise matches break.
+                const double objDiag = std::hypot(static_cast<double>(extBox.width),
+                                                  static_cast<double>(extBox.height));
+                double maxJumpX = std::min(3.0 * objDiag, frameSize.width  * 0.25);
+                double maxJumpY = std::min(3.0 * objDiag, frameSize.height * 0.25);
                 double dx = std::clamp(safeLag * vx, -maxJumpX, maxJumpX);
                 double dy = std::clamp(safeLag * vy, -maxJumpY, maxJumpY);
                 
@@ -202,9 +207,9 @@ void MultiTracker::update(const std::vector<Detection>& detections,
             measurement.at<double>(3) = static_cast<double>(extBox.height);
             track.kf.correct(measurement);
 
-            // Hard Velocity Cap: Prevent extreme velocity build-up (max 100 px/frame)
-            track.kf.statePost.at<double>(4) = std::clamp(track.kf.statePost.at<double>(4), -100.0, 100.0);
-            track.kf.statePost.at<double>(5) = std::clamp(track.kf.statePost.at<double>(5), -100.0, 100.0);
+            // Hard Velocity Cap: Prevent extreme velocity build-up (max 60 px/frame ≈ 1800 px/s @30fps)
+            track.kf.statePost.at<double>(4) = std::clamp(track.kf.statePost.at<double>(4), -60.0, 60.0);
+            track.kf.statePost.at<double>(5) = std::clamp(track.kf.statePost.at<double>(5), -60.0, 60.0);
 
             track.confidence    = det.confidence;
             track.lost_frames   = 0;
@@ -415,8 +420,12 @@ std::vector<std::vector<MatchCost>> MultiTracker::computeCostMatrix(
                 const auto& track = m_tracks.at(trackIds[ti]);
                 double vx = track.kf.statePost.at<double>(4);
                 double vy = track.kf.statePost.at<double>(5);
-                db.x += static_cast<int>(std::round(lagFrames * vx));
-                db.y += static_cast<int>(std::round(lagFrames * vy));
+                // Same guard as the measurement path (kept consistent so matches don't break):
+                // cap the lag shift to a few object diagonals.
+                const double maxShift = 3.0 * std::hypot(static_cast<double>(db.width),
+                                                         static_cast<double>(db.height));
+                db.x += static_cast<int>(std::round(std::clamp(lagFrames * vx, -maxShift, maxShift)));
+                db.y += static_cast<int>(std::round(std::clamp(lagFrames * vy, -maxShift, maxShift)));
             }
             const float dcx = static_cast<float>(db.x + db.width  / 2);
             const float dcy = static_cast<float>(db.y + db.height / 2);
