@@ -91,7 +91,8 @@ struct TargetSnapshot {
     cv::Mat image;
     std::string timestamp;
     cv::Rect box;
-    float confidence = 0.0f;
+    float confidence  = 0.0f;
+    float qualityScore = 0.0f; // Laplacian-variance × confidence × completeness
 };
 
 // Target History: Eindeutige Targets zur Aufzeichnung und Analyse
@@ -131,6 +132,9 @@ struct UniqueTargetRecord {
 
     // Manual selection sync from UI to worker (-1 = auto)
     int snapshot_mid_manual_idx = -1;
+
+    // Highest-quality snapshot seen so far (used as AI dossier crop)
+    TargetSnapshot snapshot_best;
 
     // Adaptive decimation state
     int current_snapshot_interval_ms = 500;

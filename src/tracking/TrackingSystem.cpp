@@ -8,6 +8,34 @@
 #include <sys/qos.h>
 #endif
 
+// Returns a quality score in [0, 1] for a snapshot crop.
+// Combines sharpness (Laplacian variance), detection confidence, and
+// whether the bounding box is fully inside the frame.
+static float computeSnapQuality(const cv::Mat& crop, float confidence,
+                                 const cv::Rect& box, cv::Size frameSize) {
+    if (crop.empty()) return 0.0f;
+
+    // Sharpness: variance of the Laplacian on a grayscale crop.
+    // 200 = "clearly sharp" reference point; capped at 1.0.
+    cv::Mat gray;
+    if (crop.channels() == 3) cv::cvtColor(crop, gray, cv::COLOR_BGR2GRAY);
+    else gray = crop;
+    cv::Mat lap;
+    cv::Laplacian(gray, lap, CV_64F);
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(lap, mean, stddev);
+    float sharpness = std::min(1.0f, static_cast<float>(stddev[0] * stddev[0]) / 200.0f);
+
+    // Completeness: full score if box doesn't touch any frame edge.
+    constexpr int kEdgeMargin = 3;
+    bool clipped = (box.x <= kEdgeMargin || box.y <= kEdgeMargin ||
+                    box.x + box.width  >= frameSize.width  - kEdgeMargin ||
+                    box.y + box.height >= frameSize.height - kEdgeMargin);
+    float completeness = clipped ? 0.75f : 1.0f;
+
+    return sharpness * (0.7f + 0.3f * confidence) * completeness;
+}
+
 TrackingSystem::TrackingSystem(Blackboard& blackboard, ROIManager& roiManager,
                                DataLogger& dataLogger, AudioEngine& audioEngine,
                                LogFn logFn)
@@ -1072,11 +1100,14 @@ void TrackingSystem::updateTargetHistory(const std::vector<TrackedObject>& activ
 
             if (roi.width > 0 && roi.height > 0) {
                 TargetSnapshot snap;
-                snap.image     = currentFrame(roi).clone();
-                snap.timestamp = timestamp;
-                snap.box       = obj.box;
-                snap.confidence = obj.confidence;
+                snap.image        = currentFrame(roi).clone();
+                snap.timestamp    = timestamp;
+                snap.box          = obj.box;
+                snap.confidence   = obj.confidence;
+                snap.qualityScore = computeSnapQuality(snap.image, snap.confidence,
+                                                       snap.box, currentFrame.size());
                 rec.snapshot_first = rec.snapshot_mid = rec.snapshot_last = snap;
+                rec.snapshot_best  = snap;
                 rec.periodic_snapshots.push_back(snap);
             }
             rec.last_snapshot_time       = std::chrono::steady_clock::now();
@@ -1113,10 +1144,14 @@ void TrackingSystem::updateTargetHistory(const std::vector<TrackedObject>& activ
                 if (roi.width <= 0 || roi.height <= 0) return;
 
                 TargetSnapshot snap;
-                snap.image     = currentFrame(roi).clone();
-                snap.timestamp = timestamp;
-                snap.box       = obj.box;
-                snap.confidence = obj.confidence;
+                snap.image        = currentFrame(roi).clone();
+                snap.timestamp    = timestamp;
+                snap.box          = obj.box;
+                snap.confidence   = obj.confidence;
+                snap.qualityScore = computeSnapQuality(snap.image, snap.confidence,
+                                                        snap.box, currentFrame.size());
+                if (snap.qualityScore > it->snapshot_best.qualityScore)
+                    it->snapshot_best = snap;
                 it->periodic_snapshots.push_back(snap);
                 it->last_snapshot_time = now;
 

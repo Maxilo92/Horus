@@ -770,11 +770,23 @@ void VisionSystem::workerLoop() {
                 if (duration >= settings.aiStabilitySec && !info.reidDone) {
                     // Extract embedding
                     cv::Rect roi = track.box;
-                    if (roi.x >= 0 && roi.y >= 0 && 
-                        roi.x + roi.width <= trackingFrame.cols && 
+                    if (roi.x >= 0 && roi.y >= 0 &&
+                        roi.x + roi.width <= trackingFrame.cols &&
                         roi.y + roi.height <= trackingFrame.rows) {
-                        
-                        cv::Mat crop = trackingFrame(roi).clone();
+
+                        // Use the best-quality snapshot collected so far instead of the
+                        // arbitrary current frame — TrackingSystem scores every periodic
+                        // snapshot with Laplacian variance and keeps the sharpest one.
+                        cv::Mat crop;
+                        for (const auto& rec : tState.targetHistory) {
+                            if (rec.track_id == track.track_id &&
+                                !rec.snapshot_best.image.empty()) {
+                                crop = rec.snapshot_best.image; // shallow copy — immutable Mat
+                                break;
+                            }
+                        }
+                        if (crop.empty())
+                            crop = trackingFrame(roi).clone(); // fallback: current frame
                         std::vector<float> embedding;
                         if (m_reidManager) embedding = m_reidManager->extractFeatures(crop);
 
