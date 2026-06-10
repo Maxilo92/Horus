@@ -44,11 +44,22 @@ UIManager::UIManager(Blackboard& blackboard, ROIManager& roiManager,
 {
     m_appStart      = std::chrono::steady_clock::now();
     m_lastRenderTime = m_appStart;
+
+    // Initialize model list for installation check
+    const std::string baseUrl = "https://github.com/Maxilo92/Horus/releases/download/v0.12.0/";
+    m_modelStatuses = {
+        {"YOLOv8s (Genau)", "yolov8s.onnx", baseUrl + "yolov8s.onnx"},
+        {"YOLOv8n (Schnell)", "yolov8n.onnx", baseUrl + "yolov8n.onnx"},
+        {"Labels (COCO)", "coco.txt", baseUrl + "coco.txt"},
+        {"Gesichtserkennung (Detektor)", "face_detection_yunet_2023mar.onnx", baseUrl + "face_detection_yunet_2023mar.onnx"},
+        {"Gesichtserkennung (Feature)", "face_recognition_sface_2021dec.onnx", baseUrl + "face_recognition_sface_2021dec.onnx"}
+    };
     
     m_devConsolePanel = std::make_unique<DevConsolePanel>();
     m_analyzerPanel   = std::make_unique<AnalyzerPanel>();
     m_audioVisualizerPanel = std::make_unique<AudioVisualizerPanel>();
     m_replayPanel     = std::make_unique<ReplayPanel>();
+    m_radarPanel      = std::make_unique<RadarPanel>();
 
     m_exportWorkerRunning = true;
     m_exportWorker = std::thread(&UIManager::exportWorkerLoop, this);
@@ -193,7 +204,18 @@ void UIManager::update() {
     m_zoomHeight    = vision.zoomHeight;
 
     m_trackedObjects = tracking.activeTracks;
-    m_lockedTarget   = tracking.lockedTarget;
+    
+    // Support manual drag/edit: don't overwrite the locked target box if the user is currently 
+    // manipulating the pixel target (ID 999). This prevents "jumping" back to the last tracked 
+    // position before the tracking thread has processed the update.
+    if (m_editZoneId == 999 && m_editState != ROIEditState::NONE) {
+        cv::Rect localBox = m_lockedTarget.box;
+        m_lockedTarget = tracking.lockedTarget;
+        m_lockedTarget.box = localBox;
+    } else {
+        m_lockedTarget = tracking.lockedTarget;
+    }
+
     m_targetHistory  = tracking.targetHistory;
     m_motionRegions  = det.motionRegions;
     m_detections     = det.detections;
@@ -206,13 +228,13 @@ void UIManager::update() {
     // m_cameraAddress = status.cameraAddress; <--- Removed to fix persistence bug
 
     // ── Display frame (fast-path from capture thread) ─────────────────────
+    cv::Mat displayFrame;
     {
-        cv::Mat frame;
-        if (m_blackboard.consumeDisplayFrame(frame) && !frame.empty()) {
-            m_renderer->updateTexture(frame);
+        if (m_blackboard.consumeDisplayFrame(displayFrame) && !displayFrame.empty()) {
+            m_renderer->updateTexture(displayFrame);
             // Cache dimensions directly from frame — VisionState may lag on first frames
-            if (m_cameraWidth  == 0) m_cameraWidth  = frame.cols;
-            if (m_cameraHeight == 0) m_cameraHeight = frame.rows;
+            if (m_cameraWidth  == 0) m_cameraWidth  = displayFrame.cols;
+            if (m_cameraHeight == 0) m_cameraHeight = displayFrame.rows;
         }
     }
 
@@ -316,6 +338,7 @@ void UIManager::update() {
             ImGui::Separator();
             if (ImGui::MenuItem("Data Panel",  nullptr, &m_showDataPanel))   savePersistedSettings();
             if (ImGui::MenuItem("Zoom Window", "Z",     &m_showZoomWindow))  savePersistedSettings();
+            if (ImGui::MenuItem("Radar",       nullptr, &m_showRadar))       savePersistedSettings();
             ImGui::Separator();
             if (ImGui::MenuItem("Keyboard Shortcuts", "F1"))
                 m_showShortcutHelp = true;
@@ -403,14 +426,13 @@ void UIManager::update() {
     if (m_showTargetAnalyzer)  renderTargetAnalyzer(tracking);
     if (m_showDossierPanel)    renderDossierPanel(dossier);
     if (m_dossierArchivePanel) m_dossierArchivePanel->render(&m_showDossierArchive);
+    if (m_showRadar)           renderRadar();
     
     // Replay Control Panel
     if (m_replayPanel) m_replayPanel->render(m_blackboard);
 
     // CameraView (the big one)
-    cv::Mat frameForHUD;
-    m_blackboard.consumeDisplayFrame(frameForHUD);
-    renderCameraView(frameForHUD, m_trackedObjects, m_lockedTarget, m_motionRegions, vision);
+    renderCameraView(displayFrame, m_trackedObjects, m_lockedTarget, m_motionRegions, vision);
 
     // Feedback modal
     if (m_showFeedbackWindow) {
@@ -563,10 +585,9 @@ void UIManager::renderSplashScreen() {
     // Convenience lambda: local → screen coords
     auto P = [&](float x, float y) { return ImVec2(ox + x, oy + y); };
 
-    const ImU32 kGreen      = IM_COL32(0,   200, 100, 255);
-    const ImU32 kGreenDim   = IM_COL32(0,   140,  70, 180);
-    const ImU32 kGreenFaint = IM_COL32(0,   200, 100,  40);
-    const ImU32 kBg         = IM_COL32(8,   12,   8, 255);
+    const ImU32 kGreen    = IM_COL32(0, 200, 100, 255);
+    const ImU32 kGreenDim = IM_COL32(0, 140,  70, 180);
+    const ImU32 kBg       = IM_COL32(8,  12,   8, 255);
 
     // Background fill
     dl->AddRectFilled(P(0, 0), P(W, H), kBg);
@@ -598,7 +619,7 @@ void UIManager::renderSplashScreen() {
     // Center decorative circle
     const float cx = W * 0.5f;
     const float cy = H * 0.40f;
-    dl->AddCircle(P(cx, cy), 80.0f, kGreenFaint, 64, 1.0f);
+    dl->AddCircle(P(cx, cy), 80.0f, IM_COL32(0, 200, 100, 40), 64, 1.0f);
     dl->AddCircle(P(cx, cy), 82.0f, kGreenDim,   64, 0.5f);
 
     // Horizontal rule above title
@@ -632,37 +653,18 @@ void UIManager::renderSplashScreen() {
     dl->AddLine(P(cx - 220.0f, rule2Y), P(cx - 10.0f, rule2Y),  kGreenDim, 1.0f);
     dl->AddLine(P(cx + 10.0f,  rule2Y), P(cx + 220.0f, rule2Y), kGreenDim, 1.0f);
 
-    // ── Animated spinner + status ─────────────────────────────────────────
-    float t = static_cast<float>(glfwGetTime());
-    const char* spinFrames[] = { "|", "/", "-", "\\" };
-    const char* spinner = spinFrames[static_cast<int>(t * 6.0f) % 4];
-
+    // ── Status text (static) ─────────────────────────────────────────────
     bool cameraReady = (m_cameraWidth > 0 && m_renderer && m_renderer->getTextureID() != 0);
-    const char* statusStr = cameraReady ? "CAMERA ONLINE  —  STARTING UP"
-                                        : "INITIALIZING CAMERA...";
-
-    char statusLine[128];
-    std::snprintf(statusLine, sizeof(statusLine), "%s  %s", spinner, statusStr);
+    const char* statusStr = cameraReady ? "CAMERA ONLINE" : "INITIALIZING CAMERA...";
 
     const float statusY = rule2Y + 20.0f;
     {
-        ImVec2 stSz = ImGui::CalcTextSize(statusLine);
+        ImVec2 stSz = ImGui::CalcTextSize(statusStr);
         ImGui::SetCursorScreenPos(P((W - stSz.x) * 0.5f, statusY));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.784f, 0.392f, 0.85f));
-        ImGui::TextUnformatted(statusLine);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.784f, 0.392f, 0.75f));
+        ImGui::TextUnformatted(statusStr);
         ImGui::PopStyleColor();
     }
-
-    // Animated scanning bar
-    const float barW    = 360.0f;
-    const float barH    = 3.0f;
-    const float barLX   = (W - barW) * 0.5f;
-    const float barY    = statusY + ImGui::GetTextLineHeight() + 14.0f;
-    const float scanPos = barLX + std::fmod(t * 120.0f, barW + 60.0f) - 30.0f;
-    dl->AddRectFilled(P(barLX, barY), P(barLX + barW, barY + barH), IM_COL32(0, 80, 40, 120));
-    dl->AddRectFilled(P(std::max(barLX, scanPos),        barY),
-                      P(std::min(barLX + barW, scanPos + 60.0f), barY + barH),
-                      kGreen);
 
     // Version / build tag (bottom centre)
     {
@@ -757,6 +759,71 @@ void UIManager::renderUpdateDialog() {
 // renderSetupWizard  —  shown once on first launch, after splash clears
 // ─────────────────────────────────────────────────────────────────────────────
 
+static std::filesystem::path getExecutableDir() {
+#ifdef _WIN32
+    char path[MAX_PATH];
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+    return std::filesystem::path(path).parent_path();
+#elif defined(__APPLE__)
+    // Rough estimate for macOS bundle or dev build
+    return std::filesystem::current_path();
+#else
+    return std::filesystem::read_symlink("/proc/self/exe").parent_path();
+#endif
+}
+
+void UIManager::checkModelsExist() {
+    auto exeDir = getExecutableDir();
+    std::vector<std::filesystem::path> searchPaths = {
+        exeDir / "assets" / "models",
+        exeDir / ".." / "Resources",
+        exeDir / "Resources",
+        std::filesystem::path(m_settingsPath).parent_path() / "models"
+    };
+
+    for (auto& status : m_modelStatuses) {
+        status.exists = false;
+        for (const auto& sp : searchPaths) {
+            if (std::filesystem::exists(sp / status.filename)) {
+                status.exists = true;
+                break;
+            }
+        }
+        
+        // Update progress if currently downloading
+        if (m_updateChecker && status.downloading) {
+            if (m_updateChecker->getDownloadState() == DownloadState::COMPLETED) {
+                status.exists = true;
+                status.downloading = false;
+                status.progress = 1.0f;
+            } else if (m_updateChecker->getDownloadState() == DownloadState::FAILED) {
+                status.downloading = false;
+                status.progress = 0.0f;
+            } else {
+                status.progress = m_updateChecker->getDownloadProgress();
+            }
+        }
+    }
+}
+
+void UIManager::startModelDownload(int idx) {
+    if (!m_updateChecker || idx < 0 || idx >= static_cast<int>(m_modelStatuses.size())) return;
+    
+    auto& status = m_modelStatuses[idx];
+    if (status.exists || status.downloading) return;
+
+    auto destDir = std::filesystem::path(m_settingsPath).parent_path() / "models";
+    std::filesystem::create_directories(destDir);
+    
+    status.downloading = true;
+    m_updateChecker->downloadFileAsync(status.url, (destDir / status.filename).string());
+}
+
+bool UIManager::allModelsPresent() {
+    for (const auto& s : m_modelStatuses) if (!s.exists) return false;
+    return true;
+}
+
 void UIManager::renderSetupWizard() {
     static const ImVec4 kGreen  = ImVec4(0.0f, 0.85f, 0.45f, 1.0f);
     static const ImVec4 kDim    = ImVec4(0.55f, 0.55f, 0.55f, 1.0f);
@@ -784,8 +851,8 @@ void UIManager::renderSetupWizard() {
     ImGui::Spacing();
 
     // ── Step indicator ────────────────────────────────────────────────────
-    const char* kStepLabels[] = { "Willkommen", "Kamera", "Audio", "Modell", "Fertig" };
-    constexpr int kTotalSteps = 5;
+    const char* kStepLabels[] = { "Willkommen", "Installation", "Kamera", "Audio", "Modell", "Fertig" };
+    constexpr int kTotalSteps = 6;
     for (int i = 0; i < kTotalSteps; ++i) {
         if (i > 0) { ImGui::SameLine(); ImGui::TextDisabled(" › "); ImGui::SameLine(); }
         if (i == m_setupWizardStep)
@@ -823,6 +890,45 @@ void UIManager::renderSetupWizard() {
 #endif
 
     } else if (m_setupWizardStep == 1) {
+        // ─ Installation ──────────────────────────────────────────────────
+        ImGui::TextUnformatted("Schritt 2: KI-Modelle überprüfen");
+        ImGui::Spacing();
+        
+        checkModelsExist();
+
+        bool anyMissing = false;
+        bool anyDownloading = false;
+        for (size_t i = 0; i < m_modelStatuses.size(); ++i) {
+            auto& s = m_modelStatuses[i];
+            ImGui::Text("%-30s", s.name.c_str());
+            ImGui::SameLine();
+            if (s.exists) {
+                ImGui::TextColored(kGreen, "[ VORHANDEN ]");
+            } else if (s.downloading) {
+                ImGui::TextColored(ImVec4(1, 1, 0, 1), "[ DOWNLOAD %3d%% ]", static_cast<int>(s.progress * 100));
+                anyDownloading = true;
+            } else {
+                ImGui::TextColored(ImVec4(1, 0, 0, 1), "[ FEHLT ]");
+                ImGui::SameLine();
+                if (ImGui::SmallButton(("Download##" + std::to_string(i)).c_str())) {
+                    startModelDownload(static_cast<int>(i));
+                }
+                anyMissing = true;
+            }
+        }
+
+        ImGui::Spacing();
+        if (anyMissing && !anyDownloading) {
+            if (ImGui::Button("Alle fehlenden Modelle herunterladen")) {
+                for (size_t i = 0; i < m_modelStatuses.size(); ++i) startModelDownload(static_cast<int>(i));
+            }
+        }
+
+        if (anyDownloading) {
+            ImGui::TextDisabled("Downloads laufen im Hintergrund...");
+        }
+
+    } else if (m_setupWizardStep == 2) {
         // ─ Kamera ────────────────────────────────────────────────────────
         ImGui::TextUnformatted("Kameraquelle auswählen:");
         ImGui::Spacing();
@@ -853,7 +959,7 @@ void UIManager::renderSetupWizard() {
                          sizeof(m_wizardCameraInput));
         ImGui::TextDisabled("Zahl = lokale Kamera (0, 1, …)   |   rtsp://… = Netzwerk-Stream");
 
-    } else if (m_setupWizardStep == 2) {
+    } else if (m_setupWizardStep == 3) {
         // ─ Audio ─────────────────────────────────────────────────────────
         ImGui::TextUnformatted("Audioeingang (optional — für Audio-Visualizer):");
         ImGui::Spacing();
@@ -873,7 +979,7 @@ void UIManager::renderSetupWizard() {
         if (status.audioDeviceNames.empty())
             ImGui::TextDisabled("(Keine Eingabegeräte gefunden)");
 
-    } else if (m_setupWizardStep == 3) {
+    } else if (m_setupWizardStep == 4) {
         // ─ Modell ─────────────────────────────────────────────────────────
         ImGui::TextUnformatted("Erkennungsmodell:");
         ImGui::Spacing();
@@ -892,7 +998,7 @@ void UIManager::renderSetupWizard() {
         ImGui::TextUnformatted("    Für schwächere Hardware oder Echtzeit-Anforderungen.");
         ImGui::PopStyleColor();
 
-    } else if (m_setupWizardStep == 4) {
+    } else if (m_setupWizardStep == 5) {
         // ─ Fertig ─────────────────────────────────────────────────────────
         ImGui::PushStyleColor(ImGuiCol_Text, kGreen);
         ImGui::TextUnformatted("Einrichtung abgeschlossen!");
@@ -924,37 +1030,48 @@ void UIManager::renderSetupWizard() {
     const bool isLastStep = (m_setupWizardStep == kTotalSteps - 1);
     const char* nextLabel = isLastStep ? "Starten  >" : "Weiter  >";
 
+    // Block "Weiter" if models are missing in step 1
+    bool nextBlocked = (m_setupWizardStep == 1 && !allModelsPresent());
+
     // Align next/finish button to right
     float buttonW = isLastStep ? 130.0f : 110.0f;
     ImGui::SetCursorPosX(ImGui::GetContentRegionAvail().x - buttonW +
                          (m_setupWizardStep > 0 ? 108.0f : 0.0f));
 
-    if (ImGui::Button(nextLabel, ImVec2(buttonW, 0))) {
-        if (isLastStep) {
-            // Apply wizard choices
-            if (m_wizardCameraInput[0] != '\0')
-                m_cameraAddress = std::string(m_wizardCameraInput);
+    if (nextBlocked) {
+        ImGui::BeginDisabled();
+        ImGui::Button(nextLabel, ImVec2(buttonW, 0));
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Alle Modelle müssen für den Betrieb installiert sein.");
+    } else {
+        if (ImGui::Button(nextLabel, ImVec2(buttonW, 0))) {
+            if (isLastStep) {
+                // Apply wizard choices
+                if (m_wizardCameraInput[0] != '\0')
+                    m_cameraAddress = std::string(m_wizardCameraInput);
 
-            // Apply model choice
-            m_settings.detectorModel = m_wizardModelIdx;
+                // Apply model choice
+                m_settings.detectorModel = m_wizardModelIdx;
 
-            // Apply audio capture device
-            if (m_wizardAudioIdx >= 0) {
-                m_settings.audioCaptureEnabled  = true;
-                m_settings.audioCaptureDeviceId = static_cast<uint32_t>(m_wizardAudioIdx);
+                // Apply audio capture device
+                if (m_wizardAudioIdx >= 0) {
+                    m_settings.audioCaptureEnabled  = true;
+                    m_settings.audioCaptureDeviceId = static_cast<uint32_t>(m_wizardAudioIdx);
+                } else {
+                    m_settings.audioCaptureEnabled = false;
+                }
+
+                // Propagate to blackboard and save — this also writes setup_complete=1
+                pushSettingsToBlackboard();
+                savePersistedSettings();
+
+                m_setupWizardActive = false;
+                m_setupWizardStep   = 0;
+                ImGui::CloseCurrentPopup();
             } else {
-                m_settings.audioCaptureEnabled = false;
+                ++m_setupWizardStep;
             }
-
-            // Propagate to blackboard and save — this also writes setup_complete=1
-            pushSettingsToBlackboard();
-            savePersistedSettings();
-
-            m_setupWizardActive = false;
-            m_setupWizardStep   = 0;
-            ImGui::CloseCurrentPopup();
-        } else {
-            ++m_setupWizardStep;
         }
     }
 

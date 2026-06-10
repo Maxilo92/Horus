@@ -69,6 +69,9 @@ private:
     void updateLockedTargetYolo(const std::vector<TrackedObject>& tracked);
     void updateAudioFeedback(const SystemSettings& settings);
     void checkAlarmZones(const std::vector<TrackedObject>& tracked);
+    void computeTargetPriorities(std::vector<TrackedObject>& tracked,
+                                 const SystemSettings& settings,
+                                 cv::Size frameSize);
     void logTrackingData(const std::vector<TrackedObject>& tracked,
                          const std::vector<MotionTrack>& motionTracks,
                          const SystemSettings& settings,
@@ -101,7 +104,8 @@ private:
     bool                     m_trackingHasNewDetections = true;
 
     // Kamerabewegungsschätzung (Ego-Motion via Sparse Optical Flow)
-    cv::Mat  m_prevFrameGray;
+    cv::Mat      m_prevFrameGray;
+    cv::Point2d  m_prevCameraMotion{0.0, 0.0}; // for temporal smoothing of the ego-motion estimate
 
     // Pixel template tracking state
     bool     m_pixelLockActive = false;
@@ -116,11 +120,20 @@ private:
         int         face_id = -1;
         std::string face_name;
         cv::Rect    face_box;
-        int         retryCountdown = 0; // frames until next recognition attempt (when face_id == -1)
+        cv::Rect    last_person_box; // person box when face was last detected
+        int         retryCountdown = 0; // frames until next recognition attempt
     };
     // Face recognition identity cache: track_id -> {face_id, face_name, face_box}
     std::unordered_map<int, FaceTrackInfo> m_trackIdToFace;
     std::mutex m_faceMutex;
+
+    // Target-Priorität: Verlaufsdaten pro Track (Annäherung, Neuheit)
+    struct PriorityMemory {
+        std::chrono::steady_clock::time_point firstSeen{};
+        float smoothedArea = 0.0f; // EMA der Boxfläche zur Annäherungserkennung
+        float areaGrowth   = 0.0f; // geglättete relative Flächenänderung pro Update
+    };
+    std::unordered_map<int, PriorityMemory> m_prioMem;
 
     // Accumulated face recognition stats — updated by tracking thread, pushed to Blackboard.
     FaceDebugState m_faceDbg;

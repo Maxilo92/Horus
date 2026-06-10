@@ -36,7 +36,15 @@ public:
 private:
     bool initGLFW();
     bool initImGui();
+    void drawSplashFrame();          // re-renders the boot terminal to the screen
+    void bootBegin(const std::string& msg);  // add pending line + render
+    void bootEnd(bool ok = true);            // resolve last line + render
     void cleanup();
+
+    // ── Boot log ──────────────────────────────────────────────────────────
+    enum class BootStatus { PENDING, OK, FAIL };
+    struct BootLine { std::string msg; BootStatus status = BootStatus::PENDING; };
+    std::vector<BootLine> m_bootLog;
 
     Blackboard  m_blackboard;
     GLFWwindow* m_window = nullptr;

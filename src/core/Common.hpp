@@ -7,6 +7,22 @@
 #include <set>
 #include <cstdint>
 #include <chrono>
+#include <algorithm>
+
+// Utility: Clamps a rectangle to stay within defined image boundaries [0, width] and [0, height].
+inline cv::Rect clampRect(const cv::Rect& rect, int width, int height) {
+    if (width <= 0 || height <= 0) return rect;
+    int x1 = std::max(0, std::min(rect.x, width - 1));
+    int y1 = std::max(0, std::min(rect.y, height - 1));
+    int x2 = std::max(0, std::min(rect.x + rect.width,  width));
+    int y2 = std::max(0, std::min(rect.y + rect.height, height));
+    
+    // Ensure width and height are at least 1 if the original rect was not empty
+    int nw = std::max(rect.width > 0 ? 1 : 0, x2 - x1);
+    int nh = std::max(rect.height > 0 ? 1 : 0, y2 - y1);
+    
+    return cv::Rect(x1, y1, nw, nh);
+}
 
 // Kein imgui.h hier – ImU32 = uint32_t, kompatibel ohne imgui-Abhängigkeit
 
@@ -49,6 +65,12 @@ struct TrackedObject {
     std::string face_name = "";
     cv::Rect    face_box;          // Face bounding box in frame-space (empty = no face detected)
 
+    // Target-Priorität: Die App bewertet pro Frame, welches Ziel für den
+    // Operator gerade am wichtigsten ist (Alarmzone, Klasse, Tempo, Nähe, …).
+    float       priority       = 0.0f; // Roh-Score (höher = wichtiger)
+    int         priorityRank   = -1;   // 0 = wichtigstes Ziel, -1 = nicht bewertet
+    std::string priorityReason;        // Kurzbegründung fürs HUD, z.B. "ALARM+FAST"
+
     // Centroid-History für Trail-Rendering
     std::vector<cv::Point> trail;
 };
@@ -69,7 +91,8 @@ struct TargetSnapshot {
     cv::Mat image;
     std::string timestamp;
     cv::Rect box;
-    float confidence = 0.0f;
+    float confidence  = 0.0f;
+    float qualityScore = 0.0f; // Laplacian-variance × confidence × completeness
 };
 
 // Target History: Eindeutige Targets zur Aufzeichnung und Analyse
@@ -110,6 +133,9 @@ struct UniqueTargetRecord {
     // Manual selection sync from UI to worker (-1 = auto)
     int snapshot_mid_manual_idx = -1;
 
+    // Highest-quality snapshot seen so far (used as AI dossier crop)
+    TargetSnapshot snapshot_best;
+
     // Adaptive decimation state
     int current_snapshot_interval_ms = 500;
     int gallery_version = 0;
@@ -122,7 +148,9 @@ struct DossierEntry {
     std::string first_seen;
     std::string last_seen;
     std::string dossier_text;
+    std::string plate;             // Erkanntes Kennzeichen (nur Fahrzeuge, leer = unbekannt)
     int sightings_count = 0;
+    std::vector<uchar> thumbnail_jpeg; // JPEG-Vorschaubild (leer = noch kein Bild)
 };
 
 struct SystemSettings {
@@ -142,13 +170,13 @@ struct SystemSettings {
     // ----------------------------------------------------------------
     // Multi-Tracker Settings
     // ----------------------------------------------------------------
-    int   trackerMaxLostFrames    = 12;       // Reduced: removes ghost tracks faster
+    int   trackerMaxLostFrames    = 30;       // ~1s tolerance: survives brief misses/occlusion (coast track stays visible)
     float trackerMinMatchIOU      = 0.20f;    // Slightly lower IOU requirement for 4K jitter
     int   trackerMaxTrailLength   = 30;
     bool  showTrails              = true;
     float trackerMinMatchScore    = 0.35f;    // Raised from 0.25 to reduce spurious matches
     float trackerMaxCenterDistPx  = 300.0f;   // Reduced from 500 to prevent cross-track matching
-    int   trackerConfirmFrames    = 3;        // Box visible only after 3 consecutive matches
+    int   trackerConfirmFrames    = 2;        // Box visible only after 2 consecutive matches (was 3; probe shows fewer zero-track frames, no extra reacquires)
 
     // ----------------------------------------------------------------
     // Tracking Re-acquisition Settings (Plan 11)
@@ -161,6 +189,12 @@ struct SystemSettings {
     // Single-Tracker Settings (Target-Lock Feature)
     float trackerVelocitySmoothing    = 0.4f;    // Smoother velocity estimation
     float trackerDeadReckoningDamping = 0.85f;   // More aggressive damping
+
+    // ----------------------------------------------------------------
+    // Target Priority Settings
+    // ----------------------------------------------------------------
+    bool  targetPriorityEnabled = true;  // App bewertet automatisch, welches Ziel am wichtigsten ist
+    bool  priorityShowTopBadge  = true;  // Wichtigstes Ziel im HUD hervorheben (Farbe + Grund)
 
     // ----------------------------------------------------------------
     // HUD Settings
@@ -324,10 +358,29 @@ struct SystemSettings {
     // ----------------------------------------------------------------
     bool        aiDossierEnabled      = true;
     std::string aiOpenRouterKey       = "";
-    std::string aiVlmModel            = "google/gemini-flash-1.5";
+    // Achtung: Modell-IDs veralten — "google/gemini-flash-1.5" wurde von OpenRouter
+    // entfernt (HTTP 404). Bei Dossier-Fehlern zuerst die Modell-ID prüfen.
+    std::string aiVlmModel            = "google/gemini-3.5-flash";
     float       aiReidThreshold       = 0.75f;
     int         aiRequestLimitPerMin  = 5;
     float       aiStabilitySec        = 3.0f;
+
+    // ----------------------------------------------------------------
+    // Radar Settings (live aircraft scope via OpenSky Network)
+    // ----------------------------------------------------------------
+    bool        radarEnabled        = true;       // Enable background OpenSky polling
+    float       radarCenterLat      = 50.1109f;   // Scope center latitude  (default: Frankfurt)
+    float       radarCenterLon      = 8.6821f;    // Scope center longitude
+    float       radarRadiusKm       = 100.0f;     // Scope range in kilometres
+    int         radarRefreshMs      = 10000;      // OpenSky poll interval (anon rate-limit friendly)
+    float       radarSweepPeriodSec = 4.0f;       // Seconds per full sweep rotation
+    std::string openSkyClientId     = "";         // optional OAuth2 client credentials (empty = anonymous)
+    std::string openSkyClientSecret = "";
+
+    // Map background (OpenStreetMap tile layer)
+    bool        radarMapEnabled    = true;
+    float       radarMapOpacity    = 0.85f;      // 0.0 = invisible, 1.0 = full brightness
+    std::string radarMapTileUrl    = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 
     // ----------------------------------------------------------------
     // Debug & Performance Settings

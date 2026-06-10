@@ -2,6 +2,10 @@
 #include "TrackingSystem.hpp"
 #include <iostream>
 #include <chrono>
+#ifdef __APPLE__
+#include <pthread.h>
+#include <sys/qos.h>
+#endif
 
 VisionSystem::VisionSystem(Blackboard& blackboard, AudioEngine& audioEngine, 
                            DossierDatabase* dossierDb, AIAgent* aiAgent, LogFn logFn)
@@ -25,17 +29,21 @@ bool VisionSystem::init(const std::string& cameraAddress, const std::string& mod
     int requestedW = settings.request4KCamera ? 3840 : 1280;
     int requestedH = settings.request4KCamera ? 2160 : 720;
 
-    if (!m_camera->open(m_cameraAddress, requestedW, requestedH)) {
-        m_log(LogLevel::ERR, "[VisionSystem] Failed to open camera: " + m_cameraAddress);
-        return false;
+    const bool cameraOk = m_camera->open(m_cameraAddress, requestedW, requestedH);
+    if (!cameraOk) {
+        // Non-fatal: bring the UI up anyway so the user can load a video file or pick another
+        // camera via hot-swap. The capture loop idles (read() fails → short sleep) until a
+        // valid source is set, instead of the whole app refusing to start.
+        m_log(LogLevel::WARN, "[VisionSystem] Could not open camera '" + m_cameraAddress +
+              "' — starting without a live source (load a video or select a camera in the UI).");
+    } else {
+        m_log(LogLevel::INFO, "[VisionSystem] Camera opened: " + m_cameraAddress +
+              " (backend=" + m_camera->getBackendName() + ")");
+        m_log(LogLevel::INFO, "[VisionSystem] Camera resolution requested=" +
+              std::to_string(requestedW) + "x" + std::to_string(requestedH) +
+              ", actual=" + std::to_string(m_camera->getWidth()) + "x" +
+              std::to_string(m_camera->getHeight()));
     }
-
-    m_log(LogLevel::INFO, "[VisionSystem] Camera opened: " + m_cameraAddress +
-          " (backend=" + m_camera->getBackendName() + ")");
-    m_log(LogLevel::INFO, "[VisionSystem] Camera resolution requested=" +
-          std::to_string(requestedW) + "x" + std::to_string(requestedH) +
-          ", actual=" + std::to_string(m_camera->getWidth()) + "x" +
-          std::to_string(m_camera->getHeight()));
 
     // Derive sibling model paths from the resolved modelPath
     {
@@ -63,6 +71,10 @@ bool VisionSystem::init(const std::string& cameraAddress, const std::string& mod
         m_detector = std::make_unique<ObjectDetector>(modelPath, labelsPath);
         if (!m_reidModelPath.empty()) {
             m_reidManager = std::make_unique<ReIDManager>(m_reidModelPath);
+        } else {
+            m_log(LogLevel::WARN, "[VisionSystem] ReID model 'osnet_x0_25.onnx' not found in model "
+                  "directory — dossiers will be created WITHOUT re-identification "
+                  "(every stable track becomes a new entity).");
         }
     } catch (const std::exception& e) {
         m_log(LogLevel::ERR, std::string("[VisionSystem] Detector/ReID init failed: ") + e.what());
@@ -75,8 +87,9 @@ bool VisionSystem::init(const std::string& cameraAddress, const std::string& mod
     else if (modelPath.find("yolov8n") != std::string::npos) activeModel = "yolov8n";
 
     AppStatusState status = m_blackboard.getAppStatus();
-    status.cameraStatus = "OK — " + m_cameraAddress;
-    status.cameraStatusOk = true;
+    status.cameraStatus   = cameraOk ? ("OK — " + m_cameraAddress)
+                                     : ("NO SOURCE — " + m_cameraAddress);
+    status.cameraStatusOk = cameraOk;
     status.classNames = m_detector->getClasses();
     status.activeModelName = activeModel;
     m_blackboard.setAppStatus(status);
@@ -109,6 +122,11 @@ void VisionSystem::update() {
 // ---------------------------------------------------------------------------
 void VisionSystem::captureWorkerLoop() {
     m_log(LogLevel::INFO, "Capture thread started");
+#ifdef __APPLE__
+    // Kamera-Feed hat Vorrang vor aller Vision-/Tracking-Arbeit: das Live-Bild
+    // muss auch bei voller CPU-Last flüssig bleiben.
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
     cv::Mat frame;
     bool lastRequest4K = m_blackboard.getSettings().request4KCamera;
     
@@ -210,9 +228,17 @@ void VisionSystem::captureWorkerLoop() {
                 // Fast display path: UIManager reads this directly for low-latency rendering
                 m_blackboard.updateDisplayFrame(frame);
 
-                std::lock_guard<std::mutex> lock(m_captureMutex);
-                m_captureFrame = frame; // Shallow copy
-                m_captureNewFrameVision = true;
+                {
+                    std::lock_guard<std::mutex> lock(m_captureMutex);
+                    m_captureFrame = frame; // Shallow: Puffer-Eigentum geht an die Konsumenten über
+                    m_captureNewFrameVision = true;
+                }
+                // Header freigeben, damit das nächste read() einen FRISCHEN Puffer
+                // alloziert: der publizierte Puffer wird so nie wieder beschrieben.
+                // Erlaubt durchgehend Shallow Copies (Worker/Detektor/Tracking) ohne
+                // Tearing — eine einzelne Allokation ist deutlich billiger als
+                // mehrere Full-Frame-memcpys pro Frame (besonders bei 4K).
+                frame.release();
 
                 m_blackboard.updateStatusCounts(-1, -1, 1);
 
@@ -233,6 +259,16 @@ void VisionSystem::captureWorkerLoop() {
 // ---------------------------------------------------------------------------
 void VisionSystem::detectorWorkerLoop() {
     m_log(LogLevel::INFO, "Detector thread started");
+#ifdef __APPLE__
+    // Inferenz darf UI/Kamera nie verdrängen: unter CPU-Sättigung gewinnen
+    // höher priorisierte Threads (UI, Capture) die Kerne.
+    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+#endif
+    // Eigene Puffer für die Graustufen-Eingabe: frameToProcess teilt seinen Puffer
+    // mit Worker/Tracking/Zoom — würde die Konvertierung dort hineinschreiben,
+    // bekämen alle anderen Konsumenten das Schwarz/Weiß-Bild (nur der Detektor
+    // soll es sehen).
+    cv::Mat grayScratch, grayInputScratch;
     while (m_running) {
         cv::Mat frameToProcess;
         SystemSettings settings;
@@ -243,7 +279,9 @@ void VisionSystem::detectorWorkerLoop() {
                 return !m_running || m_detectorBusy.load();
             });
             if (!m_running) break;
-            frameToProcess = m_detectorFrameCopy.clone(); // Clone to avoid threading issues
+            // Shallow: Puffer ist nach Publish unveränderlich, Klonen (24 MB bei 4K)
+            // wäre reine CPU-Verschwendung pro Inferenz.
+            frameToProcess = m_detectorFrameCopy;
             settings = m_detectorSettingsCopy;
         }
 
@@ -258,9 +296,9 @@ void VisionSystem::detectorWorkerLoop() {
             if (m_detector) {
                 cv::Mat input = frameToProcess;
                 if (settings.grayscaleInput) {
-                    cv::Mat gray;
-                    cv::cvtColor(frameToProcess, gray, cv::COLOR_BGR2GRAY);
-                    cv::cvtColor(gray, input, cv::COLOR_GRAY2BGR);
+                    cv::cvtColor(frameToProcess, grayScratch, cv::COLOR_BGR2GRAY);
+                    cv::cvtColor(grayScratch, grayInputScratch, cv::COLOR_GRAY2BGR);
+                    input = grayInputScratch;
                 }
                 results = m_detector->detect(input, settings);
             }
@@ -326,6 +364,10 @@ void VisionSystem::detectorWorkerLoop() {
 // ---------------------------------------------------------------------------
 void VisionSystem::workerLoop() {
     m_log(LogLevel::INFO, "Worker thread started");
+#ifdef __APPLE__
+    // Nachgeordnete Vision-Arbeit (Motion, Zoom, Dossier) — nie auf Kosten von UI/Kamera.
+    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+#endif
 
     cv::Mat rawFrame;
     cv::Mat trackingFrame;
@@ -356,9 +398,15 @@ void VisionSystem::workerLoop() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
                 continue;
             }
-            m_captureFrame.copyTo(rawFrame);
+            // Shallow: jeder Capture-Frame hat einen eigenen Puffer (capture released
+            // seinen Header nach dem Publish), niemand schreibt ihn nachträglich.
+            rawFrame = m_captureFrame;
             m_captureNewFrameVision = false;
         }
+
+        // One iteration = one tracker update. Lag is measured in these units so it shares
+        // the Kalman velocity time base (px/iteration), unlike the capture-frame counter.
+        ++m_workerFrameCounter;
 
         auto now   = std::chrono::steady_clock::now();
         currentFps = 1.0f / std::chrono::duration<float>(now - lastTime).count();
@@ -560,8 +608,8 @@ void VisionSystem::workerLoop() {
         if (m_trackingSystem) {
             if (pendingDetections) {
                 hasNewDetections = true;
-                detectorLag = static_cast<int>(
-                    static_cast<uint64_t>(curStatus.totalFramesProcessed) - detectionTriggerFrame);
+                // Lag in worker iterations (same time base as Kalman velocity).
+                detectorLag = static_cast<int>(m_workerFrameCounter - detectionTriggerFrame);
                 pendingDetections = false;
             }
 
@@ -607,9 +655,11 @@ void VisionSystem::workerLoop() {
             frameSkipCounter = (frameSkipCounter + 1) % (settings.detectionSkipFrames + 1);
             if (runDetector) {
                 std::lock_guard<std::mutex> lock(m_detectorMutex);
-                m_detectorFrameCopy = trackingFrame; // Shallow copy
+                // Shallow safe: der Frame-Puffer ist nach der Worker-Verarbeitung
+                // unveränderlich (jede Iteration arbeitet auf einem frischen Puffer).
+                m_detectorFrameCopy = trackingFrame;
                 m_detectorSettingsCopy = settings;
-                m_detectorTriggerFrame = curStatus.totalFramesProcessed;
+                m_detectorTriggerFrame = static_cast<int>(m_workerFrameCounter);
                 m_detectorBusy         = true;
                 m_detectorCv.notify_one();
             }
@@ -695,7 +745,9 @@ void VisionSystem::workerLoop() {
         m_blackboard.setDetectionState(dState);
 
         // ── AI Dossier Processing (Plan 13) ────────────────────────────
-        if (settings.aiDossierEnabled && m_dossierDb && m_reidManager && m_aiAgent) {
+        // m_reidManager ist optional: ohne ReID-Modell keine Wiedererkennung,
+        // aber Dossier-Erstellung muss trotzdem funktionieren.
+        if (settings.aiDossierEnabled && m_dossierDb && m_aiAgent) {
             auto now = std::chrono::steady_clock::now();
             
             // Clean up stale stability info
@@ -718,17 +770,38 @@ void VisionSystem::workerLoop() {
                 if (duration >= settings.aiStabilitySec && !info.reidDone) {
                     // Extract embedding
                     cv::Rect roi = track.box;
-                    if (roi.x >= 0 && roi.y >= 0 && 
-                        roi.x + roi.width <= trackingFrame.cols && 
+                    if (roi.x >= 0 && roi.y >= 0 &&
+                        roi.x + roi.width <= trackingFrame.cols &&
                         roi.y + roi.height <= trackingFrame.rows) {
-                        
-                        cv::Mat crop = trackingFrame(roi).clone();
-                        std::vector<float> embedding = m_reidManager->extractFeatures(crop);
-                        
-                        if (!embedding.empty()) {
+
+                        // Use the best-quality snapshot collected so far instead of the
+                        // arbitrary current frame — TrackingSystem scores every periodic
+                        // snapshot with Laplacian variance and keeps the sharpest one.
+                        cv::Mat crop;
+                        for (const auto& rec : tState.targetHistory) {
+                            if (rec.track_id == track.track_id &&
+                                !rec.snapshot_best.image.empty()) {
+                                crop = rec.snapshot_best.image; // shallow copy — immutable Mat
+                                break;
+                            }
+                        }
+                        if (crop.empty()) {
+                            // No quality snapshot yet. Only fall back to the live frame
+                            // if the track is matched THIS frame — never crop a coasting
+                            // box that's extrapolating a vanished object. Otherwise defer
+                            // to a later frame where a real detection is available.
+                            if (!track.is_active) continue;
+                            crop = trackingFrame(roi).clone();
+                        }
+                        std::vector<float> embedding;
+                        if (m_reidManager) embedding = m_reidManager->extractFeatures(crop);
+
+                        {
                             DossierEntry entry;
-                            bool found = m_dossierDb->findNearestEntity(embedding, track.className, settings.aiReidThreshold, entry);
-                            
+                            // Ohne Embedding keine Wiedererkennung möglich → immer neue Entität.
+                            bool found = !embedding.empty() &&
+                                         m_dossierDb->findNearestEntity(embedding, track.className, settings.aiReidThreshold, entry);
+
                             if (found) {
                                 m_log(LogLevel::INFO, "[VisionSystem] Re-identified " + track.className + " as " + entry.uuid);
                                 m_dossierDb->addSighting(entry.uuid, "session_001"); // TODO: Real session ID

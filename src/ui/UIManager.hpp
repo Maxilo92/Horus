@@ -25,6 +25,7 @@
 #include "AudioVisualizerPanel.hpp"
 #include "ReplayPanel.hpp"
 #include "DossierArchivePanel.hpp"
+#include "RadarPanel.hpp"
 #include "UpdateChecker.hpp"
 
 class UIManager : public IModule {
@@ -75,6 +76,7 @@ private:
     void renderSettingsWindow();
     void renderTargetAnalyzer(const TrackingStateData& tracking);
     void renderDossierPanel(const DossierState& dossier);
+    void renderRadar();
 
     // ── Export / utility ─────────────────────────────────────────────────
     bool exportTarget(const UniqueTargetRecord& record);
@@ -116,6 +118,7 @@ private:
     std::unique_ptr<AudioVisualizerPanel> m_audioVisualizerPanel;
     std::unique_ptr<ReplayPanel>     m_replayPanel;
     std::unique_ptr<DossierArchivePanel> m_dossierArchivePanel;
+    std::unique_ptr<RadarPanel>      m_radarPanel;
 
     // ── Settings (local; pushed to Blackboard on change) ─────────────────
     SystemSettings m_settings;
@@ -161,6 +164,20 @@ private:
     char m_wizardCameraInput[64]  = {"1"};
     int  m_wizardAudioIdx         = -1;
     int  m_wizardModelIdx         = 0;   // 0 = yolov8s (genau), 1 = yolov8n (schnell)
+
+    struct ModelStatus {
+        std::string name;
+        std::string filename;
+        std::string url;
+        bool        exists = false;
+        bool        downloading = false;
+        float       progress = 0.0f;
+    };
+    std::vector<ModelStatus> m_modelStatuses;
+    void checkModelsExist();
+    void startModelDownload(int idx);
+    bool allModelsPresent();
+
     void renderSetupWizard();
 
     // ── UI state booleans ────────────────────────────────────────────────
@@ -172,6 +189,7 @@ private:
     bool m_showShortcutHelp   = false;
     bool m_showDossierPanel   = true;
     bool m_showDossierArchive = false;
+    bool m_showRadar          = false;
     int  m_devConsoleTab      = 0;
     char m_dataPanelFilter[128] = {0};
     bool m_showUpdateDialog     = false;

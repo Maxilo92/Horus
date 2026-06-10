@@ -1,5 +1,59 @@
 # Changelog
 
+## [1.17.3] - 2026-06-08
+
+### Fixed
+- **Face Recognition Deduplication**: Implemented a "Best-Row" confidence filter in `FaceRecognizer`. The system now only processes and registers the single most confident face detection within a person's ROI, eliminating the "Multiple Unknown Identities" bug where one person was recognized as several different IDs simultaneously.
+- **Dynamic Face Tracking**: Resolved the "Frozen Face Box" issue. The Face Recognition module now re-runs periodically (every 15 frames) for all active tracks to update features and coordinates. 
+- **Relative Box Interpolation**: Introduced relative coordinate interpolation for face bounding boxes. The face box now tracks smoothly in real-time by following the person's main body movements between recognition runs, instead of remaining static at its initial detection point.
+
+## [1.17.2] - 2026-06-08
+
+### Fixed
+- **Bounding Box Stability**: Resolved the "escaping boxes" issue where tracking rectangles would drift off-screen. Implemented robust coordinate clamping across `ObjectDetector`, `MultiTracker`, and `TrackingSystem`, ensuring all boxes remain within frame boundaries.
+- **Velocity Safeguards**: Added hard velocity caps (100-120 px/frame) and plausibility checks for lag-based extrapolation. This prevents positive feedback loops in the Kalman filter that previously caused runaway motion on noisy signals.
+- **Improved Lag Compensation**: Refined the extrapolation logic in `MultiTracker` to use safe, clamped offsets, eliminating "teleporting" boxes during network jitter.
+- **Pixel Tracker Robustness**: Applied similar clamping and velocity damping to the manual Pixel Lock system, ensuring stable tracking of custom-selected regions even at frame edges.
+
+## [1.17.1] - 2026-06-08
+
+### Fixed
+- **Pixel Target Interaction**: Fixed a critical bug where moving or resizing the custom Pixel Target (ID 999) caused the Zoom Window to jump back to its original position and prevented smooth grabbing of resize handles. The UI now correctly preserves the local dragged state of the bounding box between frames without being continuously overwritten by the slower tracking thread.
+- **ROI Detection Filtering**: Fixed an architectural oversight where ROI zones (Inclusion/Exclusion) were visually drawn but never actually applied to filter detections in the background tracking thread. The `ROIManager` is now correctly invoked in the tracking loop, making ROI zones fully functional.
+- **Display Frame Double-Consumption**: Fixed a race condition in the UI loop where the display frame was accidentally consumed twice, occasionally causing the Camera View to receive empty frames.
+
+## [1.17.0] - 2026-06-08
+
+### Fixed
+- **UIManager Syntax Error**: Resolved a critical build failure in `UIManager.cpp` caused by a missing closing brace in the `renderSetupWizard` function.
+- **Setup Wizard Logic**: Corrected duplicated and offset step indices in the Setup Wizard, ensuring a smooth multi-step configuration flow (0-5).
+
+## [1.17.0] - 2026-06-08
+
+### Added
+- **Integrated Setup & Installation Wizard**: Significantly expanded the Setup Wizard to handle automated "installation" of required AI models.
+- **Automated Model Verification**: The application now automatically checks for the presence of essential AI models (YOLOv8, Face Detection/Recognition) in multiple search paths.
+- **Asynchronous Model Downloads**: Implemented a robust download manager using CURL within the `UpdateChecker` to fetch missing models directly from GitHub releases without blocking the UI.
+- **Enforced Installation Step**: The Setup Wizard now includes a dedicated "Installation" step that blocks application startup if essential models are missing, ensuring a functional environment for the user.
+- **Enhanced UpdateChecker**: Extended the `UpdateChecker` class with file download capabilities, including progress tracking and status reporting.
+
+### Fixed
+- **Boot Logic Robustness**: Updated `Application::init` to include the user's local models directory in the search path, ensuring models downloaded via the wizard are correctly utilized.
+- **Setup Completion Logic**: Modified the configuration loader to force the Setup Wizard if models are missing, even if the initial setup was previously completed.
+
+## [1.16.7] - 2026-06-08
+
+### Added
+- **Functional Test Suite**: Introduced `tests/functional_tests.cpp` covering end-to-end functionality of core systems.
+- **Dossier Database Validation**: Automated testing for entity CRUD, face identity persistence, and SQLite integrity.
+- **Data Logger Verification**: Implemented content-level verification for CSV logging, ensuring accurate field mapping and coordinate persistence.
+- **Calibration Scaling Test**: Verified the pixel-to-meter scaling logic in the data logging pipeline.
+
+### Fixed
+- **Missing Velocity Data**: Fixed a bug in `MultiTracker::getTrackedObjects` where `vx` and `vy` fields of `TrackedObject` were not being populated from the Kalman filter state.
+- **Data Logger Precision**: Updated `DataLogger` to use the high-precision Kalman-estimated velocity from `TrackedObject` instead of calculating it via finite difference from the trail history.
+- **Log Logic**: Fixed `DataLogger` to correctly skip inactive tracks and ensure atomic flushes for deterministic data recovery.
+
 ## [1.16.6] - 2026-06-07
 
 ### Fixed

@@ -234,6 +234,18 @@ void UIManager::renderSettingsWindow() {
             changed |= ImGui::SliderFloat("Lost Match Radius Mult##ra",
                 &m_settings.trackerReacquisitionMaxDist, 1.0f, 3.0f, "%.1fx");
 
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.0f, 1.0f),
+                "Target Priority (automatic)");
+            changed |= ImGui::Checkbox("Auto Target Priority##prio",
+                &m_settings.targetPriorityEnabled);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Bewertet pro Frame, welches Ziel für den Operator am wichtigsten ist\n(Alarmzone, Klasse, Tempo, Nähe, Annäherung, Neuheit).");
+            if (m_settings.targetPriorityEnabled) {
+                changed |= ImGui::Checkbox("Highlight Top Target in HUD##prio",
+                    &m_settings.priorityShowTopBadge);
+            }
+
             ImGui::EndTabItem();
         }
 
@@ -432,6 +444,95 @@ void UIManager::renderSettingsWindow() {
             }
             ImGui::EndDisabled();
             ImGui::EndDisabled(); // faceRecognitionEnabled
+            ImGui::EndTabItem();
+        }
+
+        // ── Radar ──────────────────────────────────────────────────────────
+        if (ImGui::BeginTabItem("Radar")) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f),
+                               "Live Aircraft Scope (OpenSky Network)");
+            changed |= ImGui::Checkbox("Enable Radar Polling##rad", &m_settings.radarEnabled);
+            ImGui::Spacing();
+
+            changed |= ImGui::InputFloat("Center Latitude##rad",  &m_settings.radarCenterLat, 0.0f, 0.0f, "%.4f");
+            changed |= ImGui::InputFloat("Center Longitude##rad", &m_settings.radarCenterLon, 0.0f, 0.0f, "%.4f");
+            m_settings.radarCenterLat = std::clamp(m_settings.radarCenterLat, -90.0f, 90.0f);
+            m_settings.radarCenterLon = std::clamp(m_settings.radarCenterLon, -180.0f, 180.0f);
+
+            changed |= ImGui::SliderFloat("Range (km)##rad",       &m_settings.radarRadiusKm, 10.0f, 400.0f, "%.0f");
+            changed |= ImGui::SliderFloat("Sweep Period (s)##rad", &m_settings.radarSweepPeriodSec, 1.0f, 12.0f, "%.1f");
+            changed |= ImGui::SliderInt("Refresh (ms)##rad",       &m_settings.radarRefreshMs, 2000, 30000);
+            ImGui::TextDisabled("Anonymous OpenSky access is rate-limited; >=10000 ms recommended.");
+
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "Map Background (OpenStreetMap)");
+            changed |= ImGui::Checkbox("Enable Map##rad", &m_settings.radarMapEnabled);
+            ImGui::BeginDisabled(!m_settings.radarMapEnabled);
+            changed |= ImGui::SliderFloat("Map Opacity##rad", &m_settings.radarMapOpacity, 0.0f, 1.0f, "%.2f");
+            ImGui::Spacing();
+            ImGui::TextDisabled("Tile Server URL  ({z} {x} {y} = zoom / tile coords)");
+
+            // Presets
+            static const char* kPresets[] = {
+                "OpenStreetMap (Standard)",
+                "OpenTopoMap",
+                "Custom"
+            };
+            static const char* kPresetUrls[] = {
+                "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                "https://tile.opentopomap.org/{z}/{x}/{y}.png",
+                ""
+            };
+            static int radMapPreset = 0;
+            static char tileUrlBuf[256] = {0};
+            static bool tileUrlInit = false;
+            if (!tileUrlInit) {
+                std::strncpy(tileUrlBuf, m_settings.radarMapTileUrl.c_str(), sizeof(tileUrlBuf) - 1);
+                // Match preset
+                radMapPreset = 2; // default to Custom
+                for (int i = 0; i < 2; ++i)
+                    if (m_settings.radarMapTileUrl == kPresetUrls[i]) { radMapPreset = i; break; }
+                tileUrlInit = true;
+            }
+            if (ImGui::Combo("Tile Server##rad", &radMapPreset, kPresets, 3)) {
+                if (radMapPreset < 2) {
+                    m_settings.radarMapTileUrl = kPresetUrls[radMapPreset];
+                    std::strncpy(tileUrlBuf, kPresetUrls[radMapPreset], sizeof(tileUrlBuf) - 1);
+                    changed = true;
+                }
+            }
+            ImGui::BeginDisabled(radMapPreset != 2);
+            if (ImGui::InputText("URL##radtile", tileUrlBuf, sizeof(tileUrlBuf))) {
+                m_settings.radarMapTileUrl = tileUrlBuf;
+                changed = true;
+            }
+            ImGui::EndDisabled(); // custom URL
+            ImGui::TextDisabled("Note: changing URL clears the tile cache.");
+            ImGui::EndDisabled(); // map enabled
+
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.4f, 1.0f), "OpenSky OAuth2 (optional)");
+            ImGui::TextDisabled("Leave empty for anonymous access.");
+
+            static char clientIdBuf[128]     = {0};
+            static char clientSecretBuf[128] = {0};
+            static bool radCredsInit = false;
+            if (!radCredsInit) {
+                std::strncpy(clientIdBuf,     m_settings.openSkyClientId.c_str(),     sizeof(clientIdBuf) - 1);
+                std::strncpy(clientSecretBuf, m_settings.openSkyClientSecret.c_str(), sizeof(clientSecretBuf) - 1);
+                radCredsInit = true;
+            }
+            if (ImGui::InputText("Client ID##rad", clientIdBuf, sizeof(clientIdBuf))) {
+                m_settings.openSkyClientId = clientIdBuf;
+                changed = true;
+            }
+            if (ImGui::InputText("Client Secret##rad", clientSecretBuf, sizeof(clientSecretBuf),
+                                 ImGuiInputTextFlags_Password)) {
+                m_settings.openSkyClientSecret = clientSecretBuf;
+                changed = true;
+            }
+
             ImGui::EndTabItem();
         }
 

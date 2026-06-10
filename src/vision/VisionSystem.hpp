@@ -78,7 +78,10 @@ private:
     std::condition_variable  m_detectorCv;
     std::atomic<bool>        m_detectorBusy{false};
     std::atomic<bool>        m_detectorNewResults{false};
-    std::atomic<int>         m_detectorTriggerFrame{0};
+    std::atomic<int>         m_detectorTriggerFrame{0};   // worker-iteration counter value at detector dispatch
+    // Monotonic worker-loop iteration counter. Detector lag is measured in these units so it
+    // matches the Kalman velocity time base (px per tracker iteration). Worker-thread only.
+    uint64_t                 m_workerFrameCounter{0};
     cv::Mat                  m_detectorFrameCopy;
     SystemSettings           m_detectorSettingsCopy;
     std::vector<Detection>   m_detectorResults;

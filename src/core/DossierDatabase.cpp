@@ -18,7 +18,7 @@ bool DossierDatabase::init() {
         return false;
     }
 
-    const char* schema = 
+    const char* schema =
         "CREATE TABLE IF NOT EXISTS Entities ("
         "uuid TEXT PRIMARY KEY,"
         "type TEXT,"
@@ -26,7 +26,8 @@ bool DossierDatabase::init() {
         "first_seen TEXT,"
         "last_seen TEXT,"
         "dossier_text TEXT,"
-        "sightings_count INTEGER DEFAULT 0"
+        "sightings_count INTEGER DEFAULT 0,"
+        "thumbnail_jpeg BLOB DEFAULT NULL"
         ");"
         "CREATE TABLE IF NOT EXISTS Sightings ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -49,26 +50,48 @@ bool DossierDatabase::init() {
         return false;
     }
 
+    // Migration: Kennzeichen-Spalte für bestehende Datenbanken nachrüsten.
+    // "duplicate column name" ist der erwartete Fehler bei bereits migrierter DB.
+    errMsg = nullptr;
+    rc = sqlite3_exec(m_db, "ALTER TABLE Entities ADD COLUMN plate TEXT DEFAULT '';",
+                      nullptr, nullptr, &errMsg);
+    if (rc != SQLITE_OK) {
+        if (errMsg && std::string(errMsg).find("duplicate column") == std::string::npos)
+            std::cerr << "[DossierDatabase] Plate migration failed: " << errMsg << std::endl;
+        sqlite3_free(errMsg);
+    }
+
+    // Migration: Vorschaubild-Spalte für bestehende Datenbanken nachrüsten.
+    errMsg = nullptr;
+    rc = sqlite3_exec(m_db, "ALTER TABLE Entities ADD COLUMN thumbnail_jpeg BLOB DEFAULT NULL;",
+                      nullptr, nullptr, &errMsg);
+    if (rc != SQLITE_OK) {
+        if (errMsg && std::string(errMsg).find("duplicate column") == std::string::npos)
+            std::cerr << "[DossierDatabase] Thumbnail migration failed: " << errMsg << std::endl;
+        sqlite3_free(errMsg);
+    }
+
     return true;
 }
 
 bool DossierDatabase::upsertEntity(const DossierEntry& entry) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    const char* sql = "INSERT OR REPLACE INTO Entities (uuid, type, embedding, first_seen, last_seen, dossier_text, sightings_count) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?);";
+    const char* sql = "INSERT OR REPLACE INTO Entities (uuid, type, embedding, first_seen, last_seen, dossier_text, sightings_count, plate) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
 
     sqlite3_bind_text(stmt, 1, entry.uuid.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, entry.type.c_str(), -1, SQLITE_TRANSIENT);
-    
+
     std::string blob = vectorToBlob(entry.embedding);
     sqlite3_bind_blob(stmt, 3, blob.data(), static_cast<int>(blob.size()), SQLITE_TRANSIENT);
-    
+
     sqlite3_bind_text(stmt, 4, entry.first_seen.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 5, entry.last_seen.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 6, entry.dossier_text.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 7, entry.sightings_count);
+    sqlite3_bind_text(stmt, 8, entry.plate.c_str(), -1, SQLITE_TRANSIENT);
 
     bool success = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
@@ -77,7 +100,7 @@ bool DossierDatabase::upsertEntity(const DossierEntry& entry) {
 
 bool DossierDatabase::getEntityByUUID(const std::string& uuid, DossierEntry& outEntry) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    const char* sql = "SELECT uuid, type, embedding, first_seen, last_seen, dossier_text, sightings_count FROM Entities WHERE uuid = ?;";
+    const char* sql = "SELECT uuid, type, embedding, first_seen, last_seen, dossier_text, sightings_count, plate FROM Entities WHERE uuid = ?;";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
 
@@ -87,15 +110,17 @@ bool DossierDatabase::getEntityByUUID(const std::string& uuid, DossierEntry& out
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         outEntry.uuid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
         outEntry.type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-        
+
         const void* blob = sqlite3_column_blob(stmt, 2);
         int bytes = sqlite3_column_bytes(stmt, 2);
         outEntry.embedding = blobToVector(blob, bytes);
-        
+
         outEntry.first_seen = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
         outEntry.last_seen = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
         outEntry.dossier_text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
         outEntry.sightings_count = sqlite3_column_int(stmt, 6);
+        const unsigned char* plateText = sqlite3_column_text(stmt, 7);
+        outEntry.plate = plateText ? reinterpret_cast<const char*>(plateText) : "";
         found = true;
     }
 
@@ -105,7 +130,7 @@ bool DossierDatabase::getEntityByUUID(const std::string& uuid, DossierEntry& out
 
 bool DossierDatabase::findNearestEntity(const std::vector<float>& embedding, const std::string& type, float threshold, DossierEntry& outEntry) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    const char* sql = "SELECT uuid, type, embedding, first_seen, last_seen, dossier_text, sightings_count FROM Entities WHERE type = ?;";
+    const char* sql = "SELECT uuid, type, embedding, first_seen, last_seen, dossier_text, sightings_count, plate FROM Entities WHERE type = ?;";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
 
@@ -139,6 +164,8 @@ bool DossierDatabase::findNearestEntity(const std::vector<float>& embedding, con
             outEntry.last_seen = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
             outEntry.dossier_text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
             outEntry.sightings_count = sqlite3_column_int(stmt, 6);
+            const unsigned char* plateText = sqlite3_column_text(stmt, 7);
+            outEntry.plate = plateText ? reinterpret_cast<const char*>(plateText) : "";
             found = true;
         }
     }
@@ -154,6 +181,20 @@ bool DossierDatabase::updateDossierText(const std::string& uuid, const std::stri
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
 
     sqlite3_bind_text(stmt, 1, text.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, uuid.c_str(), -1, SQLITE_TRANSIENT);
+
+    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return success;
+}
+
+bool DossierDatabase::updateEntityPlate(const std::string& uuid, const std::string& plate) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const char* sql = "UPDATE Entities SET plate = ? WHERE uuid = ?;";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+
+    sqlite3_bind_text(stmt, 1, plate.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, uuid.c_str(), -1, SQLITE_TRANSIENT);
 
     bool success = (sqlite3_step(stmt) == SQLITE_DONE);
@@ -200,7 +241,7 @@ int DossierDatabase::getEntityCount() const {
 std::vector<DossierEntry> DossierDatabase::getAllEntities() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<DossierEntry> results;
-    const char* sql = "SELECT uuid, type, embedding, first_seen, last_seen, dossier_text, sightings_count FROM Entities ORDER BY last_seen DESC;";
+    const char* sql = "SELECT uuid, type, embedding, first_seen, last_seen, dossier_text, sightings_count, plate FROM Entities ORDER BY last_seen DESC;";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -216,6 +257,8 @@ std::vector<DossierEntry> DossierDatabase::getAllEntities() const {
             entry.last_seen = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
             entry.dossier_text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
             entry.sightings_count = sqlite3_column_int(stmt, 6);
+            const unsigned char* plateText = sqlite3_column_text(stmt, 7);
+            entry.plate = plateText ? reinterpret_cast<const char*>(plateText) : "";
             results.push_back(entry);
         }
         sqlite3_finalize(stmt);
@@ -286,6 +329,42 @@ int DossierDatabase::getMaxFaceId() const {
         sqlite3_finalize(stmt);
     }
     return maxId;
+}
+
+bool DossierDatabase::updateEntityThumbnail(const std::string& uuid, const std::vector<uchar>& jpeg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const char* sql = "UPDATE Entities SET thumbnail_jpeg = ? WHERE uuid = ?;";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+
+    sqlite3_bind_blob(stmt, 1, jpeg.data(), static_cast<int>(jpeg.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, uuid.c_str(), -1, SQLITE_TRANSIENT);
+
+    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return success;
+}
+
+bool DossierDatabase::getEntityThumbnail(const std::string& uuid, std::vector<uchar>& outJpeg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const char* sql = "SELECT thumbnail_jpeg FROM Entities WHERE uuid = ?;";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+
+    sqlite3_bind_text(stmt, 1, uuid.c_str(), -1, SQLITE_TRANSIENT);
+
+    bool found = false;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const void* blob = sqlite3_column_blob(stmt, 0);
+        int bytes = sqlite3_column_bytes(stmt, 0);
+        if (blob && bytes > 0) {
+            outJpeg.assign(reinterpret_cast<const uchar*>(blob),
+                           reinterpret_cast<const uchar*>(blob) + bytes);
+            found = true;
+        }
+    }
+    sqlite3_finalize(stmt);
+    return found;
 }
 
 std::vector<float> DossierDatabase::blobToVector(const void* blob, int size) {

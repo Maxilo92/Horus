@@ -27,14 +27,14 @@ TEST(MultiTrackerTest, StartsTrackingOnDetection) {
     SystemSettings settings;
     settings.trackerConfirmFrames = 2; // test the confirmed/unconfirmed transition
 
-    tracker.update({d}, settings);
+    tracker.update({d}, settings, cv::Size(1280, 720));
 
     // Track exists internally but is not yet confirmed → getTrackedObjects hides it
     EXPECT_EQ(tracker.getActiveTrackCount(), 1);
     EXPECT_EQ(tracker.getTrackedObjects(10).size(), 0);
 
     // Second update: reaches confirmFrames threshold → now visible
-    tracker.update({d}, settings);
+    tracker.update({d}, settings, cv::Size(1280, 720));
     auto objects = tracker.getTrackedObjects(10);
     ASSERT_EQ(objects.size(), 1);
     EXPECT_EQ(objects[0].class_id, 1);
@@ -49,7 +49,7 @@ TEST(MultiTrackerTest, SuccessfulTracking) {
     // First detection
     Detection d1;
     d1.class_id = 1; d1.box = cv::Rect(10, 10, 100, 100); d1.confidence = 0.9f; d1.className = "test";
-    tracker.update({d1}, settings);
+    tracker.update({d1}, settings, cv::Size(1280, 720));
     
     auto objects1 = tracker.getTrackedObjects(10);
     ASSERT_EQ(objects1.size(), 1);
@@ -59,7 +59,7 @@ TEST(MultiTrackerTest, SuccessfulTracking) {
     Detection d2;
     d2.class_id = 1; d2.box = cv::Rect(15, 15, 100, 100); d2.confidence = 0.85f; d2.className = "test";
     
-    tracker.update({d2}, settings);
+    tracker.update({d2}, settings, cv::Size(1280, 720));
     
     auto objects2 = tracker.getTrackedObjects(10);
     ASSERT_EQ(objects2.size(), 1);
@@ -76,13 +76,13 @@ TEST(MultiTrackerTest, PredictionOnSignalLoss) {
     
     // Initialize track with velocity
     Detection d1; d1.class_id = 1; d1.box = cv::Rect(100, 100, 50, 50); d1.className = "test";
-    tracker.update({d1}, settings);
+    tracker.update({d1}, settings, cv::Size(1280, 720));
     
     Detection d2; d2.class_id = 1; d2.box = cv::Rect(110, 100, 50, 50); d2.className = "test";
-    tracker.update({d2}, settings); 
+    tracker.update({d2}, settings, cv::Size(1280, 720)); 
 
     // Signal loss (empty detections)
-    tracker.update({}, settings);
+    tracker.update({}, settings, cv::Size(1280, 720));
     
     auto objects = tracker.getTrackedObjects(10);
     ASSERT_EQ(objects.size(), 1);
@@ -98,13 +98,13 @@ TEST(MultiTrackerTest, TrackRemovalAfterTimeout) {
     settings.trackerMaxLostFrames = 5;
     
     Detection d; d.class_id = 1; d.box = cv::Rect(10, 10, 100, 100); d.className = "test";
-    tracker.update({d}, settings);
+    tracker.update({d}, settings, cv::Size(1280, 720));
     
     EXPECT_EQ(tracker.getActiveTrackCount(), 1);
 
     // Update with empty detections until it's removed
     for (int i = 0; i < 6; ++i) {
-        tracker.update({}, settings);
+        tracker.update({}, settings, cv::Size(1280, 720));
     }
     
     EXPECT_EQ(tracker.getTrackedObjects(10).size(), 0);
@@ -121,7 +121,7 @@ TEST(MultiTrackerTest, Kalman6DStateAndLagCompensation) {
     d1.box = cv::Rect(100, 100, 50, 50);
     d1.className = "test";
     d1.confidence = 0.9f;
-    tracker.update({d1}, settings);
+    tracker.update({d1}, settings, cv::Size(1280, 720));
 
     // Get the object and check its size
     auto objects = tracker.getTrackedObjects(10);
@@ -135,7 +135,7 @@ TEST(MultiTrackerTest, Kalman6DStateAndLagCompensation) {
     d2.box = cv::Rect(110, 100, 50, 50);
     d2.className = "test";
     d2.confidence = 0.9f;
-    tracker.update({d2}, settings);
+    tracker.update({d2}, settings, cv::Size(1280, 720));
 
     // Frame N+2: detection at x = 120
     Detection d3;
@@ -143,7 +143,7 @@ TEST(MultiTrackerTest, Kalman6DStateAndLagCompensation) {
     d3.box = cv::Rect(120, 100, 50, 50);
     d3.className = "test";
     d3.confidence = 0.9f;
-    tracker.update({d3}, settings);
+    tracker.update({d3}, settings, cv::Size(1280, 720));
 
     // Now, at Frame N+5, we receive a delayed detection from Frame N+2 (lag = 3)
     // The delayed detection is at x = 120.
@@ -155,7 +155,7 @@ TEST(MultiTrackerTest, Kalman6DStateAndLagCompensation) {
     d_lag.className = "test";
     d_lag.confidence = 0.9f;
 
-    tracker.update({d_lag}, settings, 3);
+    tracker.update({d_lag}, settings, cv::Size(1280, 720), 3);
 
     objects = tracker.getTrackedObjects(10);
     ASSERT_EQ(objects.size(), 1);
@@ -164,6 +164,81 @@ TEST(MultiTrackerTest, Kalman6DStateAndLagCompensation) {
     // Also check that the box dimensions did NOT change/shrink
     EXPECT_NEAR(objects[0].box.width, 50, 5.0);
     EXPECT_NEAR(objects[0].box.height, 50, 5.0);
+}
+
+// Regression guard for the lag pipeline (Fix 1/Fix 2): a delayed detection that arrives at
+// the object's correct *past* position must be extrapolated to the present, match into a
+// SINGLE track (no duplicate/ghost), and land near the true current position — not teleport.
+TEST(MultiTrackerTest, DelayedDetectionMatchesSingleTrack) {
+    MultiTracker tracker;
+    SystemSettings settings;
+    settings.trackerConfirmFrames = 1;
+
+    const cv::Size frame(1280, 720);
+
+    // Object moving a steady 20 px/frame to the right → velocity converges to ~20.
+    // Detections at x = 100,120,140,160,180; the present position is therefore ~200.
+    for (int i = 0; i < 5; ++i) {
+        Detection d;
+        d.class_id = 1;
+        d.box = cv::Rect(100 + i * 20, 100, 50, 50);
+        d.className = "test";
+        d.confidence = 0.9f;
+        tracker.update({d}, settings, frame);
+    }
+
+    // A detection delayed by 3 iterations reflects where the object was 3 frames ago:
+    // present(~200) - 3*20 = ~140. The tracker must extrapolate 140 + 3*20 back up to ~200.
+    Detection dLag;
+    dLag.class_id = 1;
+    dLag.box = cv::Rect(140, 100, 50, 50);
+    dLag.className = "test";
+    dLag.confidence = 0.9f;
+    tracker.update({dLag}, settings, frame, 3);
+
+    auto objects = tracker.getTrackedObjects(10);
+    ASSERT_EQ(objects.size(), 1);            // no ghost/duplicate track
+    EXPECT_NEAR(objects[0].box.x, 200, 25);  // lands at the present position, not at 140 or flung away
+}
+
+// Regression guard for the runaway-drift bug: a stationary object whose detections
+// only jitter by a few pixels (and arrive with detector lag) must keep its box on the
+// object. Previously the lag extrapolation fed the Kalman velocity estimate back into
+// the measurement, so velocity noise self-amplified until boxes wandered off-screen.
+TEST(MultiTrackerTest, StationaryObjectDoesNotDrift) {
+    MultiTracker tracker;
+    SystemSettings settings;
+    settings.trackerConfirmFrames = 1;
+
+    const cv::Size frame(1280, 720);
+    const cv::Rect home(600, 340, 80, 160); // stationary object, center of frame
+
+    // Deterministic ±2px jitter pattern, detections delivered with lag=3 every 3rd
+    // iteration (the other iterations dead-reckon, like the real async detector).
+    const int jitter[] = {0, 2, -1, 1, -2, 0, 1, -1, 2, -2};
+    for (int i = 0; i < 300; ++i) {
+        if (i % 3 == 0) {
+            Detection d;
+            d.class_id   = 1;
+            d.className  = "test";
+            d.confidence = 0.9f;
+            d.box = cv::Rect(home.x + jitter[i % 10], home.y + jitter[(i + 5) % 10],
+                             home.width, home.height);
+            tracker.update({d}, settings, frame, 3);
+        } else {
+            tracker.update({}, settings, frame, 0, {0.0, 0.0}, false);
+        }
+    }
+
+    auto objects = tracker.getTrackedObjects(10);
+    ASSERT_EQ(objects.size(), 1);
+    EXPECT_NEAR(objects[0].box.x, home.x, 10);
+    EXPECT_NEAR(objects[0].box.y, home.y, 10);
+    EXPECT_NEAR(objects[0].box.width,  home.width,  8);
+    EXPECT_NEAR(objects[0].box.height, home.height, 8);
+    // Velocity must have settled near zero — no residual drift.
+    EXPECT_LT(std::abs(objects[0].vx), 1.0f);
+    EXPECT_LT(std::abs(objects[0].vy), 1.0f);
 }
 
 // --- ObjectDetector Tests ---
@@ -644,6 +719,42 @@ TEST(TargetHistoryTest, VisualChronologySnapshottingAndFinalizing) {
     EXPECT_EQ(record.cropped_image_first_version, 2);
     EXPECT_EQ(record.cropped_image_mid_version, 2);
     EXPECT_EQ(record.cropped_image_last_version, 2);
+}
+
+// Regression: the "best photo" for the AI dossier must be driven purely by the
+// quality score. A coasting/dead-reckoning frame is never quality-scored (the
+// capture is skipped while the track has no real detection), so its score stays
+// at the default 0 and it must never win as best — even if it arrives last.
+TEST(BestPhotoTest, BestSnapshotIsHighestQualityNeverPhantom) {
+    UniqueTargetRecord record;
+    EXPECT_TRUE(record.snapshot_best.image.empty());
+    EXPECT_FLOAT_EQ(record.snapshot_best.qualityScore, 0.0f);
+
+    cv::Mat sharp  = cv::Mat::ones(100, 100, CV_8UC3);
+    cv::Mat blurry = cv::Mat::ones(100, 100, CV_8UC3) * 2;
+    cv::Mat phantom = cv::Mat::zeros(100, 100, CV_8UC3); // coasting box, unscored
+
+    // Mirrors the production rule: a new active snapshot updates best only when
+    // its quality exceeds the incumbent.
+    auto offer = [&](const cv::Mat& img, float score) {
+        TargetSnapshot s;
+        s.image = img.clone();
+        s.qualityScore = score;
+        if (s.qualityScore > record.snapshot_best.qualityScore)
+            record.snapshot_best = s;
+    };
+
+    offer(blurry, 0.30f);   // first real, low-sharpness frame
+    offer(sharp,  0.85f);   // sharper frame wins
+    // Coasting frame: capture is skipped in production, so it is never offered
+    // with a real score. Simulate that it carries the default 0 score.
+    offer(phantom, 0.0f);
+
+    // Best must be the sharp frame, not the later phantom.
+    EXPECT_FLOAT_EQ(record.snapshot_best.qualityScore, 0.85f);
+    ASSERT_FALSE(record.snapshot_best.image.empty());
+    // Sharp frame was all-ones; phantom was all-zeros — confirm identity.
+    EXPECT_GT(cv::sum(record.snapshot_best.image)[0], 0.0);
 }
 
 

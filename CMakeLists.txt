@@ -38,6 +38,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
+# Fetch nlohmann/json (header-only) for parsing OpenSky radar responses
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 # Define ImGui Source Files
 set(IMGUI_SRCS
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -74,11 +82,14 @@ set(CORE_SRCS
     src/ui/UIManager_SettingsWindow.cpp
     src/ui/UIManager_Export.cpp
     src/ui/UIManager_Analyzer.cpp
+    src/ui/UIManager_Radar.cpp
+    src/ui/RadarPanel.cpp
     src/ui/DevConsolePanel.cpp
     src/ui/AnalyzerPanel.cpp
     src/ui/AudioVisualizerPanel.cpp
     src/ui/ReplayPanel.cpp
     src/ui/DossierArchivePanel.cpp
+    src/ui/MarkdownText.cpp
     src/tracking/MultiTracker.cpp
     src/tracking/TrackingSystem.cpp
 )
@@ -132,7 +143,8 @@ target_link_libraries(Tactileviewer
     ${GLFW_LIBRARIES}
     ${GLEW_LIBRARIES}
     ${CURL_LIBRARIES}
-    SQLite::SQLite3
+    SQLite3::SQLite3
+    nlohmann_json::nlohmann_json
 )
 if(APPLE)
     target_link_libraries(Tactileviewer
@@ -265,7 +277,8 @@ target_link_libraries(unit_tests PRIVATE
     ${GLFW_LIBRARIES}
     OpenGL::GL
     ${CMAKE_DL_LIBS}
-    SQLite::SQLite3
+    SQLite3::SQLite3
+    nlohmann_json::nlohmann_json
 )
 if(APPLE)
     target_link_libraries(unit_tests PRIVATE
@@ -284,7 +297,8 @@ target_link_libraries(integration_tests PRIVATE
     ${GLFW_LIBRARIES}
     OpenGL::GL
     ${CMAKE_DL_LIBS}
-    SQLite::SQLite3
+    SQLite3::SQLite3
+    nlohmann_json::nlohmann_json
 )
 if(APPLE)
     target_link_libraries(integration_tests PRIVATE
@@ -303,7 +317,8 @@ target_link_libraries(functional_tests PRIVATE
     ${GLFW_LIBRARIES}
     OpenGL::GL
     ${CMAKE_DL_LIBS}
-    SQLite::SQLite3
+    SQLite3::SQLite3
+    nlohmann_json::nlohmann_json
 )
 if(APPLE)
     target_link_libraries(functional_tests PRIVATE

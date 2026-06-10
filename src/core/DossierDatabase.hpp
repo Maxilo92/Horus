@@ -30,6 +30,9 @@ public:
     bool getEntityByUUID(const std::string& uuid, DossierEntry& outEntry);
     bool findNearestEntity(const std::vector<float>& embedding, const std::string& type, float threshold, DossierEntry& outEntry);
     bool updateDossierText(const std::string& uuid, const std::string& text);
+    bool updateEntityPlate(const std::string& uuid, const std::string& plate);
+    bool updateEntityThumbnail(const std::string& uuid, const std::vector<uchar>& jpeg);
+    bool getEntityThumbnail(const std::string& uuid, std::vector<uchar>& outJpeg);
     
     // Sightings
     bool addSighting(const std::string& entityUuid, const std::string& sessionId);

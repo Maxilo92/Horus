@@ -102,6 +102,7 @@ void UIManager::savePersistedSettings() const {
     out << "showDataPanel="       << (m_showDataPanel ? 1 : 0) << '\n';
     out << "showZoomWindow="      << (m_showZoomWindow ? 1 : 0) << '\n';
     out << "showTargetAnalyzer="  << (m_showTargetAnalyzer ? 1 : 0) << '\n';
+    out << "showRadar="           << (m_showRadar ? 1 : 0) << '\n';
 
     const auto& s = m_settings;
     out << "detectorModel="       << s.detectorModel << '\n';
@@ -126,6 +127,8 @@ void UIManager::savePersistedSettings() const {
     out << "trackerConfirmFrames="         << s.trackerConfirmFrames << '\n';
     out << "trackerVelocitySmoothing="     << s.trackerVelocitySmoothing << '\n';
     out << "trackerDeadReckoningDamping="  << s.trackerDeadReckoningDamping << '\n';
+    out << "targetPriorityEnabled="        << (s.targetPriorityEnabled ? 1 : 0) << '\n';
+    out << "priorityShowTopBadge="         << (s.priorityShowTopBadge ? 1 : 0) << '\n';
     out << "showTacticalOverlay="  << (s.showTacticalOverlay ? 1 : 0) << '\n';
     out << "showCrosshair="        << (s.showCrosshair ? 1 : 0) << '\n';
     out << "showCornerBrackets="   << (s.showCornerBrackets ? 1 : 0) << '\n';
@@ -185,6 +188,19 @@ void UIManager::savePersistedSettings() const {
     out << "debugShowKalmanVectors="    << (s.debugShowKalmanVectors ? 1 : 0) << '\n';
     out << "debugFreezeVision="         << (s.debugFreezeVision ? 1 : 0) << '\n';
     out << "debugPerformanceGraphs="    << (s.debugPerformanceGraphs ? 1 : 0) << '\n';
+
+    // Radar Settings (OpenSky live aircraft scope)
+    out << "radarEnabled="         << (s.radarEnabled ? 1 : 0) << '\n';
+    out << "radarCenterLat="       << s.radarCenterLat << '\n';
+    out << "radarCenterLon="       << s.radarCenterLon << '\n';
+    out << "radarRadiusKm="        << s.radarRadiusKm << '\n';
+    out << "radarRefreshMs="       << s.radarRefreshMs << '\n';
+    out << "radarSweepPeriodSec="  << s.radarSweepPeriodSec << '\n';
+    out << "openSkyClientId="      << s.openSkyClientId << '\n';
+    out << "openSkyClientSecret="  << s.openSkyClientSecret << '\n';
+    out << "radarMapEnabled="      << (s.radarMapEnabled ? 1 : 0) << '\n';
+    out << "radarMapOpacity="      << s.radarMapOpacity << '\n';
+    out << "radarMapTileUrl="      << s.radarMapTileUrl << '\n';
 
     // AI Dossier Settings (Plan 13)
     out << "aiDossierEnabled="     << (s.aiDossierEnabled ? 1 : 0) << '\n';
@@ -279,6 +295,7 @@ void UIManager::loadPersistedSettings(const std::string& path) {
             else if (key == "showDataPanel")              m_showDataPanel                 = ParseBoolSetting(val);
             else if (key == "showZoomWindow")             m_showZoomWindow                = ParseBoolSetting(val);
             else if (key == "showTargetAnalyzer")         m_showTargetAnalyzer            = ParseBoolSetting(val);
+            else if (key == "showRadar")                  m_showRadar                     = ParseBoolSetting(val);
             else if (key == "remoteInferenceEnabled")     s.remoteInferenceEnabled        = ParseBoolSetting(val);
             else if (key == "remoteInferenceIp")          s.remoteInferenceIp             = val;
             else if (key == "remoteInferencePort")        s.remoteInferencePort           = std::stoi(val);
@@ -300,6 +317,8 @@ void UIManager::loadPersistedSettings(const std::string& path) {
             else if (key == "trackerConfirmFrames")       s.trackerConfirmFrames          = std::stoi(val);
             else if (key == "trackerVelocitySmoothing")   s.trackerVelocitySmoothing      = std::stof(val);
             else if (key == "trackerDeadReckoningDamping")s.trackerDeadReckoningDamping   = std::stof(val);
+            else if (key == "targetPriorityEnabled")      s.targetPriorityEnabled         = ParseBoolSetting(val);
+            else if (key == "priorityShowTopBadge")       s.priorityShowTopBadge          = ParseBoolSetting(val);
             else if (key == "showTacticalOverlay")        s.showTacticalOverlay           = ParseBoolSetting(val);
             else if (key == "showCrosshair")              s.showCrosshair                 = ParseBoolSetting(val);
             else if (key == "showCornerBrackets")         s.showCornerBrackets            = ParseBoolSetting(val);
@@ -369,6 +388,17 @@ void UIManager::loadPersistedSettings(const std::string& path) {
             else if (key == "debugShowKalmanVectors")      s.debugShowKalmanVectors         = ParseBoolSetting(val);
             else if (key == "debugFreezeVision")           s.debugFreezeVision              = ParseBoolSetting(val);
             else if (key == "debugPerformanceGraphs")      s.debugPerformanceGraphs         = ParseBoolSetting(val);
+            else if (key == "radarEnabled")               s.radarEnabled                  = ParseBoolSetting(val);
+            else if (key == "radarCenterLat")             s.radarCenterLat                = std::stof(val);
+            else if (key == "radarCenterLon")             s.radarCenterLon                = std::stof(val);
+            else if (key == "radarRadiusKm")              s.radarRadiusKm                 = std::stof(val);
+            else if (key == "radarRefreshMs")             s.radarRefreshMs                = std::stoi(val);
+            else if (key == "radarSweepPeriodSec")        s.radarSweepPeriodSec           = std::stof(val);
+            else if (key == "openSkyClientId")            s.openSkyClientId               = val;
+            else if (key == "openSkyClientSecret")        s.openSkyClientSecret           = val;
+            else if (key == "radarMapEnabled")            s.radarMapEnabled               = ParseBoolSetting(val);
+            else if (key == "radarMapOpacity")            s.radarMapOpacity               = std::stof(val);
+            else if (key == "radarMapTileUrl")            s.radarMapTileUrl               = val;
             else if (key == "audioEnabled")               s.audioEnabled                  = ParseBoolSetting(val);
             else if (key == "audioMasterVolume")          s.audioMasterVolume             = std::stof(val);
             else if (key == "audioMotionEnabled")         s.audioMotionEnabled            = ParseBoolSetting(val);
@@ -438,8 +468,7 @@ void UIManager::loadPersistedSettings(const std::string& path) {
         }
     }
 
-    // If the loaded file has no setup_complete key (e.g. migrated from an older version),
-    // show the wizard on next frame so the user can confirm/adjust their setup.
+    // Force setup wizard if setup is incomplete OR if models are missing
     {
         std::ifstream recheck(p);
         bool hasSetupComplete = false;
@@ -447,7 +476,15 @@ void UIManager::loadPersistedSettings(const std::string& path) {
         while (std::getline(recheck, chkLine)) {
             if (chkLine.rfind("setup_complete=", 0) == 0) { hasSetupComplete = true; break; }
         }
-        if (!hasSetupComplete) m_setupWizardActive = true;
+
+        checkModelsExist();
+        if (!hasSetupComplete) {
+            m_setupWizardActive = true;
+            m_setupWizardStep = 0;
+        } else if (!allModelsPresent()) {
+            m_setupWizardActive = true;
+            m_setupWizardStep = 1; // Jump directly to installation
+        }
     }
 }
 

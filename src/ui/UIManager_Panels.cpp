@@ -1,5 +1,6 @@
 #include "UIManager.hpp"
 #include "UIManager_internal.hpp"
+#include "MarkdownText.hpp"
 #include <algorithm>
 #include <cstring>
 
@@ -487,6 +488,10 @@ void UIManager::renderDossierPanel(const DossierState& dossier) {
     ImGui::TextColored(ImVec4(0, 0.8f, 1, 1), "ID: %s", entry.uuid.c_str());
     ImGui::SameLine();
     ImGui::TextDisabled("Type: %s", entry.type.c_str());
+    if (!entry.plate.empty()) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.1f, 1.0f), "PLATE: %s", entry.plate.c_str());
+    }
     ImGui::Separator();
 
     ImGui::BeginGroup();
@@ -508,7 +513,7 @@ void UIManager::renderDossierPanel(const DossierState& dossier) {
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.1f, 0.1f, 0.12f, 1.0f));
     ImGui::BeginChild("DossierText", ImVec2(0, 0), true);
-    ImGui::TextWrapped("%s", entry.dossier_text.c_str());
+    MarkdownText::Render(entry.dossier_text);
     ImGui::EndChild();
     ImGui::PopStyleColor();
 

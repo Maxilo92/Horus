@@ -3,6 +3,38 @@
 #include <chrono>
 #include <algorithm>
 #include <ctime>
+#ifdef __APPLE__
+#include <pthread.h>
+#include <sys/qos.h>
+#endif
+
+// Returns a quality score in [0, 1] for a snapshot crop.
+// Combines sharpness (Laplacian variance), detection confidence, and
+// whether the bounding box is fully inside the frame.
+static float computeSnapQuality(const cv::Mat& crop, float confidence,
+                                 const cv::Rect& box, cv::Size frameSize) {
+    if (crop.empty()) return 0.0f;
+
+    // Sharpness: variance of the Laplacian on a grayscale crop.
+    // 200 = "clearly sharp" reference point; capped at 1.0.
+    cv::Mat gray;
+    if (crop.channels() == 3) cv::cvtColor(crop, gray, cv::COLOR_BGR2GRAY);
+    else gray = crop;
+    cv::Mat lap;
+    cv::Laplacian(gray, lap, CV_64F);
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(lap, mean, stddev);
+    float sharpness = std::min(1.0f, static_cast<float>(stddev[0] * stddev[0]) / 200.0f);
+
+    // Completeness: full score if box doesn't touch any frame edge.
+    constexpr int kEdgeMargin = 3;
+    bool clipped = (box.x <= kEdgeMargin || box.y <= kEdgeMargin ||
+                    box.x + box.width  >= frameSize.width  - kEdgeMargin ||
+                    box.y + box.height >= frameSize.height - kEdgeMargin);
+    float completeness = clipped ? 0.75f : 1.0f;
+
+    return sharpness * (0.7f + 0.3f * confidence) * completeness;
+}
 
 TrackingSystem::TrackingSystem(Blackboard& blackboard, ROIManager& roiManager,
                                DataLogger& dataLogger, AudioEngine& audioEngine,
@@ -98,7 +130,9 @@ void TrackingSystem::submitFrame(const cv::Mat& frame, const SystemSettings& set
                                   bool hasNewDetections) {
     if (m_trackingBusy.load()) return;
     std::lock_guard<std::mutex> lock(m_trackingMutex);
-    m_trackingFrameCopy            = frame; // Shallow copy
+    // Shallow safe: jeder Frame lebt in einem eigenen, nach Publish unveränderlichen
+    // Puffer (Capture released seinen Header nach dem Publish).
+    m_trackingFrameCopy = frame;
     m_trackingSettingsCopy         = settings;
     m_trackingDetectionsCopy       = detections;
     m_trackingDetectorLag          = detectorLag;
@@ -111,6 +145,11 @@ void TrackingSystem::submitFrame(const cv::Mat& frame, const SystemSettings& set
 
 void TrackingSystem::trackingWorkerLoop() {
     m_log(LogLevel::INFO, "Tracking thread started");
+#ifdef __APPLE__
+    // Tracking darf UI und Kamera-Feed nie verdrängen — bei CPU-Sättigung
+    // bekommen die interaktiven Threads die Kerne zuerst.
+    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+#endif
     while (m_running) {
         cv::Mat trackingFrame;
         SystemSettings settings;
@@ -163,11 +202,17 @@ void TrackingSystem::trackingWorkerLoop() {
 
             if (settings.enableTracking) {
                 runReacquisition(detections, trackingFrame, settings, motionTracks);
+                
+                // Plan 04: Filter detections through ROI zones (Inclusion/Exclusion)
+                m_roiManager.filterDetections(detections);
+                
                 deduplicateDetections(detections);
 
                 cv::Point2d cameraMotion = estimateCameraMotion(trackingFrame, settings);
                 updateTrackerAndFaces(tracked, trackingFrame, detections, settings,
                                       detectorLag, cameraMotion, hasNewDetections);
+
+                computeTargetPriorities(tracked, settings, trackingFrame.size());
 
                 updateTargetHistory(tracked, trackingFrame, manualCaptureId);
                 runPixelTemplateMatch(tracked, trackingFrame, cmd, settings);
@@ -434,14 +479,23 @@ cv::Point2d TrackingSystem::estimateCameraMotion(const cv::Mat& frame,
 
             if (goodPrev.size() >= 6) {
                 // Partial affine (Translation + Rotation + uniform Scale), RANSAC filters outliers
+                cv::Mat inliers;
                 cv::Mat affine = cv::estimateAffinePartial2D(
-                    goodPrev, goodCurr, cv::noArray(), cv::RANSAC, 3.0);
+                    goodPrev, goodCurr, inliers, cv::RANSAC, 3.0);
 
-                if (!affine.empty()) {
+                // Inlier gating: a trustworthy global motion needs a clear consensus of
+                // static features. Otherwise (foreground motion, low texture) we self-disable
+                // the compensation rather than shoving every track by a bad estimate.
+                const int inlierCount = cv::countNonZero(inliers);
+                const double inlierRatio = goodPrev.empty() ? 0.0
+                    : static_cast<double>(inlierCount) / static_cast<double>(goodPrev.size());
+
+                if (!affine.empty() && inlierCount >= 12 && inlierRatio >= 0.40) {
                     const double dx = affine.at<double>(0, 2);
                     const double dy = affine.at<double>(1, 2);
-                    // Plausibility guard: reject shifts exceeding 25 % of frame width
-                    const double maxShift = 0.25 * frame.cols;
+                    // Plausibility guard: a real pan rarely moves the scene more than
+                    // ~8 % of frame width per frame at 30 fps.
+                    const double maxShift = 0.08 * frame.cols;
                     if (std::abs(dx) <= maxShift && std::abs(dy) <= maxShift) {
                         motion.x = dx;
                         motion.y = dy;
@@ -451,6 +505,11 @@ cv::Point2d TrackingSystem::estimateCameraMotion(const cv::Mat& frame,
         }
     }
     m_prevFrameGray = grayFrame.clone();
+
+    // Temporal smoothing dampens single-frame outliers before the shift hits every track.
+    motion.x = 0.6 * motion.x + 0.4 * m_prevCameraMotion.x;
+    motion.y = 0.6 * motion.y + 0.4 * m_prevCameraMotion.y;
+    m_prevCameraMotion = motion;
     return motion;
 }
 
@@ -465,8 +524,13 @@ void TrackingSystem::updateTrackerAndFaces(std::vector<TrackedObject>& tracked,
                                             int detectorLag,
                                             const cv::Point2d& cameraMotion,
                                             bool hasNewDetections) {
-    m_tracker->update(detections, settings, detectorLag, cameraMotion, hasNewDetections);
+    m_tracker->update(detections, settings, frame.size(), detectorLag, cameraMotion, hasNewDetections);
     tracked = m_tracker->getTrackedObjects(settings.trackerMaxTrailLength);
+    
+    // Safety clamp for all tracked objects displayed in HUD
+    for (auto& obj : tracked) {
+        obj.box = clampRect(obj.box, frame.cols, frame.rows);
+    }
 
     if (!settings.faceRecognitionEnabled) {
         m_log(LogLevel::VERBOSE, "[FaceRecognizer] Skipped: faceRecognitionEnabled=false");
@@ -486,8 +550,8 @@ void TrackingSystem::updateTrackerAndFaces(std::vector<TrackedObject>& tracked,
             auto it = m_trackIdToFace.find(obj.track_id);
             if (it == m_trackIdToFace.end()) {
                 runRecognition = true;
-            } else if (it->second.face_id == -1) {
-                // No identity yet — retry every 15 frames (don't hammer the model every frame)
+            } else {
+                // Retry every 15 frames to update tracking and check identity
                 it->second.retryCountdown--;
                 if (it->second.retryCountdown <= 0) {
                     runRecognition = true;
@@ -510,23 +574,23 @@ void TrackingSystem::updateTrackerAndFaces(std::vector<TrackedObject>& tracked,
 
             {
                 std::lock_guard<std::mutex> lock(m_faceMutex);
-                FaceTrackInfo info;
+                auto& info = m_trackIdToFace[obj.track_id];
                 if (!faceResults.empty()) {
-                    info.face_id   = faceResults[0].identityId; // may be -1 (unknown)
-                    info.face_name = faceResults[0].name;
+                    // Update identity if recognized, otherwise keep current identity
+                    if (faceResults[0].identityId != -1) {
+                        info.face_id   = faceResults[0].identityId;
+                        info.face_name = faceResults[0].name;
+                    }
                     info.face_box  = faceResults[0].box;
+                    info.last_person_box = obj.box;
                     m_log(LogLevel::INFO, "[FaceRecognizer] Face found for track=" +
                           std::to_string(obj.track_id) + " id=" + std::to_string(info.face_id) +
                           " name=" + info.face_name);
                 } else {
-                    // No face detected — create a throttled "no face" entry so we
-                    // don't hammer the model every frame for this track.
-                    info.face_id = -1;
+                    // No face detected this time; we keep the existing identity but don't update face_box
+                    if (info.last_person_box.width == 0) info.face_id = -1;
                 }
-                // Always set a cooldown so retries are rate-limited.
-                // Default FaceTrackInfo has retryCountdown=0 which causes immediate re-runs.
                 info.retryCountdown = 15;
-                m_trackIdToFace[obj.track_id] = std::move(info);
             }
         }
         {
@@ -535,7 +599,21 @@ void TrackingSystem::updateTrackerAndFaces(std::vector<TrackedObject>& tracked,
             if (it != m_trackIdToFace.end()) {
                 obj.face_id   = it->second.face_id;
                 obj.face_name = it->second.face_name;
-                obj.face_box  = it->second.face_box;
+                
+                // Interpolate face_box relative to current person box for smooth tracking
+                if (it->second.last_person_box.width > 0 && it->second.last_person_box.height > 0) {
+                    float rel_x = (it->second.face_box.x - it->second.last_person_box.x) / (float)it->second.last_person_box.width;
+                    float rel_y = (it->second.face_box.y - it->second.last_person_box.y) / (float)it->second.last_person_box.height;
+                    float rel_w = it->second.face_box.width / (float)it->second.last_person_box.width;
+                    float rel_h = it->second.face_box.height / (float)it->second.last_person_box.height;
+                    
+                    obj.face_box.x = obj.box.x + static_cast<int>(rel_x * obj.box.width);
+                    obj.face_box.y = obj.box.y + static_cast<int>(rel_y * obj.box.height);
+                    obj.face_box.width = static_cast<int>(rel_w * obj.box.width);
+                    obj.face_box.height = static_cast<int>(rel_h * obj.box.height);
+                } else {
+                    obj.face_box = it->second.face_box;
+                }
             }
         }
     }
@@ -580,6 +658,9 @@ void TrackingSystem::runPixelTemplateMatch(std::vector<TrackedObject>& tracked,
                 static_cast<int>(std::round(m_pixelCenterX - lastBox.width  / 2.0f)),
                 static_cast<int>(std::round(m_pixelCenterY - lastBox.height / 2.0f)),
                 lastBox.width, lastBox.height);
+            
+            // Safety clamp for predicted box
+            predicted = clampRect(predicted, frame.cols, frame.rows);
 
             const int pad = 80;
             int sx1 = std::max(0, std::min(predicted.x - pad, frame.cols - 1));
@@ -655,6 +736,10 @@ void TrackingSystem::runPixelTemplateMatch(std::vector<TrackedObject>& tracked,
                         m_pixelVy = alpha * pixDy + (1.0f - alpha) * m_pixelVy;
                     }
 
+                    // Hard Velocity Cap for Pixel Target (max 120 px/frame)
+                    m_pixelVx = std::clamp(m_pixelVx, -120.0f, 120.0f);
+                    m_pixelVy = std::clamp(m_pixelVy, -120.0f, 120.0f);
+
                     m_pixelCenterX = static_cast<float>(newCx);
                     m_pixelCenterY = static_cast<float>(newCy);
 
@@ -664,7 +749,7 @@ void TrackingSystem::runPixelTemplateMatch(std::vector<TrackedObject>& tracked,
                         static_cast<int>(std::round(tw)),
                         static_cast<int>(std::round(th)));
 
-                    m_sharedLockedTarget.box         = newBox;
+                    m_sharedLockedTarget.box         = clampRect(newBox, frame.cols, frame.rows);
                     m_sharedLockedTarget.confidence  = static_cast<float>(bestMaxVal);
                     m_sharedLockedTarget.lost_frames = 0;
                     m_sharedLockedTarget.state       = TrackingState::LOCKED;
@@ -765,6 +850,118 @@ void TrackingSystem::updateAudioFeedback(const SystemSettings& settings) {
     }
 
     m_prevLockState = cur;
+}
+
+// -----------------------------------------------------------------------
+// Section 11b – automatic target prioritization
+// Bewertet pro Frame, welches Ziel für den Operator am wichtigsten ist.
+// Score-Komponenten: Klassengewicht, Alarmzone, Tempo, Nähe, Annäherung,
+// Neuheit. Rang 0 = wichtigstes Ziel (HUD hebt es hervor).
+// -----------------------------------------------------------------------
+
+void TrackingSystem::computeTargetPriorities(std::vector<TrackedObject>& tracked,
+                                             const SystemSettings& settings,
+                                             cv::Size frameSize) {
+    if (!settings.targetPriorityEnabled || tracked.empty()) {
+        for (auto& obj : tracked) { obj.priority = 0.0f; obj.priorityRank = -1; obj.priorityReason.clear(); }
+        m_prioMem.clear();
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const float frameArea = std::max(1.0f, static_cast<float>(frameSize.width) *
+                                            static_cast<float>(frameSize.height));
+
+    // Aktive Alarmzonen einsammeln
+    std::vector<cv::Rect> alarmZones;
+    for (const auto& z : m_roiManager.getROIs())
+        if (z.active && z.function == ROIFunction::ALARM)
+            alarmZones.push_back(z.rect);
+
+    // Klassengewicht: Wie operator-relevant ist diese Objektklasse grundsätzlich?
+    auto classWeight = [](const std::string& cls) -> float {
+        if (cls == "person") return 1.0f;
+        if (cls == "car" || cls == "truck" || cls == "bus" ||
+            cls == "motorcycle" || cls == "bicycle") return 0.85f;
+        if (cls == "airplane" || cls == "boat" || cls == "train") return 0.8f;
+        if (cls == "dog" || cls == "cat" || cls == "horse") return 0.5f;
+        return 0.35f;
+    };
+
+    // Verlaufsspeicher für verschwundene Tracks aufräumen
+    {
+        std::unordered_set<int> alive;
+        for (const auto& o : tracked) alive.insert(o.track_id);
+        for (auto it = m_prioMem.begin(); it != m_prioMem.end(); )
+            it = alive.count(it->first) ? std::next(it) : m_prioMem.erase(it);
+    }
+
+    for (auto& obj : tracked) {
+        auto& mem = m_prioMem[obj.track_id];
+        if (mem.firstSeen == std::chrono::steady_clock::time_point()) {
+            mem.firstSeen = now;
+            mem.smoothedArea = static_cast<float>(obj.box.area());
+        }
+
+        std::string reason;
+        auto addReason = [&reason](const char* tag) {
+            if (!reason.empty()) reason += "+";
+            reason += tag;
+        };
+
+        float score = classWeight(obj.className);
+
+        // Alarmzone: dominanter Faktor — ein Ziel in einer Alarmzone hat Vorrang.
+        const cv::Point center(obj.box.x + obj.box.width / 2, obj.box.y + obj.box.height / 2);
+        for (const auto& z : alarmZones) {
+            if (z.contains(center)) { score += 1.5f; addReason("ALARM"); break; }
+        }
+
+        // Tempo relativ zur Objektgröße (px/Frame pro Objektdiagonale)
+        const float objDiag = std::hypot(static_cast<float>(obj.box.width),
+                                          static_cast<float>(obj.box.height));
+        const float relSpeed = std::hypot(obj.vx, obj.vy) / std::max(1.0f, objDiag);
+        if (relSpeed > 0.02f) {
+            score += std::min(0.6f, relSpeed * 6.0f);
+            if (relSpeed > 0.06f) addReason("FAST");
+        }
+
+        // Nähe: Bildflächenanteil (große Box = nah an der Kamera)
+        const float areaFrac = static_cast<float>(obj.box.area()) / frameArea;
+        score += std::min(0.5f, areaFrac * 5.0f);
+        if (areaFrac > 0.08f) addReason("CLOSE");
+
+        // Annäherung: wächst die Box nachhaltig, kommt das Objekt auf die Kamera zu.
+        const float area = static_cast<float>(obj.box.area());
+        if (mem.smoothedArea > 1.0f) {
+            const float growth = (area - mem.smoothedArea) / mem.smoothedArea;
+            mem.areaGrowth = 0.9f * mem.areaGrowth + 0.1f * growth;
+            if (mem.areaGrowth > 0.004f) { // ~+12 %/s Flächenwachstum bei 30 fps
+                score += 0.4f;
+                addReason("APPROACHING");
+            }
+        }
+        mem.smoothedArea = 0.9f * mem.smoothedArea + 0.1f * area;
+
+        // Neuheit: frisch aufgetauchte Ziele brauchen Operator-Aufmerksamkeit.
+        const float ageSec = std::chrono::duration<float>(now - mem.firstSeen).count();
+        if (ageSec < 3.0f) { score += 0.4f * (1.0f - ageSec / 3.0f); if (ageSec < 1.5f) addReason("NEW"); }
+
+        // Verlorene Tracks sind weniger handlungsrelevant.
+        if (obj.lost_frames > 0) score *= 0.4f;
+
+        obj.priority = score;
+        obj.priorityReason = std::move(reason);
+    }
+
+    // Rang vergeben (0 = wichtigstes Ziel)
+    std::vector<int> order(tracked.size());
+    for (size_t i = 0; i < order.size(); ++i) order[static_cast<int>(i)] = static_cast<int>(i);
+    std::sort(order.begin(), order.end(), [&tracked](int a, int b) {
+        return tracked[a].priority > tracked[b].priority;
+    });
+    for (size_t rank = 0; rank < order.size(); ++rank)
+        tracked[order[rank]].priorityRank = static_cast<int>(rank);
 }
 
 // -----------------------------------------------------------------------
@@ -903,11 +1100,16 @@ void TrackingSystem::updateTargetHistory(const std::vector<TrackedObject>& activ
 
             if (roi.width > 0 && roi.height > 0) {
                 TargetSnapshot snap;
-                snap.image     = currentFrame(roi).clone();
-                snap.timestamp = timestamp;
-                snap.box       = obj.box;
-                snap.confidence = obj.confidence;
+                snap.image        = currentFrame(roi).clone();
+                snap.timestamp    = timestamp;
+                snap.box          = obj.box;
+                snap.confidence   = obj.confidence;
+                snap.qualityScore = computeSnapQuality(snap.image, snap.confidence,
+                                                       snap.box, currentFrame.size());
                 rec.snapshot_first = rec.snapshot_mid = rec.snapshot_last = snap;
+                // Only seed the best photo from a frame backed by a real detection,
+                // never from a coasting box over a vanished object.
+                if (obj.is_active) rec.snapshot_best = snap;
                 rec.periodic_snapshots.push_back(snap);
             }
             rec.last_snapshot_time       = std::chrono::steady_clock::now();
@@ -928,6 +1130,12 @@ void TrackingSystem::updateTargetHistory(const std::vector<TrackedObject>& activ
                 now - it->last_snapshot_time).count();
 
             auto captureSnap = [&]() {
+                // Never snapshot a coasting / dead-reckoning track: the box is a
+                // Kalman extrapolation of an object that wasn't detected this frame,
+                // so it sits over empty background or a wrong object. Such phantom
+                // crops must not pollute the gallery or become the best photo.
+                if (!obj.is_active) return;
+
                 float pf = 0.5f;
                 cv::Rect roi = obj.box;
                 int padW = static_cast<int>(roi.width  * pf);
@@ -944,10 +1152,14 @@ void TrackingSystem::updateTargetHistory(const std::vector<TrackedObject>& activ
                 if (roi.width <= 0 || roi.height <= 0) return;
 
                 TargetSnapshot snap;
-                snap.image     = currentFrame(roi).clone();
-                snap.timestamp = timestamp;
-                snap.box       = obj.box;
-                snap.confidence = obj.confidence;
+                snap.image        = currentFrame(roi).clone();
+                snap.timestamp    = timestamp;
+                snap.box          = obj.box;
+                snap.confidence   = obj.confidence;
+                snap.qualityScore = computeSnapQuality(snap.image, snap.confidence,
+                                                        snap.box, currentFrame.size());
+                if (snap.qualityScore > it->snapshot_best.qualityScore)
+                    it->snapshot_best = snap;
                 it->periodic_snapshots.push_back(snap);
                 it->last_snapshot_time = now;
 
