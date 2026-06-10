@@ -69,6 +69,9 @@ private:
     void updateLockedTargetYolo(const std::vector<TrackedObject>& tracked);
     void updateAudioFeedback(const SystemSettings& settings);
     void checkAlarmZones(const std::vector<TrackedObject>& tracked);
+    void computeTargetPriorities(std::vector<TrackedObject>& tracked,
+                                 const SystemSettings& settings,
+                                 cv::Size frameSize);
     void logTrackingData(const std::vector<TrackedObject>& tracked,
                          const std::vector<MotionTrack>& motionTracks,
                          const SystemSettings& settings,
@@ -123,6 +126,14 @@ private:
     // Face recognition identity cache: track_id -> {face_id, face_name, face_box}
     std::unordered_map<int, FaceTrackInfo> m_trackIdToFace;
     std::mutex m_faceMutex;
+
+    // Target-Priorität: Verlaufsdaten pro Track (Annäherung, Neuheit)
+    struct PriorityMemory {
+        std::chrono::steady_clock::time_point firstSeen{};
+        float smoothedArea = 0.0f; // EMA der Boxfläche zur Annäherungserkennung
+        float areaGrowth   = 0.0f; // geglättete relative Flächenänderung pro Update
+    };
+    std::unordered_map<int, PriorityMemory> m_prioMem;
 
     // Accumulated face recognition stats — updated by tracking thread, pushed to Blackboard.
     FaceDebugState m_faceDbg;

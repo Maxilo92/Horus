@@ -8,6 +8,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <filesystem>
+#include <thread>
 
 // -----------------------------------------------------------------------
 // Helpers
@@ -97,6 +98,15 @@ bool Application::initImGui() {
 
 bool Application::init(int argc, char** argv) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
+
+    // Kerne für UI + Kamera reservieren: OpenCVs parallel_for (vor allem die
+    // DNN-Inferenz) belegt sonst alle Kerne und lässt die interaktiven Threads
+    // verhungern, sobald das Tracking unter Last steht.
+    {
+        const int hw = static_cast<int>(std::thread::hardware_concurrency());
+        cv::setNumThreads(std::max(2, hw - 2));
+    }
+
     m_settingsPath = GetDefaultSettingsPath();
 
     const std::string cameraAddress = (argc > 1) ? argv[1] : "1";

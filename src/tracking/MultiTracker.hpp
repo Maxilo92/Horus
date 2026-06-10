@@ -18,6 +18,16 @@ struct TrackState {
 
     cv::KalmanFilter kf;
 
+    // Messbasierte Geschwindigkeit (px pro update()-Iteration), unabhängig vom
+    // Kalman-Zustand. Wird ausschließlich für den Lag-Ausgleich verwendet:
+    // Würde stattdessen die Kalman-Geschwindigkeit in die Messung extrapoliert,
+    // entstünde eine Rückkopplungsschleife (Schätzung bestätigt sich selbst),
+    // durch die Boxen bei stehenden Objekten wegdriften.
+    cv::Point2d measVelocity{0.0, 0.0};
+    cv::Point2d lastMeasCenter{0.0, 0.0};
+    int  updatesSinceMeas = 0;   // update()-Iterationen seit letzter akzeptierter Messung
+    bool hasMeasVelocity  = false;
+
     // Bewegungspfad (Centroid-History für Trail-Rendering)
     std::vector<cv::Point> trail;
 

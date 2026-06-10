@@ -59,6 +59,7 @@ UIManager::UIManager(Blackboard& blackboard, ROIManager& roiManager,
     m_analyzerPanel   = std::make_unique<AnalyzerPanel>();
     m_audioVisualizerPanel = std::make_unique<AudioVisualizerPanel>();
     m_replayPanel     = std::make_unique<ReplayPanel>();
+    m_radarPanel      = std::make_unique<RadarPanel>();
 
     m_exportWorkerRunning = true;
     m_exportWorker = std::thread(&UIManager::exportWorkerLoop, this);
@@ -337,6 +338,7 @@ void UIManager::update() {
             ImGui::Separator();
             if (ImGui::MenuItem("Data Panel",  nullptr, &m_showDataPanel))   savePersistedSettings();
             if (ImGui::MenuItem("Zoom Window", "Z",     &m_showZoomWindow))  savePersistedSettings();
+            if (ImGui::MenuItem("Radar",       nullptr, &m_showRadar))       savePersistedSettings();
             ImGui::Separator();
             if (ImGui::MenuItem("Keyboard Shortcuts", "F1"))
                 m_showShortcutHelp = true;
@@ -424,6 +426,7 @@ void UIManager::update() {
     if (m_showTargetAnalyzer)  renderTargetAnalyzer(tracking);
     if (m_showDossierPanel)    renderDossierPanel(dossier);
     if (m_dossierArchivePanel) m_dossierArchivePanel->render(&m_showDossierArchive);
+    if (m_showRadar)           renderRadar();
     
     // Replay Control Panel
     if (m_replayPanel) m_replayPanel->render(m_blackboard);

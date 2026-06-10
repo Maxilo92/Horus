@@ -25,6 +25,7 @@
 #include "AudioVisualizerPanel.hpp"
 #include "ReplayPanel.hpp"
 #include "DossierArchivePanel.hpp"
+#include "RadarPanel.hpp"
 #include "UpdateChecker.hpp"
 
 class UIManager : public IModule {
@@ -75,6 +76,7 @@ private:
     void renderSettingsWindow();
     void renderTargetAnalyzer(const TrackingStateData& tracking);
     void renderDossierPanel(const DossierState& dossier);
+    void renderRadar();
 
     // ── Export / utility ─────────────────────────────────────────────────
     bool exportTarget(const UniqueTargetRecord& record);
@@ -116,6 +118,7 @@ private:
     std::unique_ptr<AudioVisualizerPanel> m_audioVisualizerPanel;
     std::unique_ptr<ReplayPanel>     m_replayPanel;
     std::unique_ptr<DossierArchivePanel> m_dossierArchivePanel;
+    std::unique_ptr<RadarPanel>      m_radarPanel;
 
     // ── Settings (local; pushed to Blackboard on change) ─────────────────
     SystemSettings m_settings;
@@ -186,6 +189,7 @@ private:
     bool m_showShortcutHelp   = false;
     bool m_showDossierPanel   = true;
     bool m_showDossierArchive = false;
+    bool m_showRadar          = false;
     int  m_devConsoleTab      = 0;
     char m_dataPanelFilter[128] = {0};
     bool m_showUpdateDialog     = false;

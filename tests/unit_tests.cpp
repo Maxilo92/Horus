@@ -201,6 +201,46 @@ TEST(MultiTrackerTest, DelayedDetectionMatchesSingleTrack) {
     EXPECT_NEAR(objects[0].box.x, 200, 25);  // lands at the present position, not at 140 or flung away
 }
 
+// Regression guard for the runaway-drift bug: a stationary object whose detections
+// only jitter by a few pixels (and arrive with detector lag) must keep its box on the
+// object. Previously the lag extrapolation fed the Kalman velocity estimate back into
+// the measurement, so velocity noise self-amplified until boxes wandered off-screen.
+TEST(MultiTrackerTest, StationaryObjectDoesNotDrift) {
+    MultiTracker tracker;
+    SystemSettings settings;
+    settings.trackerConfirmFrames = 1;
+
+    const cv::Size frame(1280, 720);
+    const cv::Rect home(600, 340, 80, 160); // stationary object, center of frame
+
+    // Deterministic ±2px jitter pattern, detections delivered with lag=3 every 3rd
+    // iteration (the other iterations dead-reckon, like the real async detector).
+    const int jitter[] = {0, 2, -1, 1, -2, 0, 1, -1, 2, -2};
+    for (int i = 0; i < 300; ++i) {
+        if (i % 3 == 0) {
+            Detection d;
+            d.class_id   = 1;
+            d.className  = "test";
+            d.confidence = 0.9f;
+            d.box = cv::Rect(home.x + jitter[i % 10], home.y + jitter[(i + 5) % 10],
+                             home.width, home.height);
+            tracker.update({d}, settings, frame, 3);
+        } else {
+            tracker.update({}, settings, frame, 0, {0.0, 0.0}, false);
+        }
+    }
+
+    auto objects = tracker.getTrackedObjects(10);
+    ASSERT_EQ(objects.size(), 1);
+    EXPECT_NEAR(objects[0].box.x, home.x, 10);
+    EXPECT_NEAR(objects[0].box.y, home.y, 10);
+    EXPECT_NEAR(objects[0].box.width,  home.width,  8);
+    EXPECT_NEAR(objects[0].box.height, home.height, 8);
+    // Velocity must have settled near zero — no residual drift.
+    EXPECT_LT(std::abs(objects[0].vx), 1.0f);
+    EXPECT_LT(std::abs(objects[0].vy), 1.0f);
+}
+
 // --- ObjectDetector Tests ---
 
 TEST(ObjectDetectorTest, HandleInvalidModelPath) {

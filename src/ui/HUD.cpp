@@ -176,12 +176,21 @@ void HUD::drawTrackedObject(ImDrawList* drawList, const TrackedObject& obj,
     float x2 = x1 + obj.box.width  * view.scale;
     float y2 = y1 + obj.box.height * view.scale;
 
+    // Automatische Ziel-Priorisierung: das wichtigste Ziel (Rang 0) bekommt
+    // Bernstein-Farbe + dickere Linie, damit der Operator es sofort findet.
+    const bool isTopPriority = settings.targetPriorityEnabled &&
+                               settings.priorityShowTopBadge &&
+                               obj.priorityRank == 0 && obj.is_confirmed;
+
     ImU32 boxColor = obj.is_confirmed ? targetColor : IM_COL32(150, 150, 150, 150);
+    if (isTopPriority) {
+        boxColor = IM_COL32(255, 180, 0, 255); // Amber for the highest-priority target
+    }
     if (isLocked) {
         boxColor = IM_COL32(255, 50, 50, 255); // Solid red for locked target
     }
 
-    float lw = isLocked ? settings.boxLineWidth * 1.8f : settings.boxLineWidth;
+    float lw = (isLocked || isTopPriority) ? settings.boxLineWidth * 1.8f : settings.boxLineWidth;
 
     // Draw fading trail
     if (settings.showTrails && obj.trail.size() > 1) {
@@ -244,6 +253,17 @@ void HUD::drawTrackedObject(ImDrawList* drawList, const TrackedObject& obj,
         snprintf(faceTag, sizeof(faceTag), "%s%s",
                  (tag[0] != '\0') ? "  -  " : "", obj.face_name.c_str());
         strncat(tag, faceTag, sizeof(tag) - strlen(tag) - 1);
+    }
+
+    // Priority badge: prefix the top target and show why it matters right now
+    if (isTopPriority) {
+        char prioTag[224];
+        if (!obj.priorityReason.empty())
+            snprintf(prioTag, sizeof(prioTag), "PRIORITY [%s]  %s", obj.priorityReason.c_str(), tag);
+        else
+            snprintf(prioTag, sizeof(prioTag), "PRIORITY  %s", tag);
+        strncpy(tag, prioTag, sizeof(tag) - 1);
+        tag[sizeof(tag) - 1] = '\0';
     }
 
     if (tag[0] != '\0') {

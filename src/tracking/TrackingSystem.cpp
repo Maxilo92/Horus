@@ -3,6 +3,10 @@
 #include <chrono>
 #include <algorithm>
 #include <ctime>
+#ifdef __APPLE__
+#include <pthread.h>
+#include <sys/qos.h>
+#endif
 
 TrackingSystem::TrackingSystem(Blackboard& blackboard, ROIManager& roiManager,
                                DataLogger& dataLogger, AudioEngine& audioEngine,
@@ -98,7 +102,9 @@ void TrackingSystem::submitFrame(const cv::Mat& frame, const SystemSettings& set
                                   bool hasNewDetections) {
     if (m_trackingBusy.load()) return;
     std::lock_guard<std::mutex> lock(m_trackingMutex);
-    m_trackingFrameCopy            = frame; // Shallow copy
+    // Shallow safe: jeder Frame lebt in einem eigenen, nach Publish unveränderlichen
+    // Puffer (Capture released seinen Header nach dem Publish).
+    m_trackingFrameCopy = frame;
     m_trackingSettingsCopy         = settings;
     m_trackingDetectionsCopy       = detections;
     m_trackingDetectorLag          = detectorLag;
@@ -111,6 +117,11 @@ void TrackingSystem::submitFrame(const cv::Mat& frame, const SystemSettings& set
 
 void TrackingSystem::trackingWorkerLoop() {
     m_log(LogLevel::INFO, "Tracking thread started");
+#ifdef __APPLE__
+    // Tracking darf UI und Kamera-Feed nie verdrängen — bei CPU-Sättigung
+    // bekommen die interaktiven Threads die Kerne zuerst.
+    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+#endif
     while (m_running) {
         cv::Mat trackingFrame;
         SystemSettings settings;
@@ -172,6 +183,8 @@ void TrackingSystem::trackingWorkerLoop() {
                 cv::Point2d cameraMotion = estimateCameraMotion(trackingFrame, settings);
                 updateTrackerAndFaces(tracked, trackingFrame, detections, settings,
                                       detectorLag, cameraMotion, hasNewDetections);
+
+                computeTargetPriorities(tracked, settings, trackingFrame.size());
 
                 updateTargetHistory(tracked, trackingFrame, manualCaptureId);
                 runPixelTemplateMatch(tracked, trackingFrame, cmd, settings);
@@ -809,6 +822,118 @@ void TrackingSystem::updateAudioFeedback(const SystemSettings& settings) {
     }
 
     m_prevLockState = cur;
+}
+
+// -----------------------------------------------------------------------
+// Section 11b – automatic target prioritization
+// Bewertet pro Frame, welches Ziel für den Operator am wichtigsten ist.
+// Score-Komponenten: Klassengewicht, Alarmzone, Tempo, Nähe, Annäherung,
+// Neuheit. Rang 0 = wichtigstes Ziel (HUD hebt es hervor).
+// -----------------------------------------------------------------------
+
+void TrackingSystem::computeTargetPriorities(std::vector<TrackedObject>& tracked,
+                                             const SystemSettings& settings,
+                                             cv::Size frameSize) {
+    if (!settings.targetPriorityEnabled || tracked.empty()) {
+        for (auto& obj : tracked) { obj.priority = 0.0f; obj.priorityRank = -1; obj.priorityReason.clear(); }
+        m_prioMem.clear();
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const float frameArea = std::max(1.0f, static_cast<float>(frameSize.width) *
+                                            static_cast<float>(frameSize.height));
+
+    // Aktive Alarmzonen einsammeln
+    std::vector<cv::Rect> alarmZones;
+    for (const auto& z : m_roiManager.getROIs())
+        if (z.active && z.function == ROIFunction::ALARM)
+            alarmZones.push_back(z.rect);
+
+    // Klassengewicht: Wie operator-relevant ist diese Objektklasse grundsätzlich?
+    auto classWeight = [](const std::string& cls) -> float {
+        if (cls == "person") return 1.0f;
+        if (cls == "car" || cls == "truck" || cls == "bus" ||
+            cls == "motorcycle" || cls == "bicycle") return 0.85f;
+        if (cls == "airplane" || cls == "boat" || cls == "train") return 0.8f;
+        if (cls == "dog" || cls == "cat" || cls == "horse") return 0.5f;
+        return 0.35f;
+    };
+
+    // Verlaufsspeicher für verschwundene Tracks aufräumen
+    {
+        std::unordered_set<int> alive;
+        for (const auto& o : tracked) alive.insert(o.track_id);
+        for (auto it = m_prioMem.begin(); it != m_prioMem.end(); )
+            it = alive.count(it->first) ? std::next(it) : m_prioMem.erase(it);
+    }
+
+    for (auto& obj : tracked) {
+        auto& mem = m_prioMem[obj.track_id];
+        if (mem.firstSeen == std::chrono::steady_clock::time_point()) {
+            mem.firstSeen = now;
+            mem.smoothedArea = static_cast<float>(obj.box.area());
+        }
+
+        std::string reason;
+        auto addReason = [&reason](const char* tag) {
+            if (!reason.empty()) reason += "+";
+            reason += tag;
+        };
+
+        float score = classWeight(obj.className);
+
+        // Alarmzone: dominanter Faktor — ein Ziel in einer Alarmzone hat Vorrang.
+        const cv::Point center(obj.box.x + obj.box.width / 2, obj.box.y + obj.box.height / 2);
+        for (const auto& z : alarmZones) {
+            if (z.contains(center)) { score += 1.5f; addReason("ALARM"); break; }
+        }
+
+        // Tempo relativ zur Objektgröße (px/Frame pro Objektdiagonale)
+        const float objDiag = std::hypot(static_cast<float>(obj.box.width),
+                                          static_cast<float>(obj.box.height));
+        const float relSpeed = std::hypot(obj.vx, obj.vy) / std::max(1.0f, objDiag);
+        if (relSpeed > 0.02f) {
+            score += std::min(0.6f, relSpeed * 6.0f);
+            if (relSpeed > 0.06f) addReason("FAST");
+        }
+
+        // Nähe: Bildflächenanteil (große Box = nah an der Kamera)
+        const float areaFrac = static_cast<float>(obj.box.area()) / frameArea;
+        score += std::min(0.5f, areaFrac * 5.0f);
+        if (areaFrac > 0.08f) addReason("CLOSE");
+
+        // Annäherung: wächst die Box nachhaltig, kommt das Objekt auf die Kamera zu.
+        const float area = static_cast<float>(obj.box.area());
+        if (mem.smoothedArea > 1.0f) {
+            const float growth = (area - mem.smoothedArea) / mem.smoothedArea;
+            mem.areaGrowth = 0.9f * mem.areaGrowth + 0.1f * growth;
+            if (mem.areaGrowth > 0.004f) { // ~+12 %/s Flächenwachstum bei 30 fps
+                score += 0.4f;
+                addReason("APPROACHING");
+            }
+        }
+        mem.smoothedArea = 0.9f * mem.smoothedArea + 0.1f * area;
+
+        // Neuheit: frisch aufgetauchte Ziele brauchen Operator-Aufmerksamkeit.
+        const float ageSec = std::chrono::duration<float>(now - mem.firstSeen).count();
+        if (ageSec < 3.0f) { score += 0.4f * (1.0f - ageSec / 3.0f); if (ageSec < 1.5f) addReason("NEW"); }
+
+        // Verlorene Tracks sind weniger handlungsrelevant.
+        if (obj.lost_frames > 0) score *= 0.4f;
+
+        obj.priority = score;
+        obj.priorityReason = std::move(reason);
+    }
+
+    // Rang vergeben (0 = wichtigstes Ziel)
+    std::vector<int> order(tracked.size());
+    for (size_t i = 0; i < order.size(); ++i) order[static_cast<int>(i)] = static_cast<int>(i);
+    std::sort(order.begin(), order.end(), [&tracked](int a, int b) {
+        return tracked[a].priority > tracked[b].priority;
+    });
+    for (size_t rank = 0; rank < order.size(); ++rank)
+        tracked[order[rank]].priorityRank = static_cast<int>(rank);
 }
 
 // -----------------------------------------------------------------------

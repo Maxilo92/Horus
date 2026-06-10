@@ -53,6 +53,31 @@ TEST_F(DossierDatabaseTest, EntityLifecycle) {
     EXPECT_EQ(retrieved.dossier_text, "Updated info.");
 }
 
+TEST_F(DossierDatabaseTest, LicensePlatePersistence) {
+    DossierDatabase db(dbPath);
+    ASSERT_TRUE(db.init());
+
+    DossierEntry entry;
+    entry.uuid = "vehicle-001";
+    entry.type = "car";
+    entry.dossier_text = "Analysis pending...";
+    EXPECT_TRUE(db.upsertEntity(entry));
+
+    // Plate arrives later via the AI agent
+    EXPECT_TRUE(db.updateEntityPlate("vehicle-001", "M-AB 1234"));
+
+    DossierEntry retrieved;
+    ASSERT_TRUE(db.getEntityByUUID("vehicle-001", retrieved));
+    EXPECT_EQ(retrieved.plate, "M-AB 1234");
+
+    // Plate survives roundtrips through upsert and getAllEntities
+    retrieved.dossier_text = "## Overview\nGray sedan.";
+    EXPECT_TRUE(db.upsertEntity(retrieved));
+    auto all = db.getAllEntities();
+    ASSERT_EQ(all.size(), 1u);
+    EXPECT_EQ(all[0].plate, "M-AB 1234");
+}
+
 TEST_F(DossierDatabaseTest, FaceRecordPersistence) {
     DossierDatabase db(dbPath);
     ASSERT_TRUE(db.init());
