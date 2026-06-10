@@ -785,8 +785,14 @@ void VisionSystem::workerLoop() {
                                 break;
                             }
                         }
-                        if (crop.empty())
-                            crop = trackingFrame(roi).clone(); // fallback: current frame
+                        if (crop.empty()) {
+                            // No quality snapshot yet. Only fall back to the live frame
+                            // if the track is matched THIS frame — never crop a coasting
+                            // box that's extrapolating a vanished object. Otherwise defer
+                            // to a later frame where a real detection is available.
+                            if (!track.is_active) continue;
+                            crop = trackingFrame(roi).clone();
+                        }
                         std::vector<float> embedding;
                         if (m_reidManager) embedding = m_reidManager->extractFeatures(crop);
 

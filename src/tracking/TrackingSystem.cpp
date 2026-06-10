@@ -1107,7 +1107,9 @@ void TrackingSystem::updateTargetHistory(const std::vector<TrackedObject>& activ
                 snap.qualityScore = computeSnapQuality(snap.image, snap.confidence,
                                                        snap.box, currentFrame.size());
                 rec.snapshot_first = rec.snapshot_mid = rec.snapshot_last = snap;
-                rec.snapshot_best  = snap;
+                // Only seed the best photo from a frame backed by a real detection,
+                // never from a coasting box over a vanished object.
+                if (obj.is_active) rec.snapshot_best = snap;
                 rec.periodic_snapshots.push_back(snap);
             }
             rec.last_snapshot_time       = std::chrono::steady_clock::now();
@@ -1128,6 +1130,12 @@ void TrackingSystem::updateTargetHistory(const std::vector<TrackedObject>& activ
                 now - it->last_snapshot_time).count();
 
             auto captureSnap = [&]() {
+                // Never snapshot a coasting / dead-reckoning track: the box is a
+                // Kalman extrapolation of an object that wasn't detected this frame,
+                // so it sits over empty background or a wrong object. Such phantom
+                // crops must not pollute the gallery or become the best photo.
+                if (!obj.is_active) return;
+
                 float pf = 0.5f;
                 cv::Rect roi = obj.box;
                 int padW = static_cast<int>(roi.width  * pf);

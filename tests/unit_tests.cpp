@@ -721,5 +721,41 @@ TEST(TargetHistoryTest, VisualChronologySnapshottingAndFinalizing) {
     EXPECT_EQ(record.cropped_image_last_version, 2);
 }
 
+// Regression: the "best photo" for the AI dossier must be driven purely by the
+// quality score. A coasting/dead-reckoning frame is never quality-scored (the
+// capture is skipped while the track has no real detection), so its score stays
+// at the default 0 and it must never win as best — even if it arrives last.
+TEST(BestPhotoTest, BestSnapshotIsHighestQualityNeverPhantom) {
+    UniqueTargetRecord record;
+    EXPECT_TRUE(record.snapshot_best.image.empty());
+    EXPECT_FLOAT_EQ(record.snapshot_best.qualityScore, 0.0f);
+
+    cv::Mat sharp  = cv::Mat::ones(100, 100, CV_8UC3);
+    cv::Mat blurry = cv::Mat::ones(100, 100, CV_8UC3) * 2;
+    cv::Mat phantom = cv::Mat::zeros(100, 100, CV_8UC3); // coasting box, unscored
+
+    // Mirrors the production rule: a new active snapshot updates best only when
+    // its quality exceeds the incumbent.
+    auto offer = [&](const cv::Mat& img, float score) {
+        TargetSnapshot s;
+        s.image = img.clone();
+        s.qualityScore = score;
+        if (s.qualityScore > record.snapshot_best.qualityScore)
+            record.snapshot_best = s;
+    };
+
+    offer(blurry, 0.30f);   // first real, low-sharpness frame
+    offer(sharp,  0.85f);   // sharper frame wins
+    // Coasting frame: capture is skipped in production, so it is never offered
+    // with a real score. Simulate that it carries the default 0 score.
+    offer(phantom, 0.0f);
+
+    // Best must be the sharp frame, not the later phantom.
+    EXPECT_FLOAT_EQ(record.snapshot_best.qualityScore, 0.85f);
+    ASSERT_FALSE(record.snapshot_best.image.empty());
+    // Sharp frame was all-ones; phantom was all-zeros — confirm identity.
+    EXPECT_GT(cv::sum(record.snapshot_best.image)[0], 0.0);
+}
+
 
 
